@@ -83,7 +83,6 @@ class HikkariWebMod(loader.Module):
                     },
                     {"text": self.strings["btn_no"], "action": "close"},
                 ],
-                photo="",
             ):
                 raise Exception
 
@@ -478,7 +477,6 @@ class HikkariWebMod(loader.Module):
                     },
                     {"text": self.strings["btn_no"], "action": "close"},
                 ],
-                photo="",
             ):
                 raise RuntimeError("Inline form was not created")
         except Exception:

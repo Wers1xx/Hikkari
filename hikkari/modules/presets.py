@@ -114,10 +114,7 @@ class Presets(loader.Module):
         await self._menu()
 
     async def _menu(self):
-        await self.inline.bot.send_photo(
-            self._client.tg_id,
-            "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/presets_cmd.png",
-            caption=self.strings["welcome"],
+        await self.inline.bot.send_message(self._client.tg_id, self.strings["welcome"],
             reply_markup=self.inline.generate_markup(self._markup_gen()),
         )
 
@@ -337,7 +334,6 @@ class Presets(loader.Module):
         """| Packs of modules to load"""
         await self.inline.form(
             message=message,
-            photo="https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/presets_cmd.png",
             text=self.strings["welcome"].replace(
                 "/presets", self.get_prefix() + "presets"
             ),

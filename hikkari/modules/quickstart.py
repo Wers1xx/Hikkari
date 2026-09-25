@@ -125,10 +125,9 @@ class Quickstart(loader.Module):
                 "You can try solving this by leaving some channels/groups"
             )
 
-        await self.request_join(
-            "hikkari_talks",
-            "Hikkari help is only available in this chat. By agreeing to join the chat, you agree to the Hikkari federation rules and if you violate them, you will be permanently banned.",
-        )
+        # Temporarily disabled - channel hikkari_talks does not exist yet
+        # await self.request_join("hikkari_talks", "...")
+        pass
 
         self.mark = lambda: [
             [

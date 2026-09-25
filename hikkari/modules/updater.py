@@ -255,10 +255,7 @@ class UpdaterMod(loader.Module):
                     manual_update = True
 
             if manual_update:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/updated.png",
-                    caption=self.strings["update_required"].format(
+                m = await self.inline.bot.send_message(self.tg_id, self.strings["update_required"].format(
                         current[:6],
                         '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
                             current[:12],
@@ -278,10 +275,7 @@ class UpdaterMod(loader.Module):
                 self.set("upd_msg", m.message_id)
 
             else:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/updated.png",
-                    caption=self.strings["autoupdate_notifier"].format(
+                m = await self.inline.bot.send_message(self.tg_id, self.strings["autoupdate_notifier"].format(
                         self._pending[:6],
                         changelog,
                         '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
@@ -677,10 +671,7 @@ class UpdaterMod(loader.Module):
             self.set("do_not_create", True)
 
         if not self.config["autoupdate"] and not self.get("autoupdate_answered", False):
-            await self.inline.bot.send_photo(
-                self.tg_id,
-                photo="https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/unit_alpha.png",
-                caption=self.strings["autoupdate"],
+            await self.inline.bot.send_message(self.tg_id, caption=self.strings["autoupdate"],
                 reply_markup=self.inline.generate_markup(
                     [
                         [

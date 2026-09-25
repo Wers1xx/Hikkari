@@ -103,7 +103,6 @@ class CoreMod(loader.Module):
                 f"{herokutl.__version__} #{herokutl.tl.alltlobjects.LAYER}",
             )
             + (branch_text),
-            file="https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_cmd.png",
             reply_to=getattr(message, "reply_to_msg_id", None),
         )
 
@@ -637,13 +636,12 @@ class CoreMod(loader.Module):
                 self.strings["choose_installation"],
                 message,
                 reply_markup=self._markup(),
-                photo="https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_installation.png",
             )
         ):
 
             await self.client.send_file(
                 message.peer_id,
-                "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_installation.png",
+                "",
                 caption=self.strings["vds_install"],
                 reply_to=getattr(message, "reply_to_msg_id", None),
             )

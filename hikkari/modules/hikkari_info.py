@@ -39,7 +39,7 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_info.png",
+                "",
                 lambda: self.strings["_cfg_banner"],
                 validator=loader.validators.RandomLink(),
             ),

@@ -102,9 +102,7 @@ class InlineStuff(loader.Module):
     async def bot_watcher(self, message: BotInlineMessage):
         match message.text:
             case "/start":
-                await message.answer_photo(
-                    "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/start_cmd.png",
-                    caption=self.strings["this_is_hikkari"].format(
+                await message.answer(self.strings["this_is_hikkari"].format(
                         (
                             "<tg-emoji emoji-id=5463379725441341739>🪐</tg-emoji>"
                             if self._client.hikkari_me.premium is True
@@ -135,9 +133,7 @@ class InlineStuff(loader.Module):
                 if message.from_user.id != self.client.tg_id:
                     pass
                 else:
-                    await message.answer_photo(
-                        "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/start_cmd.png",
-                        caption=self.strings["profile_cmd"].format(
+                    await message.answer(self.strings["profile_cmd"].format(
                             prefix=self.get_prefix(),
                             ram_usage=utils.get_ram_usage(),
                             cpu_usage=utils.get_cpu_usage(),

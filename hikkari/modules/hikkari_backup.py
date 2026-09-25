@@ -27,10 +27,7 @@ class HikkariBackupMod(loader.Module):
 
     async def client_ready(self):
         if not self.get("period"):
-            await self.inline.bot.send_photo(
-                self.tg_id,
-                photo="https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/unit_alpha.png",
-                caption=self.strings["period"],
+            await self.inline.bot.send_message(self.tg_id, caption=self.strings["period"],
                 reply_markup=self.inline.generate_markup(
                     utils.chunks(
                         [
