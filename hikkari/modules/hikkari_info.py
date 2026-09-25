@@ -41,7 +41,7 @@ class HikkariInfoMod(loader.Module):
                 "banner_url",
                 "",
                 lambda: self.strings["_cfg_banner"],
-                validator=loader.validators.RandomLink(),
+                validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
             ),
             loader.ConfigValue(
                 "ping_emoji",

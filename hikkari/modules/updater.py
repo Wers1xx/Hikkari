@@ -671,7 +671,7 @@ class UpdaterMod(loader.Module):
             self.set("do_not_create", True)
 
         if not self.config["autoupdate"] and not self.get("autoupdate_answered", False):
-            await self.inline.bot.send_message(self.tg_id, caption=self.strings["autoupdate"],
+            await self.inline.bot.send_message(self.tg_id, self.strings["autoupdate"],
                 reply_markup=self.inline.generate_markup(
                     [
                         [
