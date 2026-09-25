@@ -1,12 +1,12 @@
 ---
-name: Heroku improvement request
-about: Suggest an idea for Heroku userbot itself
+name: Hikkari improvement request
+about: Suggest an idea for Hikkari userbot itself
 title: ""
-labels: enhancement, Heroku
+labels: enhancement, Hikkari
 assignees: ""
 ---
 
-- [x] My suggestion **is related to Heroku userbot itself**. It's not about illegal stuff, doesn't violate Telegram EULA and human rights and **is not related to modules**.
+- [x] My suggestion **is related to Hikkari userbot itself**. It's not about illegal stuff, doesn't violate Telegram EULA and human rights and **is not related to modules**.
 
 ---
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="Heroku"
-MODULE_NAME="heroku"
-REPO_URL="${HEROKU_REPO_URL:-https://github.com/coddrago/Heroku.git}"
+APP_NAME="Hikkari"
+MODULE_NAME="hikkari"
+REPO_URL="${HEROKU_REPO_URL:-https://github.com/Wers1xx/Hikkari.git}"
 VENV_DIR="${HEROKU_VENV_DIR:-.venv}"
-LOG_FILE="heroku-install.log"
+LOG_FILE="hikkari-install.log"
 
 if [ "${SUDO_USER:-}" != "" ] && command -v sudo >/dev/null 2>&1; then
 	RUN_AS_USER=(sudo -u "$SUDO_USER")

@@ -1,39 +1,39 @@
 <div align="center">
   <img src="https://github.com/hikariatama/assets/raw/master/1326-command-window-line-flat.webp" height="80">
-  <h1>Heroku Userbot</h1>
+  <h1>Hikkari Userbot</h1>
   <p>Продвинутый юзербот для Telegram с повышенной безопасностью и современными функциями</p>
 
   <p>
-    <a href="https://www.codacy.com/gh/coddrago/Heroku/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=coddrago/Heroku&amp;utm_campaign=Badge_Grade">
+    <a href="https://www.codacy.com/gh/Wers1xx/Hikkari/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=Wers1xx/Hikkari&amp;utm_campaign=Badge_Grade">
       <img src="https://app.codacy.com/project/badge/Grade/97e3ea868f9344a5aa6e4d874f83db14" alt="Codacy Grade">
     </a>
     <a href="#">
-      <img src="https://img.shields.io/github/languages/code-size/coddrago/Heroku" alt="Code Size">
+      <img src="https://img.shields.io/github/languages/code-size/Wers1xx/Hikkari" alt="Code Size">
     </a>
     <a href="#">
-      <img src="https://img.shields.io/github/issues-raw/coddrago/Heroku" alt="Open Issues">
+      <img src="https://img.shields.io/github/issues-raw/Wers1xx/Hikkari" alt="Open Issues">
     </a>
     <a href="#">
-      <img src="https://img.shields.io/github/license/coddrago/Heroku" alt="License">
+      <img src="https://img.shields.io/github/license/Wers1xx/Hikkari" alt="License">
     </a>
     <a href="#">
-      <img src="https://img.shields.io/github/commit-activity/m/coddrago/Heroku" alt="Commit Activity">
+      <img src="https://img.shields.io/github/commit-activity/m/Wers1xx/Hikkari" alt="Commit Activity">
     </a>
     <br>
     <a href="#">
-      <img src="https://img.shields.io/github/forks/coddrago/Heroku?style=flat" alt="Forks">
+      <img src="https://img.shields.io/github/forks/Wers1xx/Hikkari?style=flat" alt="Forks">
     </a>
     <a href="#">
-      <img src="https://img.shields.io/github/stars/coddrago/Heroku" alt="Stars">
+      <img src="https://img.shields.io/github/stars/Wers1xx/Hikkari" alt="Stars">
     </a>
     <a href="https://github.com/psf/black">
       <img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code Style: Black">
     </a>
     <br>
-    <a href="https://github.com/coddrago/Heroku/blob/master/README.md">
+    <a href="https://github.com/Wers1xx/Hikkari/blob/master/README.md">
       <img src="https://img.shields.io/badge/lang-en-red.svg" alt="En">
     </a>
-    <a href="https://github.com/coddrago/Heroku/blob/master/README_RU.md">
+    <a href="https://github.com/Wers1xx/Hikkari/blob/master/README_RU.md">
       <img src="https://img.shields.io/badge/lang-ru-green.svg" alt="Ru">
     </a>
   </p>
@@ -45,7 +45,7 @@
 ## ⚠️ Уведомление о безопасности
 
 > Важное предупреждение о безопасности  
-> Хотя Heroku реализует расширенные меры безопасности, установка модулей от ненадежных разработчиков все еще может нанести вред вашему серверу/аккаунту.
+> Хотя Hikkari реализует расширенные меры безопасности, установка модулей от ненадежных разработчиков все еще может нанести вред вашему серверу/аккаунту.
 > 
 > Рекомендации:
 > - ✅ Загружайте модули исключительно из официальных репозиториев или от доверенных разработчиков
@@ -64,12 +64,12 @@
 
   ```bash
   sudo apt update && sudo apt install git python3 -y && \
-  git clone https://github.com/coddrago/Heroku && \
-  cd Heroku && \
+  git clone https://github.com/Wers1xx/Hikkari && \
+  cd Hikkari && \
   python3 -m venv .venv && \
   source .venv/bin/activate && \
   pip install -r requirements.txt && \
-  python3 -m heroku
+  python3 -m hikkari
   ```
 </details>
 
@@ -78,12 +78,12 @@
   
   ```bash
   sudo dnf update -y && sudo dnf install git python3 -y && \
-  git clone https://github.com/coddrago/Heroku && \
-  cd Heroku && \
+  git clone https://github.com/Wers1xx/Hikkari && \
+  cd Hikkari && \
   python3 -m venv .venv && \
   source .venv/bin/activate && \
   python3 -m pip install -r requirements.txt && \
-  python3 -m heroku
+  python3 -m hikkari
   ```
 </details>
 
@@ -92,12 +92,12 @@
   
 ```bash
 sudo pacman -Syu --noconfirm && sudo pacman -S git python --noconfirm --needed && \
-git clone https://github.com/coddrago/Heroku && \
-cd Heroku && \
+git clone https://github.com/Wers1xx/Hikkari && \
+cd Hikkari && \
 python3 -m venv .venv && \
 source .venv/bin/activate && \
 python3 -m pip install -r requirements.txt && \
-python3 -m heroku
+python3 -m hikkari
 ```
 </details>
 
@@ -126,7 +126,7 @@ curl -Ss https://bootstrap.pypa.io/get-pip.py | python3
 
 4. **Введите эту команду (ПКМ):**
 ```bash
-clear && git clone https://github.com/coddrago/Heroku && cd Heroku && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 -m heroku
+clear && git clone https://github.com/Wers1xx/Hikkari && cd Hikkari && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python3 -m hikkari
 ```
 > **🔗Как получить API_ID и API_HASH?:** [Видео](https://youtu.be/DcqDA249Lhg?t=24)
   
@@ -140,10 +140,10 @@ clear && git clone https://github.com/coddrago/Heroku && cd Heroku && python3 -m
 3. <b>Дождитесь установки дистрибутива, можете заварить чай</b>
 4. <b>После успешной установки перед вами откроется терминал, введите туда:</b>
 ```bash
-sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-pip -y && git clone https://github.com/coddrago/Heroku && cd Heroku && python3 -m venv .venv && source .venv/bin/activate && sudo pip install -r requirements.txt && python3 -m heroku
+sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-pip -y && git clone https://github.com/Wers1xx/Hikkari && cd Hikkari && python3 -m venv .venv && source .venv/bin/activate && sudo pip install -r requirements.txt && python3 -m hikkari
 ```
 5. <b>В конце установки появится ссылка, перейдите по ней и введите данные своей учетной записи для входа.</b>
-> Вуаля! Вы установили Heroku на UserLAnd.
+> Вуаля! Вы установили Hikkari на UserLAnd.
 </details>
 
 ### Официальные хосты
@@ -152,7 +152,7 @@ sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-p
   
  1. Перейдите в [@hikkahost_bot](https://.me/hikkahost_bot)
 2. Нажмите "Установить"
-3. Выберите "🪐 Heroku"
+3. Выберите "🪐 Hikkari"
 И продолжайте установку.
 
 > **После этого вы получите ссылку, откройте ее и войдите в свою учетную запись.**
@@ -201,14 +201,14 @@ sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-p
 
 | Тип | Ссылка |
 |------|-------|
-| Пользовательская документация | [heroku-ub.xyz](https://heroku-ub.xyz/) |
-| Документация для разработчиков | [dev.heroku-ub.xyz](https://dev.heroku-ub.xyz/) |
+| Пользовательская документация | [hikkari-ub.xyz](https://hikkari-ub.xyz/) |
+| Документация для разработчиков | [dev.hikkari-ub.xyz](https://dev.hikkari-ub.xyz/) |
 
 ---
 
 ## 💬 Поддержка
 
-[![Поддержка Telegram](https://img.shields.io/badge/Telegram-Support_Group-2594cb?logo=telegram)](https://t.me/heroku_talks)
+[![Поддержка Telegram](https://img.shields.io/badge/Telegram-Support_Group-2594cb?logo=telegram)](https://t.me/hikkari_talks)
 
 ---
 
@@ -230,4 +230,4 @@ sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-p
 ## 🙏 Благодарности
 
 - [Hikari](https://gitlab.com/hikariatama) за Hikka (основа проекта)
-- [Lonami](https://t.me/lonami) за Telethon (основа Heroku-TL)
+- [Lonami](https://t.me/lonami) за Telethon (основа Hikkari-TL)
