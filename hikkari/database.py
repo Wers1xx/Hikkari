@@ -145,7 +145,7 @@ class Database(dict):
                 description="🪐 Content related to Hikkari will be here",
                 silent=True,
                 invite_bot=True,
-                avatar="https://raw.githubusercontent.com/Wers1xx/assets/main/hikkari/hikkari.png",
+                avatar=None,  # temporarily disabled
                 forum=True,
                 hide_general=True,
                 _folder="hikkari",

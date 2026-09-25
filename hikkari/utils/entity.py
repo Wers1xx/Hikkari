@@ -475,43 +475,52 @@ async def set_avatar(
     :param avatar: Avatar to set
     :return: True if avatar was set, False otherwise
     """
-    if isinstance(avatar, str) and check_url(avatar):
-        f = (
-            await run_sync(
-                requests.get,
-                avatar,
-            )
-        ).content
-    elif isinstance(avatar, bytes):
-        f = avatar
-    else:
-        return False
-
-    await fw_protect()
-    res = await client(
-        EditPhotoRequest(
-            channel=peer,
-            photo=await client.upload_file(f, file_name="photo.png"),
-        )
-    )
-
-    await fw_protect()
-
     try:
-        await client.delete_messages(
-            peer,
-            message_ids=[
-                next(
-                    update
-                    for update in res.updates
-                    if isinstance(update, UpdateNewChannelMessage)
-                ).message.id
-            ],
-        )
-    except Exception:
-        pass
+        if isinstance(avatar, str) and check_url(avatar):
+            f = (
+                await run_sync(
+                    requests.get,
+                    avatar,
+                )
+            ).content
+        elif isinstance(avatar, bytes):
+            f = avatar
+        else:
+            return False
 
-    return True
+        # Skip if downloaded content is empty or too small
+        if not f or len(f) < 1024:
+            logger.warning("Avatar is empty or too small, skipping")
+            return False
+
+        await fw_protect()
+        res = await client(
+            EditPhotoRequest(
+                channel=peer,
+                photo=await client.upload_file(f, file_name="photo.png"),
+            )
+        )
+
+        await fw_protect()
+
+        try:
+            await client.delete_messages(
+                peer,
+                message_ids=[
+                    next(
+                        update
+                        for update in res.updates
+                        if isinstance(update, UpdateNewChannelMessage)
+                    ).message.id
+                ],
+            )
+        except Exception:
+            pass
+
+        return True
+    except Exception as e:
+        logger.warning("Failed to set avatar for %s: %s", peer, e)
+        return False
 
 
 async def get_target(message: Message, arg_no: int = 0) -> int | None:
