@@ -1,6 +1,4 @@
-hikkaritl @ git+https://github.com/Wers1xx/hikkaritl.git
-# After publishing to PyPI, replace the line above with:
-# hikkaritl>=1.0.0
+hikkaritl>=1.0.0
 pyaes
 rsa
 aiofile==3.8.1
