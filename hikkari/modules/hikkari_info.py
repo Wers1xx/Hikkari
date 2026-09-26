@@ -57,7 +57,7 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                "",
+                "local:hikkari-info.jpg",
                 lambda: self.strings["_cfg_banner"],
                 validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
             ),
@@ -196,13 +196,19 @@ class HikkariInfoMod(loader.Module):
     @loader.command()
     async def infocmd(self, message: Message):
         start = time.perf_counter_ns()
-        media = str(self.config["banner_url"])
-
-        if self.config["banner_url"] and self.config["quote_media"] is True:
-            media = InputMediaWebPage(str(self.config["banner_url"]), optional=True)
-
-        elif not self.config["banner_url"]:
-            media = None
+        from .. import main as _main
+        raw_banner = self.config["banner_url"]
+        media = None
+        if raw_banner:
+            raw_banner = str(raw_banner)
+            if raw_banner.startswith("local:"):
+                media = _main.BASE_PATH / "assets" / raw_banner[6:]
+                if not media.is_file():
+                    media = None
+            elif self.config["quote_media"] is True and raw_banner.startswith(("http://", "https://")):
+                media = InputMediaWebPage(raw_banner, optional=True)
+            else:
+                media = raw_banner
 
         try:
             match True:

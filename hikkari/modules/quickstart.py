@@ -143,15 +143,16 @@ class Quickstart(loader.Module):
                 "You can try solving this by leaving some channels/groups"
             )
 
-        # Temporarily disabled - channel hikkari_talks does not exist yet
-        # await self.request_join("hikkari_talks", "...")
-        pass
+        await self.request_join(
+            "hikkari_talks",
+            "Hikkari news and updates. By joining you agree to community rules.",
+        )
 
         self.mark = lambda: [
             [
                 {
                     "text": self.strings["btn_support"],
-                    "url": "https://t.me/hikkari_talks",
+                    "url": "https://t.me/Hikkari_Support",
                 }
             ],
         ] + utils.chunks(

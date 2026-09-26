@@ -157,13 +157,16 @@ class Database(dict):
                     break
 
         if not content_channel:
+            from . import main as _main
+            _ava = _main.BASE_PATH / "assets" / "hikkari-ava.png"
+            _ava_bytes = _ava.read_bytes() if _ava.is_file() else None
             content_channel, _ = await utils.asset_channel(
                 client=self._client,
                 title="hikkari-userbot",
                 description="🪐 Content related to Hikkari will be here",
                 silent=True,
                 invite_bot=True,
-                avatar=None,  # temporarily disabled
+                avatar=_ava_bytes,
                 forum=True,
                 hide_general=True,
                 _folder="hikkari",

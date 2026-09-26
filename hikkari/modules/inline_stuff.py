@@ -182,7 +182,7 @@ class InlineStuff(loader.Module):
                             [
                                 {
                                     "text": self.strings["support_chat_caption"],
-                                    "url": "https://t.me/hikkari_talks",
+                                    "url": "https://t.me/Hikkari_Support",
                                     "emoji_id": "5363805650327450240",
                                 }
                             ],

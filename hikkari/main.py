@@ -1039,9 +1039,8 @@ class Hikkari:
                     .get_logs_topic_id_by_client(client.tg_id)
                 )
 
-                await client.hikkari_inline.bot.send_message(
-                    log_chat_id,
-                    (
+                started_banner = BASE_PATH / "assets" / "hikkari-started.jpg"
+                caption = (
                         "{} <b>{} started!</b>\n\n<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> <b>GitHub commit SHA: <a"
                         ' href="https://github.com/Wers1xx/Hikkari/commit/{}">{}</a></b>\n<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji>'
                         " <b>Update status: {}</b>\n<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> <b>Prefix:</b> <code>{}</code>"
@@ -1056,10 +1055,21 @@ class Hikkari:
                         build[:7],
                         upd,
                         "." if pref is None else pref,
-                    ),
-                    message_thread_id=message_thread_id,
-                    disable_web_page_preview=True,
-                )
+                    )
+                if started_banner.is_file():
+                    await client.hikkari_inline.bot.send_photo(
+                        log_chat_id,
+                        str(started_banner),
+                        caption=caption,
+                        message_thread_id=message_thread_id,
+                    )
+                else:
+                    await client.hikkari_inline.bot.send_message(
+                        log_chat_id,
+                        caption,
+                        message_thread_id=message_thread_id,
+                        disable_web_page_preview=True,
+                    )
             except Exception as badge_error:
                 logging.debug(f"Failed to send badge photo: {badge_error}")
             logging.debug(
