@@ -205,37 +205,24 @@ class HikkariBackupMod(loader.Module):
                 )
             )[0].download_media(bytes)
 
-            zipfile_bytes = io.BytesIO(file)
-            with zipfile.ZipFile(zipfile_bytes) as zf:
-                with zf.open("db.json") as f:
-                    db_data = orjson.loads(f.read().decode())
+            with zipfile.ZipFile(io.BytesIO(file)) as zf:
+                db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
 
-                with contextlib.suppress(KeyError):
-                    db_data["hikkari.inline"].pop("bot_token")
+            with contextlib.suppress(KeyError):
+                db_data["hikkari.inline"].pop("bot_token")
 
-                if not self._db.process_db_autofix(db_data):
-                    raise RuntimeError("Attempted to restore broken database")
+            if not self._db.process_db_autofix(db_data):
+                raise RuntimeError("Attempted to restore broken database")
 
-                self._db.clear()
-                self._db.update(**db_data)
-                self._db.save()
+            self._db.clear()
+            self._db.update(**db_data)
+            self._db.save()
 
-                with zf.open("mods.zip") as modzip_bytes:
-                    with zipfile.ZipFile(io.BytesIO(modzip_bytes.read())) as modzip:
-                        with modzip.open("db_mods.json", "r") as modules:
-                            db_mods = orjson.loads(modules.read().decode())
-                            if isinstance(db_mods, dict):
-                                self.lookup("LoaderMod").set("loaded_modules", db_mods)
+            if isinstance(db_mods, dict):
+                self.lookup("LoaderMod").set("loaded_modules", db_mods)
 
-                        for name in modzip.namelist():
-                            if name == "db_mods.json" or not Path(name).name.endswith(
-                                ".py"
-                            ):
-                                continue
-
-                            path = loader.LOADED_MODULES_PATH / Path(name).name
-                            with modzip.open(name, "r") as module:
-                                path.write_bytes(module.read())
+            for name, content in mod_files.items():
+                (loader.LOADED_MODULES_PATH / name).write_bytes(content)
 
             await self.inline.bot(
                 call.answer(self.strings["all_restored_bot"], show_alert=True)
@@ -565,7 +552,73 @@ class HikkariBackupMod(loader.Module):
         )
 
     @loader.command()
+    def _normalize_db_dict(self, db_data: dict) -> dict:
+        """Convert foreign package keys inside a loaded DB dict to hikkari.*"""
+        out = {}
+        for key, value in db_data.items():
+            new_key = key
+            for prefix in ("hikka.", "heroku.", "legacy."):
+                if isinstance(key, str) and key.startswith(prefix):
+                    new_key = "hikkari." + key[len(prefix) :]
+                    break
+            out[new_key] = value
+        return out
+
+    def _extract_db_and_mods_from_zip(self, zf: "zipfile.ZipFile"):
+        """
+        Support Hikkari / Heroku / Legacy combined backups:
+        - db.json + mods.zip (nested)
+        - database.json
+        - flat .py modules + db_mods.json
+        """
+        names = set(zf.namelist())
+        db_data = None
+        for candidate in ("db.json", "database.json", "db_backup.json"):
+            if candidate in names:
+                raw = zf.read(candidate).decode()
+                if self._is_foreign_backup(raw):
+                    raw = self._convert(raw).getvalue().decode()
+                db_data = orjson.loads(raw)
+                break
+
+        if db_data is None:
+            # maybe only nested structure
+            for name in names:
+                if name.endswith("db.json") or name.endswith("database.json"):
+                    raw = zf.read(name).decode()
+                    if self._is_foreign_backup(raw):
+                        raw = self._convert(raw).getvalue().decode()
+                    db_data = orjson.loads(raw)
+                    break
+
+        if db_data is None:
+            raise RuntimeError("No database found in backup archive")
+
+        db_data = self._normalize_db_dict(db_data)
+
+        # Modules: nested mods.zip or flat .py in archive
+        mod_files = {}  # name -> bytes
+        db_mods = None
+
+        if "mods.zip" in names:
+            with zipfile.ZipFile(io.BytesIO(zf.read("mods.zip"))) as modzip:
+                for name in modzip.namelist():
+                    if name == "db_mods.json":
+                        db_mods = orjson.loads(modzip.read(name).decode())
+                    elif Path(name).name.endswith(".py"):
+                        mod_files[Path(name).name] = modzip.read(name)
+        else:
+            for name in names:
+                base = Path(name).name
+                if base == "db_mods.json":
+                    db_mods = orjson.loads(zf.read(name).decode())
+                elif base.endswith(".py"):
+                    mod_files[base] = zf.read(name)
+
+        return db_data, db_mods, mod_files
+
     async def restoreall(self, message: Message):
+        """Restore full backup (DB + modules) from Hikkari / Heroku / Legacy .backup"""
         if not (reply := await message.get_reply_message()) or not reply.media:
             await utils.answer(message, self.strings["reply_to_file"])
             return
@@ -573,37 +626,54 @@ class HikkariBackupMod(loader.Module):
         status_message = await utils.answer(message, self.strings["restoring_backup"])
         file = await reply.download_media(bytes)
         try:
+            # Plain JSON DB-only dump
+            try:
+                raw = file.decode()
+                if raw.lstrip().startswith("{") or raw.lstrip().startswith("["):
+                    if self._is_foreign_backup(raw):
+                        raw = self._convert(raw).getvalue().decode()
+                    db_data = self._normalize_db_dict(orjson.loads(raw))
+                    with contextlib.suppress(KeyError):
+                        db_data["hikkari.inline"].pop("bot_token")
+                    if not self._db.process_db_autofix(db_data):
+                        raise RuntimeError("Broken database")
+                    self._db.clear()
+                    self._db.update(**db_data)
+                    self._db.save()
+                    await utils.answer(status_message, self.strings["db_restored"])
+                    await self.invoke("restart", "-f", peer=message.peer_id)
+                    return
+            except (UnicodeDecodeError, orjson.JSONDecodeError, ValueError):
+                pass
+
             zipfile_bytes = io.BytesIO(file)
             with zipfile.ZipFile(zipfile_bytes) as zf:
-                with zf.open("db.json") as f:
-                    db_data = orjson.loads(f.read().decode())
+                db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
 
+            with contextlib.suppress(KeyError):
+                db_data["hikkari.inline"].pop("bot_token")
+            for foreign_key in (
+                "hikka.inline",
+                "heroku.inline",
+                "legacy.inline",
+            ):
                 with contextlib.suppress(KeyError):
-                    db_data["hikkari.inline"].pop("bot_token")
+                    db_data.get(foreign_key, {}).pop("bot_token", None)
 
-                if not self._db.process_db_autofix(db_data):
-                    raise RuntimeError("Attempted to restore broken database")
+            if not self._db.process_db_autofix(db_data):
+                raise RuntimeError("Attempted to restore broken database")
 
-                self._db.clear()
-                self._db.update(**db_data)
-                self._db.save()
+            self._db.clear()
+            self._db.update(**db_data)
+            self._db.save()
 
-                with zf.open("mods.zip") as modzip_bytes:
-                    with zipfile.ZipFile(io.BytesIO(modzip_bytes.read())) as modzip:
-                        with modzip.open("db_mods.json", "r") as modules:
-                            db_mods = orjson.loads(modules.read().decode())
-                            if isinstance(db_mods, dict):
-                                self.lookup("LoaderMod").set("loaded_modules", db_mods)
+            if isinstance(db_mods, dict):
+                self.lookup("LoaderMod").set("loaded_modules", db_mods)
 
-                        for name in modzip.namelist():
-                            if name == "db_mods.json" or not Path(name).name.endswith(
-                                ".py"
-                            ):
-                                continue
+            for name, content in mod_files.items():
+                path = loader.LOADED_MODULES_PATH / name
+                path.write_bytes(content)
 
-                            path = loader.LOADED_MODULES_PATH / Path(name).name
-                            with modzip.open(name, "r") as module:
-                                path.write_bytes(module.read())
         except Exception:
             logger.exception("Restore all failed")
             await utils.answer(status_message, self.strings["reply_to_file"])

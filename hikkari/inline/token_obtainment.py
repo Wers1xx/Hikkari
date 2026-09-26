@@ -104,6 +104,26 @@ class TokenObtainment(InlineUnit):
 
         return await self._assert_token(create_new_if_needed=False)
 
+    async def _prompt_inline_setup(self: "InlineManager") -> None:
+        """Ask user in Saved Messages whether to create / attach an inline bot."""
+        if self._db.get("hikkari.inline", "setup_prompted", False):
+            return
+        prefix = self._db.get("hikkari.main", "command_prefix", False) or "."
+        text = (
+            "🪐 <b>Hikkari — Inline bot setup</b>\n\n"
+            "Нужен инлайн-бот для форм, галерей и логов.\n\n"
+            f"• <code>{prefix}yesbot</code> — создать нового бота через @BotFather\n"
+            f"• <code>{prefix}nobot</code> — пропустить (без инлайна)\n"
+            f"• <code>{prefix}ch_bot_token &lt;token&gt;</code> — свой токен "
+            f"(например <code>{prefix}ch_bot_token 123456:ABC...</code>)\n\n"
+            "<i>После выбора выполни</i> <code>{}restart -f</code>"
+        ).format(prefix)
+        try:
+            await self._client.send_message("me", text)
+        except Exception:
+            logger.exception("Failed to send inline setup prompt to Saved Messages")
+        self._db.set("hikkari.inline", "setup_prompted", True)
+
     async def _assert_token(
         self: "InlineManager",
         create_new_if_needed: bool = True,
@@ -111,6 +131,17 @@ class TokenObtainment(InlineUnit):
     ) -> bool:
         if self._token:
             return True
+
+        # User chose to skip inline
+        if self._db.get("hikkari.inline", "skip_inline", False):
+            logger.info("Inline bot skipped by user (nobot)")
+            return False
+
+        # First run: do NOT auto-create — ask in Saved Messages
+        if not self._db.get("hikkari.inline", "allow_auto_create", False):
+            logger.info("No bot token — prompting user for yesbot/nobot/ch_bot_token")
+            await self._prompt_inline_setup()
+            return False
 
         logger.info("Bot token not found in db, attempting search in BotFather")
 

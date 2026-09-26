@@ -92,12 +92,54 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def ch_bot_token(self, message: Message):
+        """<token> — set custom inline bot token"""
         args = utils.get_args_raw(message)
-        if not args or not re.match(r"[0-9]{8,10}:[a-zA-Z0-9_-]{34,36}", args):
+        if not args or not re.match(r"[0-9]{8,10}:[a-zA-Z0-9_-]{35,}", args):
             await utils.answer(message, self.strings["token_invalid"])
             return
         self._db.set("hikkari.inline", "bot_token", args)
-        await utils.answer(message, self.strings["bot_updated"])
+        self._db.set("hikkari.inline", "skip_inline", False)
+        self._db.set("hikkari.inline", "allow_auto_create", False)
+        self._db.set("hikkari.inline", "setup_prompted", True)
+        await utils.answer(
+            message,
+            self.strings.get(
+                "token_set_restart",
+                self.strings["bot_updated"],
+            ),
+        )
+
+    @loader.command()
+    async def yesbot(self, message: Message):
+        """— create a new inline bot via BotFather"""
+        self._db.set("hikkari.inline", "skip_inline", False)
+        self._db.set("hikkari.inline", "allow_auto_create", True)
+        self._db.set("hikkari.inline", "setup_prompted", True)
+        # clear stale token so creation runs
+        if not self._db.get("hikkari.inline", "bot_token", None):
+            self._db.set("hikkari.inline", "bot_token", None)
+        await utils.answer(
+            message,
+            "🪐 <b>Ок!</b> Создаю инлайн-бота через @BotFather.\n"
+            "Перезапуск…",
+        )
+        await self.invoke("restart", "-f", peer=message.peer_id)
+
+    @loader.command()
+    async def nobot(self, message: Message):
+        """— skip inline bot (Hikkari without inline)"""
+        self._db.set("hikkari.inline", "skip_inline", True)
+        self._db.set("hikkari.inline", "allow_auto_create", False)
+        self._db.set("hikkari.inline", "setup_prompted", True)
+        self._db.set("hikkari.inline", "bot_token", None)
+        await utils.answer(
+            message,
+            "🪐 <b>Инлайн отключён.</b>\n"
+            "Можно включить позже: <code>{}yesbot</code> или "
+            "<code>{}ch_bot_token &lt;token&gt;</code>".format(
+                self.get_prefix(), self.get_prefix()
+            ),
+        )
 
     async def bot_watcher(self, message: BotInlineMessage):
         match message.text:
