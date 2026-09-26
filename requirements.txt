@@ -1,5 +1,4 @@
-# Full hikkaritl library (NOT the broken PyPI 1.0.0 wrapper)
-hikkaritl @ git+https://github.com/Wers1xx/hikkaritl.git@master
+herokutl>=2.1.0
 pyaes
 rsa
 aiofile==3.8.1
