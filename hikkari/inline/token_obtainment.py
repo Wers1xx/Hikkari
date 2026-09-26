@@ -1,4 +1,23 @@
+# ©️ Dan Gazizullin (hikariatama), 2021-2023
+# This file is a part of Hikka Userbot
+# 🌐 https://github.com/hikariatama/Hikka
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+#
+# ©️ Codrago, 2024-2030
+# This file is a part of Heroku Userbot
+# 🌐 https://github.com/coddrago/Heroku
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+#
+# ©️ Wers1xx, 2025-2026
+# This file is a part of Hikkari Userbot
+# 🌐 https://github.com/Wers1xx/Hikkari
+# You can redistribute it and/or modify it under the terms of the GNU AGPLv3
+# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -30,7 +49,43 @@ class TokenObtainment(InlineUnit):
             logger.debug(">> %s", m.raw_text)
             logger.debug("<< %s", r.raw_text)
 
-            if "20" in r.raw_text:
+            raw = (r.raw_text or "").lower()
+            # BotFather limits / spam ban / flood
+            spam_markers = (
+                "sorry",
+                "too many",
+                "spam",
+                "limited",
+                "restrict",
+                "can't create",
+                "cannot create",
+                "не могу",
+                "слишком много",
+                "ограничен",
+            )
+            if "20" in r.raw_text or any(m in raw for m in spam_markers):
+                logger.warning("BotFather refused /newbot (spam/limit): %s", r.raw_text)
+                await fw_protect()
+                with contextlib.suppress(Exception):
+                    await m.delete()
+                    await r.delete()
+                # Do not crash — ask user for token, keep userbot running
+                self._db.set("hikkari.inline", "allow_auto_create", False)
+                self._db.set("hikkari.inline", "setup_prompted", False)
+                prefix = self._db.get("hikkari.main", "command_prefix", False) or "."
+                try:
+                    await self._client.send_message(
+                        "me",
+                        "⚠️ <b>Не удалось создать бота через @BotFather</b>\n"
+                        "(часто из‑за SpamBan / лимита на создание ботов).\n\n"
+                        "Юзербот продолжит работу <b>без инлайна</b>.\n"
+                        f"Укажи токен существующего бота:\n"
+                        f"<code>{prefix}ch_bot_token &lt;token&gt;</code>\n\n"
+                        f"Или пропусти: <code>{prefix}nobot</code>",
+                        link_preview=False,
+                    )
+                except Exception:
+                    logger.exception("Failed to notify about BotFather refusal")
                 return False
 
             await fw_protect()
