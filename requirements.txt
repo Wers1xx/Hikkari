@@ -1,7 +1,5 @@
-herokutl>=2.1.0
-# Full hikkaritl (Telethon fork) — install when published properly:
-#   pip install --force-reinstall git+https://github.com/Wers1xx/hikkaritl.git
-# PyPI "hikkaritl 1.0.0" is currently a broken thin wrapper — do not rely on it yet.
+# Full hikkaritl library (NOT the broken PyPI 1.0.0 wrapper)
+hikkaritl @ git+https://github.com/Wers1xx/hikkaritl.git@master
 pyaes
 rsa
 aiofile==3.8.1
