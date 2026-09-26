@@ -77,7 +77,7 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "custom_message",
-                "<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> <b>𝙿𝚒𝚗𝚐: </b><code>{ping}</code><b> 𝚖𝚜 </b>\n<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji><b> 𝚄𝚙𝚝𝚒𝚖𝚎: </b><code>{uptime}</code>",
+                "<blockquote><emoji document_id=5325547803936572038>✨</emoji> <code>Ping</code>: {ping}</blockquote>\n<blockquote><emoji document_id=5255971360965930740>🕔</emoji> <code>Uptime</code>: {uptime}</blockquote>\n<blockquote><emoji document_id=5341715473882955310>⚙️</emoji> <code>Version</code>: {version} {build}</blockquote>",
                 lambda: (
                     self.strings["configping"]
                     + (
@@ -107,7 +107,7 @@ class TestMod(loader.Module):
                 "banner_url",
                 None,
                 lambda: self.strings["banner_url"],
-                validator=loader.validators.RandomLink(),
+                validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
             ),
             loader.ConfigValue(
                 "quote_media",
@@ -323,14 +323,29 @@ class TestMod(loader.Module):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
         message = await utils.answer(message, self.config["ping_emoji"])
-        banner = str(self.config["banner_url"])
-
-        if self.config["banner_url"] and self.config["quote_media"] is True:
-            banner = InputMediaWebPage(str(self.config["banner_url"]), optional=True)
-
-        elif not self.config["banner_url"]:
+        banner = self.config["banner_url"]
+        if not banner:
             banner = None
+        else:
+            banner = str(banner)
+            # webpage preview only for http(s) links when quote_media enabled
+            if self.config["quote_media"] and banner.startswith(("http://", "https://")):
+                # if looks like audio file extension, send as file not webpage
+                if any(banner.lower().endswith(ext) for ext in (".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus")):
+                    pass  # keep as URL/file for telethon to handle
+                else:
+                    banner = InputMediaWebPage(banner, optional=True)
 
+        from .. import version as ver_mod
+        import herokutl
+        import psutil
+
+        me = (
+            f'<a href="tg://user?id={self._client.hikkari_me.id}">'
+            f"{utils.escape_html(self._client.hikkari_me.first_name)}</a>"
+        )
+        build = utils.get_commit_url()
+        _version = ".".join(map(str, list(ver_mod.__version__)))
         data = {
             "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
             "uptime": utils.formatted_uptime(),
@@ -340,6 +355,20 @@ class TestMod(loader.Module):
             "hostname": lib_platform.node(),
             "user": getpass.getuser(),
             "platform": utils.get_platform_name(),
+            "version": _version,
+            "build": build,
+            "owner": me,
+            "me": me,
+            "prefix": utils.escape_html(self.get_prefix()),
+            "branch": getattr(ver_mod, "branch", "master"),
+            "python_ver": lib_platform.python_version(),
+            "cpu_usage": utils.get_cpu_usage(),
+            "ram_usage": f"{utils.get_ram_usage()} MB",
+            "os": lib_platform.system(),
+            "kernel": lib_platform.release(),
+            "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) cores",
+            "htl_ver": getattr(herokutl, "__version__", "?"),
+            "git_status": utils.get_git_status() if hasattr(utils, "get_git_status") else "",
         }
         data = await utils.get_placeholders(data, self.config["custom_message"])
         try:

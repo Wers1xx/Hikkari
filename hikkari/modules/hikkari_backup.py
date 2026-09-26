@@ -247,11 +247,32 @@ class HikkariBackupMod(loader.Module):
                 call.answer(self.strings["reply_to_file"], show_alert=True)
             )
 
-    def _convert(self, backup):
-        fixed = re.sub(r"(hikka\.)(\S+\":)", lambda m: "hikkari." + m.group(2), backup)
+    def _convert(self, backup: str):
+        """Convert foreign userbot DB dumps (Hikka / Heroku / Legacy) to Hikkari format."""
+        fixed = backup
+        # Order matters: more specific first
+        replacements = (
+            (r"(heroku\.)(\S+\":)", r"hikkari.\2"),
+            (r"(legacy\.)(\S+\":)", r"hikkari.\2"),
+            (r"(hikka\.)(\S+\":)", r"hikkari.\2"),
+            # also plain package keys without trailing quote pattern variants
+            (r'"heroku\.', r'"hikkari.'),
+            (r'"legacy\.', r'"hikkari.'),
+            (r'"hikka\.', r'"hikkari.'),
+        )
+        for pattern, repl in replacements:
+            fixed = re.sub(pattern, repl, fixed)
         txt = io.BytesIO(fixed.encode())
         txt.name = f"db-converted-{datetime.datetime.now():%d-%m-%Y-%H-%M}.json"
         return txt
+
+    @staticmethod
+    def _is_foreign_backup(raw: str) -> bool:
+        """Detect Hikka / Heroku / Legacy database dumps."""
+        return bool(
+            re.search(r'"(hikka|heroku|legacy)\.[^"]+"\s*:', raw)
+            or re.search(r'"(hikka|heroku|legacy)\.', raw)
+        )
 
     @staticmethod
     def _message_id(message) -> int:
@@ -327,7 +348,8 @@ class HikkariBackupMod(loader.Module):
                 message, self.strings["probably_zip"].format(self.get_prefix())
             )
             return
-        if re.search(r'"(hikka\.)(\S+\":)', file.decode()):
+        raw_text = file.decode()
+        if self._is_foreign_backup(raw_text):
             await utils.answer(
                 message,
                 self.strings["db_warning"],
@@ -337,7 +359,7 @@ class HikkariBackupMod(loader.Module):
                         "callback": self.convert,
                         "args": (
                             "n",
-                            file.decode(),
+                            raw_text,
                         ),
                     },
                     {
@@ -345,7 +367,7 @@ class HikkariBackupMod(loader.Module):
                         "callback": self.convert,
                         "args": (
                             "y",
-                            file.decode(),
+                            raw_text,
                         ),
                     },
                 ],

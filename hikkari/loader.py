@@ -161,9 +161,20 @@ def patched_import(name: str, *args, **kwargs):
     try:
         match name:
             case s if s.startswith("telethon"):
-                return native_import("herokutl" + name[8:], *args, **kwargs)
+                try:
+                    return native_import("hikkaritl" + name[8:], *args, **kwargs)
+                except ImportError:
+                    return native_import("herokutl" + name[8:], *args, **kwargs)
             case s if s.startswith("hikkatl"):
-                return native_import("herokutl" + name[7:], *args, **kwargs)
+                try:
+                    return native_import("hikkaritl" + name[7:], *args, **kwargs)
+                except ImportError:
+                    return native_import("herokutl" + name[7:], *args, **kwargs)
+            case s if s.startswith("herokutl"):
+                try:
+                    return native_import("hikkaritl" + name[8:], *args, **kwargs)
+                except ImportError:
+                    return native_import(name, *args, **kwargs)
             case s if s.startswith("hikkalls"):
                 return native_import(name, *args, **kwargs)
             case s if s.startswith("hikka"):

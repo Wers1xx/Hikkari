@@ -1,4 +1,6 @@
-herokutl==2.1.0
+herokutl>=2.1.0
+# Optional private TL layer (install separately when published):
+# pip install git+https://github.com/Wers1xx/hikkaritl.git
 pyaes
 aiofile==3.8.1
 aiofiles==24.1.0
