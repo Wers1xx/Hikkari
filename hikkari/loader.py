@@ -161,6 +161,7 @@ def patched_import(name: str, *args, **kwargs):
     try:
         match name:
             case s if s.startswith("telethon"):
+                # Prefer full hikkaritl, fall back to herokutl
                 try:
                     return native_import("hikkaritl" + name[8:], *args, **kwargs)
                 except ImportError:
@@ -170,11 +171,8 @@ def patched_import(name: str, *args, **kwargs):
                     return native_import("hikkaritl" + name[7:], *args, **kwargs)
                 except ImportError:
                     return native_import("herokutl" + name[7:], *args, **kwargs)
-            case s if s.startswith("herokutl"):
-                try:
-                    return native_import("hikkaritl" + name[8:], *args, **kwargs)
-                except ImportError:
-                    return native_import(name, *args, **kwargs)
+            # Do NOT remap herokutl → hikkaritl: keep real herokutl if installed.
+            # Remapping broke thin/broken hikkaritl packages that lack .tl
             case s if s.startswith("hikkalls"):
                 return native_import(name, *args, **kwargs)
             case s if s.startswith("hikka"):
