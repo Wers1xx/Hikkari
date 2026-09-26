@@ -1,7 +1,8 @@
-herokutl>=2.1.0
-# Optional private TL layer (install separately when published):
-# pip install git+https://github.com/Wers1xx/hikkaritl.git
+hikkaritl @ git+https://github.com/Wers1xx/hikkaritl.git
+# After publishing to PyPI, replace the line above with:
+# hikkaritl>=1.0.0
 pyaes
+rsa
 aiofile==3.8.1
 aiofiles==24.1.0
 gitpython==3.1.50
@@ -14,10 +15,7 @@ grapheme==0.6.0
 emoji>=1.7
 psutil==6.0.0
 TgCrypto-pyrofork
-rsa==4.9
 ruamel.yaml==0.17.21
 bs4==0.0.2
 orjson
 Pillow
-
-# Python 3.10+
