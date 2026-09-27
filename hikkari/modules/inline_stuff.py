@@ -135,7 +135,8 @@ class InlineStuff(loader.Module):
         if not args or not re.match(r"[0-9]{8,10}:[a-zA-Z0-9_-]{35,}", args):
             await utils.answer(message, self.strings["token_invalid"])
             return
-        self._db.set("hikkari.inline", "bot_token", args)
+        from ..inline.token_obtainment import _persist_bot_token
+        _persist_bot_token(self._db, args)
         self._db.set("hikkari.inline", "skip_inline", False)
         self._db.set("hikkari.inline", "allow_auto_create", False)
         self._db.set("hikkari.inline", "setup_prompted", True)
@@ -155,6 +156,9 @@ class InlineStuff(loader.Module):
         self._db.set("hikkari.inline", "allow_auto_create", True)
         self._db.set("hikkari.inline", "setup_prompted", True)
         self._db.set("hikkari.inline", "bot_token", None)
+        with contextlib.suppress(Exception):
+            from ..inline.token_obtainment import _token_backup_path
+            _token_backup_path().unlink(missing_ok=True)
         with contextlib.suppress(Exception):
             self._db.save()
 

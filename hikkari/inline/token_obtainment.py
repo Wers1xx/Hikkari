@@ -38,6 +38,54 @@ logger = logging.getLogger(__name__)
 BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot")
 
 
+def _token_backup_path() -> "Path":
+    from pathlib import Path
+    from .. import main as _main
+    return Path(_main.BASE_PATH) / "inline_bot.token"
+
+
+def _persist_bot_token(db, token: str, username: str | None = None) -> None:
+    """Save token to DB + durable backup file. Never lose credentials."""
+    if not token:
+        return
+    db.set("hikkari.inline", "bot_token", token)
+    if username:
+        db.set("hikkari.inline", "bot_username", str(username).lstrip("@"))
+    try:
+        path = _token_backup_path()
+        path.write_text(token.strip() + "\n", encoding="utf-8")
+        path.chmod(0o600)
+    except Exception:
+        logger.exception("Failed to write inline_bot.token backup")
+    try:
+        db.save()
+    except Exception:
+        pass
+
+
+def _load_bot_token(db) -> str | None:
+    """Load token from DB, falling back to backup file."""
+    token = db.get("hikkari.inline", "bot_token", None)
+    if token:
+        return token
+    try:
+        path = _token_backup_path()
+        if path.is_file():
+            raw = path.read_text(encoding="utf-8").strip()
+            if raw and ":" in raw:
+                logger.warning("Restored inline bot token from backup file")
+                db.set("hikkari.inline", "bot_token", raw)
+                try:
+                    db.save()
+                except Exception:
+                    pass
+                return raw
+    except Exception:
+        logger.exception("Failed to read inline_bot.token backup")
+    return None
+
+
+
 class TokenObtainment(InlineUnit):
     async def _create_bot(self: "InlineManager"):
         logger.info("User doesn't have bot, attempting creating new one")
@@ -146,11 +194,9 @@ class TokenObtainment(InlineUnit):
                     pass
                 return False
 
-            self._db.set("hikkari.inline", "bot_token", token)
+            _persist_bot_token(self._db, token, username)
             self._token = token
-            with contextlib.suppress(Exception):
-                self._db.save()
-            logger.info("Inline bot created, token saved")
+            logger.info("Inline bot created, token saved (+backup)")
 
             # Enable inline mode + feedback + avatar
             for msg in [
@@ -343,7 +389,7 @@ class TokenObtainment(InlineUnit):
 
                     token = r.raw_text.splitlines()[1]
 
-                    self._db.set("hikkari.inline", "bot_token", token)
+                    _persist_bot_token(self._db, token)
                     self._token = token
 
                     await fw_protect()
@@ -403,23 +449,63 @@ class TokenObtainment(InlineUnit):
         return await self._create_bot() if create_new_if_needed else False
 
     async def _reassert_token(self: "InlineManager"):
-        is_token_asserted = await self._assert_token(revoke_token=True)
+        """Retry inline manager with existing token. Never revoke at BotFather."""
+        token = _load_bot_token(self._db)
+        if token:
+            self._token = token
+            try:
+                await self.register_manager(ignore_token_checks=True)
+                return True
+            except Exception:
+                logger.exception("Reassert with existing token failed")
+                self.init_complete = False
+                return False
+        # No token at all — do not revoke anything; just prompt / create path
+        is_token_asserted = await self._assert_token(revoke_token=False)
         if not is_token_asserted:
             self.init_complete = False
-        else:
-            await self.register_manager(ignore_token_checks=True)
+            return False
+        await self.register_manager(ignore_token_checks=True)
+        return True
 
     async def _dp_revoke_token(self: "InlineManager", already_initialised: bool = True):
-        if already_initialised:
-            await self._stop()
-            logger.error("Got polling conflict. Attempting token revocation...")
+        """Handle bot auth failure WITHOUT deleting the stored token.
 
-        self._db.set("hikkari.inline", "bot_token", None)
-        self._token = None
+        Losing the token forces painful re-setup. Keep it in DB + backup file;
+        only drop the in-memory client and retry with the same token / session.
+        """
+        logger.error(
+            "Inline bot auth issue (polling/token). "
+            "Token is KEPT — will retry with same credentials."
+        )
+        # Drop only runtime state
+        self._token = self._db.get("hikkari.inline", "bot_token", None) or self._token
+        self.init_complete = False
+
+        # Corrupt bot session is a common cause of AccessTokenInvalid — remove it
+        try:
+            from .. import main as _main
+            import pathlib
+            me = getattr(self, "_me", None) or getattr(self._client, "tg_id", None)
+            if self._token and me:
+                bot_uid = str(self._token).split(":", 1)[0]
+                sess = pathlib.Path(_main.SESSIONS_DIR) / f"hikkari-{me}-bot-{bot_uid}"
+                for path in (
+                    sess,
+                    pathlib.Path(str(sess) + ".session"),
+                    pathlib.Path(str(sess) + ".session-journal"),
+                ):
+                    if path.exists():
+                        path.unlink(missing_ok=True)
+                        logger.info("Removed stale bot session: %s", path)
+        except Exception:
+            logger.exception("Failed to cleanup bot session files")
+
         if already_initialised:
             asyncio.ensure_future(self._reassert_token())
         else:
             return await self._reassert_token()
+
 
     async def _check_bot(self: "InlineManager", username: str):
         username = username.strip("@")

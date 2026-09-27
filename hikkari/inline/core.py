@@ -169,7 +169,12 @@ class InlineManager(
         self._markup_ttl = 60 * 60 * 24
         self.init_complete = False
 
-        self._token = db.get("hikkari.inline", "bot_token", False)
+        # Prefer DB, fall back to durable backup file
+        try:
+            from .token_obtainment import _load_bot_token
+            self._token = _load_bot_token(db) or False
+        except Exception:
+            self._token = db.get("hikkari.inline", "bot_token", False)
 
         self._me: int = None
         self._name: str = None
@@ -290,12 +295,31 @@ class InlineManager(
             self._bot_client.hikkari_me = bot_me
             self.bot_username = bot_me.username
             self.bot_id = bot_me.id
+            # Remember username + reinforce token backup
+            try:
+                from .token_obtainment import _persist_bot_token
+                if self._token:
+                    _persist_bot_token(self._db, self._token, bot_me.username)
+            except Exception:
+                pass
         except (
             AccessTokenExpiredError,
             AccessTokenInvalidError,
             AuthKeyUnregisteredError,
         ):
-            logger.critical("Token expired, revoking...")
+            # Keep token in DB. Clean session & retry once — never wipe credentials.
+            logger.critical(
+                "Bot token auth failed (expired/invalid/session). "
+                "Keeping token, clearing bot session and retrying…"
+            )
+            if getattr(self, "_token_retry_done", False):
+                self.init_complete = False
+                logger.critical(
+                    "Bot token still invalid after session cleanup. "
+                    "Token is KEPT in DB/backup — fix via .ch_bot_token if needed."
+                )
+                return False
+            self._token_retry_done = True
             return await self._dp_revoke_token(False)
         except FloodWaitError as e:
             logger.error(
@@ -362,13 +386,14 @@ class InlineManager(
         try:
             m = await self._client.send_message(self.bot_username, "/start hikkari init")
         except (InputUserDeactivatedError, ValueError):
-            self._db.set("hikkari.inline", "bot_token", None)
-            self._token = False
-
-            if not after_break:
-                return await self.register_manager(True)
-
+            # Bot may be temporarily unavailable — NEVER delete the token
+            logger.error(
+                "Inline bot unreachable (deactivated/username). "
+                "Token kept; will retry next start."
+            )
             self.init_complete = False
+            if not after_break:
+                return await self.register_manager(True, ignore_token_checks=True)
             return False
         except YouBlockedUserError:
             await self._client(UnblockRequest(id=self.bot_username))
