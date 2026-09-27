@@ -41,10 +41,14 @@ class InlineStuff(loader.Module):
         if message is not None:
             with contextlib.suppress(Exception):
                 await utils.answer(message, "🔄 <b>Restarting…</b>")
-        # flush db if possible
+        # database.save() is SYNC — must not await
         with contextlib.suppress(Exception):
             if hasattr(self, "_db") and hasattr(self._db, "save"):
-                await self._db.save()
+                self._db.save()
+        # small delay so filesystem flush settles on UserLand
+        import asyncio
+        with contextlib.suppress(Exception):
+            await asyncio.sleep(0.4)
         os.execl(sys.executable, sys.executable, "-m", "hikkari", *sys.argv[1:])
 
 
@@ -150,15 +154,58 @@ class InlineStuff(loader.Module):
         self._db.set("hikkari.inline", "skip_inline", False)
         self._db.set("hikkari.inline", "allow_auto_create", True)
         self._db.set("hikkari.inline", "setup_prompted", True)
-        # clear stale token so creation runs
-        if not self._db.get("hikkari.inline", "bot_token", None):
-            self._db.set("hikkari.inline", "bot_token", None)
+        self._db.set("hikkari.inline", "bot_token", None)
+        with contextlib.suppress(Exception):
+            self._db.save()
+
         await utils.answer(
             message,
-            "✨ <b>Ок!</b> Создаю инлайн-бота через @BotFather.\n"
-            "Перезапуск…",
+            "✨ <b>Ок!</b> Создаю инлайн-бота через @BotFather…\n"
+            "Это займёт ~15–30 сек, не закрывай юзербот.",
         )
-        await self._restart_userbot(message)
+
+        try:
+            im = self.inline
+            im._token = None
+            ok = await im._create_bot()
+            if ok and im._db.get("hikkari.inline", "bot_token"):
+                im._token = im._db.get("hikkari.inline", "bot_token")
+                await utils.answer(
+                    message,
+                    "✨ <b>Инлайн-бот создан!</b>\n"
+                    "Перезапуск для подключения…",
+                )
+                await self._restart_userbot(message)
+                return
+
+            ok = await im._assert_token(create_new_if_needed=True)
+            if ok and im._db.get("hikkari.inline", "bot_token"):
+                await utils.answer(
+                    message,
+                    "✨ <b>Инлайн-бот готов!</b>\nПерезапуск…",
+                )
+                await self._restart_userbot(message)
+                return
+
+            prefix = self.get_prefix()
+            await utils.answer(
+                message,
+                "⚠️ <b>Не удалось создать бота через @BotFather</b>\n"
+                "(SpamBan / лимит ботов / ошибка диалога).\n\n"
+                f"Создай бота вручную в @BotFather и укажи токен:\n"
+                f"<code>{prefix}ch_bot_token &lt;token&gt;</code>",
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("yesbot create failed")
+            prefix = self.get_prefix()
+            await utils.answer(
+                message,
+                f"⚠️ <b>Ошибка создания бота:</b> "
+                f"<code>{utils.escape_html(str(e)[:200])}</code>\n\n"
+                f"Укажи токен вручную: <code>{prefix}ch_bot_token &lt;token&gt;</code>",
+            )
+
 
     @loader.command()
     async def nobot(self, message: Message):

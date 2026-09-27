@@ -63,7 +63,7 @@ class TokenObtainment(InlineUnit):
                 "слишком много",
                 "ограничен",
             )
-            if "20" in r.raw_text or any(m in raw for m in spam_markers):
+            if any(m in raw for m in spam_markers) or ("too many" in raw and "bot" in raw):
                 logger.warning("BotFather refused /newbot (spam/limit): %s", r.raw_text)
                 await fw_protect()
                 with contextlib.suppress(Exception):
@@ -111,53 +111,111 @@ class TokenObtainment(InlineUnit):
                 genran = "".join(random.choice(main.LATIN_MOCK))
                 username = f"@{genran}_{uid}_bot"
 
+            token = None
+            # 1) display name  2) username (BotFather returns token here)
             for msg in [
                 "✨ Hikkari userbot"[:64],
-                username,
-                "/setuserpic",
                 username,
             ]:
                 await fw_protect()
                 m = await conv.send_message(msg)
                 r = await conv.get_response()
-
                 logger.debug(">> %s", m.raw_text)
                 logger.debug("<< %s", r.raw_text)
-
+                # Token looks like 123456789:AAH...
+                found = re.search(r"([0-9]{8,12}:[A-Za-z0-9_-]{30,})", r.raw_text or "")
+                if found:
+                    token = found.group(1)
                 await fw_protect()
                 await m.delete()
                 await r.delete()
 
+            if not token:
+                logger.error("Bot created but token not found in BotFather response")
+                try:
+                    await self._client.send_message(
+                        "me",
+                        (
+                            "⚠️ Бот создан, но токен не найден в ответе BotFather.\n"
+                            "Открой @BotFather → /token и укажи:\n"
+                            "<code>.ch_bot_token &lt;token&gt;</code>"
+                        ),
+                        link_preview=False,
+                    )
+                except Exception:
+                    pass
+                return False
+
+            self._db.set("hikkari.inline", "bot_token", token)
+            self._token = token
+            with contextlib.suppress(Exception):
+                self._db.save()
+            logger.info("Inline bot created, token saved")
+
+            # Enable inline mode + feedback + avatar
+            for msg in [
+                "/setinline",
+                username,
+                "user@hikkari:~$",
+                "/setinlinefeedback",
+                username,
+                "Enabled",
+                "/setuserpic",
+                username,
+            ]:
+                try:
+                    await fw_protect()
+                    m = await conv.send_message(msg)
+                    r = await conv.get_response()
+                    logger.debug(">> %s", m.raw_text)
+                    logger.debug("<< %s", r.raw_text)
+                    await fw_protect()
+                    await m.delete()
+                    await r.delete()
+                except Exception:
+                    logger.exception("BotFather step failed: %s", msg)
+
             try:
                 await fw_protect()
                 from .. import main
-
+                ava = main.BASE_PATH / "assets" / "hikkari-ava.png"
                 if "DOCKER" in os.environ:
                     m = await conv.send_file(
                         "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/master/assets/hikkari-ava.png"
                     )
+                elif ava.is_file():
+                    m = await conv.send_file(str(ava))
                 else:
-                    m = await conv.send_file(
-                        main.BASE_PATH / "assets" / "hikkari-ava.png"
-                    )
-                r = await conv.get_response()
-
-                logger.debug(">> <Photo>")
-                logger.debug("<< %s", r.raw_text)
+                    m = None
+                if m is not None:
+                    r = await conv.get_response()
+                    logger.debug(">> <Photo>")
+                    logger.debug("<< %s", r.raw_text)
+                    await fw_protect()
+                    await m.delete()
+                    await r.delete()
             except Exception:
-                await fw_protect()
-                m = await conv.send_message("/cancel")
-                r = await conv.get_response()
+                logger.exception("Failed to set bot avatar")
+                with contextlib.suppress(Exception):
+                    await fw_protect()
+                    m = await conv.send_message("/cancel")
+                    r = await conv.get_response()
+                    await m.delete()
+                    await r.delete()
 
-                logger.debug(">> %s", m.raw_text)
-                logger.debug("<< %s", r.raw_text)
+            try:
+                await self._client.send_message(
+                    "me",
+                    (
+                        f"✨ <b>Инлайн-бот создан:</b> {username}\n"
+                        "Токен сохранён. После рестарта инлайн будет активен."
+                    ),
+                    link_preview=False,
+                )
+            except Exception:
+                pass
 
-            await fw_protect()
-
-            await m.delete()
-            await r.delete()
-
-        return await self._assert_token(create_new_if_needed=False)
+            return True
 
     async def _prompt_inline_setup(self: "InlineManager") -> None:
         """Ask user in Saved Messages whether to create / attach an inline bot."""
