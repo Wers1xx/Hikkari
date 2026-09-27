@@ -358,40 +358,66 @@ class Events(InlineUnit):
 
         for unit_id, unit in self._units.copy().items():
             for button in utils.array_sum(unit.get("buttons", [])):
+                if not isinstance(button, dict):
+                    continue
                 if (
                     "_switch_query" in button
                     and "input" in button
+                    and button.get("handler")
                     and button["_switch_query"] == query.split()[0]
                     and chosen_inline_query.user_id
                     in [self._me]
                     + self._client.dispatcher.security._owner
                     + unit.get("always_allow", [])
                 ):
-                    query = query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
+                    value = query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
+
+                    # Persist msg_id on unit for later edits
+                    msg_id = getattr(chosen_inline_query, "msg_id", None)
+                    if msg_id is not None:
+                        unit["inline_message_id"] = msg_id
 
                     class ChosenInlineCall:
                         data = b""
-                        chat_id = None
-                        message_id = None
 
-                        def __init__(self, update):
-                            self.id = update.id
-                            self.sender_id = update.user_id
+                        def __init__(self, update, unit_ref):
+                            self.id = getattr(update, "id", None)
+                            self.sender_id = getattr(update, "user_id", None)
+                            self.chat_id = unit_ref.get("chat")
+                            self.message_id = unit_ref.get("message_id")
+                            self.inline_message_id = unit_ref.get("inline_message_id") or getattr(
+                                update, "msg_id", None
+                            )
                             self.query = update
-                            self.query.msg_id = update.msg_id
+                            # Ensure msg_id is readable for InlineCall._init_callback
+                            try:
+                                self.query.msg_id = getattr(update, "msg_id", None) or unit_ref.get(
+                                    "inline_message_id"
+                                )
+                            except Exception:
+                                pass
 
                         async def answer(self, *args, **kwargs):
                             return None
 
                     try:
-                        return await button["handler"](
-                            InlineCall(
-                                ChosenInlineCall(chosen_inline_query), self, unit_id
-                            ),
-                            query,
-                            *button.get("args", []),
-                            **button.get("kwargs", {}),
+                        call = InlineCall(
+                            ChosenInlineCall(chosen_inline_query, unit), self, unit_id
                         )
+                        # Force message id if type-check stripped it
+                        if not call.inline_message_id:
+                            call.inline_message_id = unit.get("inline_message_id") or msg_id
+                        handler = button["handler"]
+                        args = list(button.get("args") or ())
+                        kwargs = dict(button.get("kwargs") or {})
+                        live_id = call.inline_message_id or unit.get("inline_message_id")
+                        # args layout from config: (mod, option, inline_message_id)
+                        if len(args) >= 3:
+                            args[2] = live_id or args[2]
+                            kwargs.pop("inline_message_id", None)
+                        elif live_id is not None:
+                            kwargs["inline_message_id"] = live_id
+                        return await handler(call, value, *args, **kwargs)
                     except Exception:
                         logger.exception(
                             "Exception while running chosen query watcher!"

@@ -237,14 +237,31 @@ class _CallbackMixin:
         self.sender_id = call.sender_id
         self.chat_id = call.chat_id
         self.message_id = call.message_id
-        self.inline_message_id = (
-            call.query.msg_id
-            if isinstance(
-                getattr(call.query, "msg_id", None),
-                (types.InputBotInlineMessageID, types.InputBotInlineMessageID64),
+        # Accept any msg_id from chosen/callback (strict type check broke config input)
+        _msg_id = None
+        q = getattr(call, "query", None)
+        if q is not None:
+            _msg_id = getattr(q, "msg_id", None)
+        if _msg_id is None:
+            _msg_id = getattr(call, "inline_message_id", None)
+        if _msg_id is None:
+            _msg_id = getattr(call, "msg_id", None)
+        # Prefer typed IDs when available, but do not discard unknown types
+        try:
+            _ok_types = tuple(
+                x
+                for x in (
+                    getattr(types, "InputBotInlineMessageID", None),
+                    getattr(types, "InputBotInlineMessageID64", None),
+                )
+                if x is not None
             )
-            else None
-        )
+        except Exception:
+            _ok_types = ()
+        if _msg_id is not None and _ok_types and not isinstance(_msg_id, _ok_types):
+            # still keep it — Telethon/hikkaritl may pass compatible objects
+            pass
+        self.inline_message_id = _msg_id
         self.message = _MessageProxy(
             inline_manager,
             chat_id=call.chat_id,

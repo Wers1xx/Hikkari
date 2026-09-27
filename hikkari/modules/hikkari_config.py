@@ -214,7 +214,13 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await call.edit(
+        # Resolve inline_message_id: arg → call → unit store
+        imid = inline_message_id or getattr(call, "inline_message_id", None)
+        if not imid and getattr(call, "unit_id", None) and getattr(call, "_units", None):
+            unit = call._units.get(call.unit_id) or {}
+            imid = unit.get("inline_message_id")
+
+        ok = await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -238,8 +244,18 @@ class HikkariConfigMod(loader.Module):
                     },
                 ]
             ],
-            inline_message_id=inline_message_id or call.inline_message_id,
+            inline_message_id=imid,
         )
+        if not ok:
+            # Value is already saved — notify user even if edit failed
+            with contextlib.suppress(Exception):
+                await call.answer(
+                    self.strings.get(
+                        "option_saved_short",
+                        "✅ Saved",
+                    ),
+                    show_alert=True,
+                )
 
     async def inline__reset_default(
         self,
