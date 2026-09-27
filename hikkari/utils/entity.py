@@ -32,16 +32,13 @@ import requests
 from hikkaritl import hints
 from hikkaritl.tl.custom.message import Message
 from hikkaritl.tl.functions.account import UpdateNotifySettingsRequest
-from hikkaritl.tl.functions.channels import (
-    CreateChannelRequest,
+from hikkaritl.tl.functions.channels import CreateChannelRequest, EditPhotoRequest
+from hikkaritl.tl.functions.messages import (
     CreateForumTopicRequest,
     EditForumTopicRequest,
-    EditPhotoRequest,
+    GetDialogFiltersRequest,
     GetForumTopicsByIDRequest,
     GetForumTopicsRequest,
-)
-from hikkaritl.tl.functions.messages import (
-    GetDialogFiltersRequest,
     SetHistoryTTLRequest,
     UpdateDialogFilterRequest,
 )
