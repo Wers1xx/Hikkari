@@ -400,10 +400,10 @@ class Form(InlineUnit):
         # Wait for UpdateBotInlineSend to get inline_message_id (needed for edit)
         # Timeout: without BotFather /setinlinefeedback this never arrives
         try:
-            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=8)
+            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=2)
         except (asyncio.TimeoutError, KeyError):
             logger.warning(
-                "Inline form %s: no chosen_inline feedback in 8s "
+                "Inline form %s: no chosen_inline feedback in 2s "
                 "(enable /setinlinefeedback in @BotFather). Continuing without it.",
                 unit_id,
             )
@@ -417,23 +417,22 @@ class Form(InlineUnit):
             inline_manager=self, unit_id=unit_id, inline_message_id=inline_message_id
         )
 
-        if needs_premium_emoji_pre_edit or not isinstance(
-            base_reply_markup, Placeholder
+        # Optional post-edit (premium emoji / markup refresh).
+        # Do NOT delete the form if edit fails — content already in the article.
+        if inline_message_id and (
+            needs_premium_emoji_pre_edit or not isinstance(base_reply_markup, Placeholder)
         ):
-            if needs_premium_emoji_pre_edit:
-                await asyncio.sleep(0.3)
-            if not await msg.edit(
-                text,
-                reply_markup=(
-                    base_reply_markup
-                    if not isinstance(base_reply_markup, Placeholder)
-                    else reply_markup
-                ),
-            ):
-                with contextlib.suppress(Exception):
-                    await msg.delete()
-                await self._unload_unit(unit_id)
-                return False
+            with contextlib.suppress(Exception):
+                if needs_premium_emoji_pre_edit:
+                    await asyncio.sleep(0.2)
+                await msg.edit(
+                    text,
+                    reply_markup=(
+                        base_reply_markup
+                        if not isinstance(base_reply_markup, Placeholder)
+                        else reply_markup
+                    ),
+                )
 
         return msg
 
@@ -486,7 +485,7 @@ class Form(InlineUnit):
             return
 
         form = self._units[inline_query.query]
-        form_text = "✨" if form.get("premium_emoji_pre_edit") else form.get("text")
+        form_text = form.get("text") or "✨"
         try:
             match True:
                 case _ if "photo" in form:

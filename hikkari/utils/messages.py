@@ -324,6 +324,8 @@ async def answer(
                 return
 
             reply_markup = message.client.loader.inline._normalize_markup(reply_markup)
+            # Prefer silent form: avoid ✨ "opening..." hang; delete cmd after click
+            kwargs.setdefault("silent", True)
             result = await message.client.loader.inline.form(
                 response,
                 message=message if message.out else get_chat_id(message),
