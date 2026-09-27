@@ -338,101 +338,150 @@ class Events(InlineUnit):
         self: "InlineManager",
         chosen_inline_query,
     ):
-        # Accept UpdateBotInlineSend or duck-typed updates with .query / .msg_id
+        """Handle chosen inline result (config "enter value", etc).
+
+        Mirrors Heroku: match input button by _switch_query, pass value to handler.
+        """
         if not isinstance(chosen_inline_query, UpdateBotInlineSend):
-            if not (
-                hasattr(chosen_inline_query, "query")
-                and (
-                    hasattr(chosen_inline_query, "msg_id")
-                    or hasattr(chosen_inline_query, "id")
-                )
-            ):
+            # Some TL layers may wrap the update
+            if not hasattr(chosen_inline_query, "query"):
                 return
 
         query = getattr(chosen_inline_query, "query", None)
-
         if not query:
             return
 
-        query_key = str(query).strip().split()[0] if query else ""
+        query = str(query)
+        query_key = query.strip().split()[0] if query.strip() else ""
+        user_id = getattr(chosen_inline_query, "user_id", None)
+        msg_id = getattr(chosen_inline_query, "msg_id", None)
 
+        logger.debug(
+            "chosen_inline: query=%r user=%s msg_id=%s units=%s",
+            query[:80],
+            user_id,
+            msg_id,
+            list(self._units.keys())[:10],
+        )
+
+        # Form open: unit_id was the full query
         for unit_id, unit in self._units.items():
             if (
                 unit_id in (query, query_key)
                 and "future" in unit
                 and isinstance(unit["future"], Event)
             ):
-                unit["inline_message_id"] = getattr(chosen_inline_query, "msg_id", None)
+                if msg_id is not None:
+                    unit["inline_message_id"] = msg_id
                 unit["future"].set()
                 return
 
+        owners = [self._me]
+        try:
+            owners += list(self._client.dispatcher.security._owner or [])
+        except Exception:
+            pass
+
         for unit_id, unit in self._units.copy().items():
-            for button in utils.array_sum(unit.get("buttons", [])):
+            buttons = unit.get("buttons", [])
+            try:
+                flat = utils.array_sum(buttons)
+            except Exception:
+                flat = []
+                for row in buttons or []:
+                    if isinstance(row, list):
+                        flat.extend(row)
+                    else:
+                        flat.append(row)
+
+            for button in flat:
                 if not isinstance(button, dict):
                     continue
-                if (
-                    "_switch_query" in button
-                    and "input" in button
-                    and button.get("handler")
-                    and button["_switch_query"] == query.split()[0]
-                    and chosen_inline_query.user_id
-                    in [self._me]
-                    + self._client.dispatcher.security._owner
-                    + unit.get("always_allow", [])
-                ):
-                    value = query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
+                if "_switch_query" not in button or "input" not in button:
+                    continue
+                if button["_switch_query"] != query_key:
+                    continue
+                if not button.get("handler"):
+                    logger.warning(
+                        "Input button %s has no handler", button.get("text")
+                    )
+                    continue
 
-                    # Persist msg_id on unit for later edits
-                    msg_id = getattr(chosen_inline_query, "msg_id", None)
+                always_allow = unit.get("always_allow", []) or []
+                if user_id is not None and user_id not in owners + list(always_allow):
+                    logger.warning(
+                        "chosen_inline rejected: user %s not in owners %s",
+                        user_id,
+                        owners,
+                    )
+                    continue
+
+                value = (
+                    query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
+                )
+
+                if msg_id is not None:
+                    unit["inline_message_id"] = msg_id
+
+                class ChosenInlineCall:
+                    data = b""
+                    chat_id = None
+                    message_id = None
+
+                    def __init__(self, update):
+                        self.id = getattr(update, "id", None)
+                        self.sender_id = getattr(update, "user_id", None)
+                        self.query = update
+                        # Heroku-compatible: expose msg_id on query
+                        try:
+                            self.query.msg_id = getattr(update, "msg_id", None)
+                        except Exception:
+                            pass
+                        self.inline_message_id = getattr(update, "msg_id", None)
+                        self.chat_id = unit.get("chat")
+                        self.message_id = unit.get("message_id")
+
+                    async def answer(self, *args, **kwargs):
+                        return None
+
+                try:
+                    call = InlineCall(
+                        ChosenInlineCall(chosen_inline_query), self, unit_id
+                    )
+                    # Prefer live msg_id on the call/unit
                     if msg_id is not None:
+                        call.inline_message_id = msg_id
                         unit["inline_message_id"] = msg_id
 
-                    class ChosenInlineCall:
-                        data = b""
+                    handler = button["handler"]
+                    args = list(button.get("args") or [])
+                    kwargs = dict(button.get("kwargs") or {})
 
-                        def __init__(self, update, unit_ref):
-                            self.id = getattr(update, "id", None)
-                            self.sender_id = getattr(update, "user_id", None)
-                            self.chat_id = unit_ref.get("chat")
-                            self.message_id = unit_ref.get("message_id")
-                            self.inline_message_id = unit_ref.get("inline_message_id") or getattr(
-                                update, "msg_id", None
-                            )
-                            self.query = update
-                            # Ensure msg_id is readable for InlineCall._init_callback
-                            try:
-                                self.query.msg_id = getattr(update, "msg_id", None) or unit_ref.get(
-                                    "inline_message_id"
-                                )
-                            except Exception:
-                                pass
-
-                        async def answer(self, *args, **kwargs):
-                            return None
-
-                    try:
-                        call = InlineCall(
-                            ChosenInlineCall(chosen_inline_query, unit), self, unit_id
+                    # Config handlers: (mod, option, inline_message_id)
+                    if len(args) >= 3:
+                        args[2] = call.inline_message_id or args[2]
+                        kwargs.pop("inline_message_id", None)
+                    elif call.inline_message_id is not None:
+                        kwargs.setdefault(
+                            "inline_message_id", call.inline_message_id
                         )
-                        # Force message id if type-check stripped it
-                        if not call.inline_message_id:
-                            call.inline_message_id = unit.get("inline_message_id") or msg_id
-                        handler = button["handler"]
-                        args = list(button.get("args") or ())
-                        kwargs = dict(button.get("kwargs") or {})
-                        live_id = call.inline_message_id or unit.get("inline_message_id")
-                        # args layout from config: (mod, option, inline_message_id)
-                        if len(args) >= 3:
-                            args[2] = live_id or args[2]
-                            kwargs.pop("inline_message_id", None)
-                        elif live_id is not None:
-                            kwargs["inline_message_id"] = live_id
-                        return await handler(call, value, *args, **kwargs)
-                    except Exception:
-                        logger.exception(
-                            "Exception while running chosen query watcher!"
-                        )
-                        return
+
+                    logger.info(
+                        "chosen_inline → handler %s value=%r unit=%s",
+                        getattr(handler, "__name__", handler),
+                        value[:50],
+                        unit_id,
+                    )
+                    return await handler(call, value, *args, **kwargs)
+                except Exception:
+                    logger.exception(
+                        "Exception while running chosen query watcher!"
+                    )
+                    return
+
+        logger.debug(
+            "chosen_inline: no matching input button for key=%r", query_key
+        )
 
     async def _query_help(self: "InlineManager", inline_query: InlineQuery):
         _help = []

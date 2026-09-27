@@ -201,6 +201,7 @@ class HikkariConfigMod(loader.Module):
         inline_message_id: str | None = None,
         obj_type: bool | str = False,
     ):
+        # Heroku-compatible: assign first, then edit form
         try:
             self.lookup(mod).config[option] = query
         except loader.validators.ValidationError as e:
@@ -214,48 +215,53 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        # Resolve inline_message_id: arg → call → unit store
-        imid = inline_message_id or getattr(call, "inline_message_id", None)
-        if not imid and getattr(call, "unit_id", None) and getattr(call, "_units", None):
-            unit = call._units.get(call.unit_id) or {}
-            imid = unit.get("inline_message_id")
+        # Flush DB so value is not lost on restart
+        with contextlib.suppress(Exception):
+            self._db.save()
 
-        ok = await call.edit(
-            self.strings[
-                "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
-            ].format(
-                utils.escape_html(option),
-                utils.escape_html(mod),
-                self._get_inline_value(mod, option),
-            ),
-            reply_markup=[
-                [
-                    {
-                        "text": self.strings["back_btn"],
-                        "callback": self.inline__configure,
-                        "args": (mod,),
-                        "style": "primary",
-                        "kwargs": self._guess_back_to_page(mod, option, obj_type),
-                    },
-                    {
-                        "text": self.strings["close_btn"],
-                        "action": "close",
-                        "style": "danger",
-                    },
-                ]
-            ],
-            inline_message_id=imid,
+        imid = (
+            inline_message_id
+            or getattr(call, "inline_message_id", None)
+            or (
+                (call._units.get(call.unit_id) or {}).get("inline_message_id")
+                if getattr(call, "unit_id", None) and getattr(call, "_units", None)
+                else None
+            )
         )
-        if not ok:
-            # Value is already saved — notify user even if edit failed
-            with contextlib.suppress(Exception):
-                await call.answer(
-                    self.strings.get(
-                        "option_saved_short",
-                        "✅ Saved",
-                    ),
-                    show_alert=True,
-                )
+
+        text = self.strings[
+            "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
+        ].format(
+            utils.escape_html(option),
+            utils.escape_html(mod),
+            self._get_inline_value(mod, option),
+        )
+        markup = [
+            [
+                {
+                    "text": self.strings["back_btn"],
+                    "callback": self.inline__configure,
+                    "args": (mod,),
+                    "style": "primary",
+                    "kwargs": self._guess_back_to_page(mod, option, obj_type),
+                },
+                {
+                    "text": self.strings["close_btn"],
+                    "action": "close",
+                    "style": "danger",
+                },
+            ]
+        ]
+
+        # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
+        try:
+            if imid is not None:
+                await call.edit(text, reply_markup=markup, inline_message_id=imid)
+            else:
+                await call.edit(text, reply_markup=markup)
+        except Exception:
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("inline__set_config edit failed (value already saved)")
 
     async def inline__reset_default(
         self,
