@@ -994,7 +994,7 @@ class Hikkari:
     async def _badge(self, client: CustomTelegramClient):
         """Call the badge in shell"""
         try:
-            if os.environ.get("HEROKU_NO_GIT") == "1":
+            if os.environ.get("HIKKARI_NO_GIT") == "1" or os.environ.get("HEROKU_NO_GIT") == "1":
                 build = "unknown"
                 upd = "Git disabled"
             else:
@@ -1007,14 +1007,12 @@ class Hikkari:
             pref = client.hikkari_db.get("hikkari.main", "command_prefix", None)
 
             logo = (
-                "                          _           \n"
-                r"  /\  /\ ___  _ __  ___  | | __ _   _ "
+                "  _   _ _ _    _              _\n"
+                " | | | (_) | _| | ____ _ _ __(_)\n"
+                " | |_| | | |/ / |/ / _` | '__| |\n"
+                " |  _  | |   <|   < (_| | |  | |\n"
+                " |_| |_|_|_|\\_\\_|\\_\\__,_|_|  |_|\n"
                 "\n"
-                r" / /_/ // _ \| '__|/ _ \ | |/ /| | | |"
-                "\n"
-                "/ __  /|  __/| |  | (_) ||   < | |_| |\n"
-                r"\/ /_/  \___||_|   \___/ |_|\_\ \__,_|"
-                "\n\n"
                 f"• Build: {build[:7]}\n"
                 f"• Version: {'.'.join(list(map(str, list(__version__))))}\n"
                 f"• {upd}\n"
