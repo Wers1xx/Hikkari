@@ -142,6 +142,7 @@ class InlineStuff(loader.Module):
                 self.strings["bot_updated"],
             ),
         )
+        await self._restart_userbot(message)
 
     @loader.command()
     async def yesbot(self, message: Message):
