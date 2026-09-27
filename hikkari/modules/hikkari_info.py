@@ -57,7 +57,7 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                "local:hikkari-info.jpg",
+                "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_info.png",
                 lambda: self.strings["_cfg_banner"],
                 validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
             ),
@@ -195,20 +195,33 @@ class HikkariInfoMod(loader.Module):
 
     @loader.command()
     async def infocmd(self, message: Message):
+        """Show userbot info (Heroku-compatible quote_media)"""
         start = time.perf_counter_ns()
         from .. import main as _main
-        raw_banner = self.config["banner_url"]
-        media = None
-        if raw_banner:
-            raw_banner = str(raw_banner)
-            if raw_banner.startswith("local:"):
-                media = _main.BASE_PATH / "assets" / raw_banner[6:]
+
+        banner = self.config["banner_url"]
+        # Heroku-style media selection
+        if banner and self.config["quote_media"] is True:
+            banner_s = str(banner)
+            if banner_s.startswith("local:"):
+                # local files cannot be quote webpage — send as file
+                media = _main.BASE_PATH / "assets" / banner_s[6:]
                 if not media.is_file():
                     media = None
-            elif self.config["quote_media"] is True:
-                media = InputMediaWebPage(raw_banner, optional=True)
+            elif banner_s.startswith(("http://", "https://")):
+                media = InputMediaWebPage(banner_s, optional=True)
             else:
-                media = raw_banner
+                media = InputMediaWebPage(banner_s, optional=True)
+        elif banner:
+            banner_s = str(banner)
+            if banner_s.startswith("local:"):
+                media = _main.BASE_PATH / "assets" / banner_s[6:]
+                if not media.is_file():
+                    media = None
+            else:
+                media = banner_s
+        else:
+            media = None
 
         try:
             match True:
@@ -219,10 +232,9 @@ class HikkariInfoMod(loader.Module):
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
                         invert_media=self.config["invert_media"],
-                        
                     )
                 case _:
-                    if "{ping}" in self.config["custom_message"]:
+                    if "{ping}" in (self.config["custom_message"] or ""):
                         message = await utils.answer(message, self.config["ping_emoji"])
                     await utils.answer(
                         message,
@@ -230,7 +242,6 @@ class HikkariInfoMod(loader.Module):
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
                         invert_media=self.config["invert_media"],
-                        
                     )
         except WebpageMediaEmptyError:
             await utils.answer(
