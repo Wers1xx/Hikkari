@@ -163,7 +163,7 @@ class Database(dict):
             content_channel, _ = await utils.asset_channel(
                 client=self._client,
                 title="hikkari-userbot",
-                description="🪐 Content related to Hikkari will be here",
+                description="✨ Content related to Hikkari will be here",
                 silent=True,
                 invite_bot=True,
                 avatar=_ava_bytes,

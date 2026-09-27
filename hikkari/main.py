@@ -1022,7 +1022,7 @@ class Hikkari:
             if not self.omit_log:
                 print(logo)
                 logging.debug(
-                    "\n🪐 Hikkari %s #%s (%s) started",
+                    "\n✨ Hikkari %s #%s (%s) started",
                     ".".join(list(map(str, list(__version__)))),
                     build[:7],
                     upd,
@@ -1048,7 +1048,7 @@ class Hikkari:
                         (
                             utils.get_platform_emoji()
                             if client.hikkari_me.premium is True
-                            else "🪐 Hikkari"
+                            else "✨ Hikkari"
                         ),
                         ".".join(list(map(str, list(__version__)))),
                         build,

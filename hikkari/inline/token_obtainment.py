@@ -112,7 +112,7 @@ class TokenObtainment(InlineUnit):
                 username = f"@{genran}_{uid}_bot"
 
             for msg in [
-                "🪐 Hikkari userbot"[:64],
+                "✨ Hikkari userbot"[:64],
                 username,
                 "/setuserpic",
                 username,
@@ -165,7 +165,7 @@ class TokenObtainment(InlineUnit):
             return
         prefix = self._db.get("hikkari.main", "command_prefix", False) or "."
         text = (
-            "🪐 <b>Hikkari — Inline bot setup</b>\n\n"
+            "✨ <b>Hikkari — Inline bot setup</b>\n\n"
             "Нужен инлайн-бот для форм, галерей и логов.\n\n"
             f"• <code>{prefix}yesbot</code> — создать нового бота через @BotFather\n"
             f"• <code>{prefix}nobot</code> — пропустить (без инлайна)\n"

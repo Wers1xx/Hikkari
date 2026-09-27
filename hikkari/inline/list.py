@@ -199,7 +199,7 @@ class List(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.hikkari_me.premium
-                        else "🪐"
+                        else "✨"
                     )
                     + self.translator.getkey("inline.opening_list"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -335,7 +335,7 @@ class List(InlineUnit):
                             await inline_query.builder.article(
                                 title="Hikkari",
                                 text=(
-                                    "🪐"
+                                    "✨"
                                     if unit.get("premium_emoji_pre_edit")
                                     else self.sanitise_text(unit["strings"][0])
                                 ),
