@@ -1,4 +1,4 @@
-herokutl>=2.1.0
+hikkaritl>=1.1.0
 pyaes
 rsa
 aiofile==3.8.1

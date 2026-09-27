@@ -155,14 +155,14 @@ elif __package__ != "hikkari":
     )
 else:
     try:
-        import herokutl
+        import hikkaritl
     except Exception:
         pass
     else:
         try:
-            import herokutl  # noqa: F811
+            import hikkaritl  # noqa: F811
 
-            if tuple(map(int, herokutl.__version__.split("."))) < (1, 7, 2):
+            if tuple(map(int, hikkaritl.__version__.split("."))) < (1, 7, 2):
                 raise ImportError
         except ImportError:
             print("\U0001f504 Installing dependencies...")

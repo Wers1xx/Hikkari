@@ -23,8 +23,8 @@ import functools
 import typing
 from math import ceil
 
-from herokutl.tl.types import Message
-from herokutl.extensions import html
+from hikkaritl.tl.types import Message
+from hikkaritl.extensions import html
 
 from .. import loader, translations, utils
 from ..inline.types import InlineCall

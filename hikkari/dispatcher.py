@@ -29,9 +29,9 @@ import re
 import sys
 import traceback
 
-from herokutl import events
-from herokutl.errors import FloodWaitError, RPCError
-from herokutl.tl.types import Message
+from hikkaritl import events
+from hikkaritl.errors import FloodWaitError, RPCError
+from hikkaritl.tl.types import Message
 
 from . import main, security, utils
 from .database import Database

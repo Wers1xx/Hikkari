@@ -25,8 +25,8 @@ import random
 import time
 from io import BytesIO
 
-from herokutl.tl.types import Message
-from herokutl.types import InputMediaWebPage
+from hikkaritl.tl.types import Message
+from hikkaritl.types import InputMediaWebPage
 
 from .. import loader, main, utils
 from ..inline.types import InlineCall
@@ -355,7 +355,7 @@ class TestMod(loader.Module):
                     banner = InputMediaWebPage(banner, optional=True)
 
         from .. import version as ver_mod
-        import herokutl
+        import hikkaritl
         import psutil
 
         me = (
@@ -385,7 +385,7 @@ class TestMod(loader.Module):
             "os": lib_platform.system(),
             "kernel": lib_platform.release(),
             "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) cores",
-            "htl_ver": getattr(herokutl, "__version__", "?"),
+            "htl_ver": getattr(hikkaritl, "__version__", "?"),
             "git_status": utils.get_git_status() if hasattr(utils, "get_git_status") else "",
         }
         data = await utils.get_placeholders(data, self.config["custom_message"])
@@ -399,6 +399,14 @@ class TestMod(loader.Module):
             placeholders_msg,
             file=banner,
             invert_media=self.config["invert_media"],
+            link_preview=bool(
+                self.config["quote_media"]
+                and banner is not None
+                and (
+                    isinstance(banner, InputMediaWebPage)
+                    or (isinstance(banner, str) and banner.startswith(("http://", "https://")))
+                )
+            ),
         )
 
     async def client_ready(self):

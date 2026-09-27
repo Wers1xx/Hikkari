@@ -21,7 +21,7 @@ import logging
 import typing
 from asyncio import Event
 
-from herokutl.tl.types import UpdateBotInlineSend
+from hikkaritl.tl.types import UpdateBotInlineSend
 
 from .. import utils, security
 from .types import BotInlineCall, InlineCall, InlineQuery, InlineUnit

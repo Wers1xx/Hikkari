@@ -23,7 +23,7 @@ import re
 import string
 import random
 
-from herokutl.tl.types import Message
+from hikkaritl.tl.types import Message
 
 from .. import loader, utils
 from ..inline.types import BotInlineMessage, InlineCall

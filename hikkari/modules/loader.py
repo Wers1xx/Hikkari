@@ -39,11 +39,11 @@ from importlib.machinery import ModuleSpec
 from urllib.parse import urlparse
 
 import requests
-from herokutl.tl.custom import Message
-from herokutl.errors.common import ScamDetectionError
-from herokutl.errors.rpcerrorlist import MediaCaptionTooLongError
-from herokutl.tl.functions.channels import JoinChannelRequest
-from herokutl.tl.types import Channel, InputMediaWebPage
+from hikkaritl.tl.custom import Message
+from hikkaritl.errors.common import ScamDetectionError
+from hikkaritl.errors.rpcerrorlist import MediaCaptionTooLongError
+from hikkaritl.tl.functions.channels import JoinChannelRequest
+from hikkaritl.tl.types import Channel, InputMediaWebPage
 
 from .. import loader, main, utils
 from .._local_storage import RemoteStorage

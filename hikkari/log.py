@@ -34,10 +34,10 @@ import functools
 from logging.handlers import RotatingFileHandler
 from collections.abc import Coroutine
 
-import herokutl
-from herokutl.errors import PersistentTimestampOutdatedError, TimeoutError
-from herokutl.errors.rpcbaseerrors import ServerError, RPCError
-from herokutl.errors.rpcerrorlist import FloodWaitError
+import hikkaritl
+from hikkaritl.errors import PersistentTimestampOutdatedError, TimeoutError
+from hikkaritl.errors.rpcbaseerrors import ServerError, RPCError
+from hikkaritl.errors.rpcerrorlist import FloodWaitError
 
 from . import utils
 from ._internal import (
@@ -150,7 +150,7 @@ class HikkariException:
                         == "Database"
                     ):
                         dictionary[key] = "<Database>"
-                    case herokutl.TelegramClient() | CustomTelegramClient():
+                    case hikkaritl.TelegramClient() | CustomTelegramClient():
                         dictionary[key] = f"<{value.__class__.__name__}>"
                     case _:
                         try:
@@ -312,7 +312,7 @@ class TelegramLogsHandler(logging.Handler):
             + f'<pre><code class="language-python">{item.full_stack}</code></pre>'
         )
 
-        chunks = list(utils.smart_split(*herokutl.extensions.html.parse(chunks), 4096))
+        chunks = list(utils.smart_split(*hikkaritl.extensions.html.parse(chunks), 4096))
 
         await call.edit(chunks[0])
 
@@ -615,7 +615,7 @@ def init():
             msg = record.getMessage()
             return "Failed to fetch updates" not in msg and "Sleep" not in msg
 
-    logging.getLogger("herokutl.network").addFilter(NoFetchUpdatesFilter())
+    logging.getLogger("hikkaritl.network").addFilter(NoFetchUpdatesFilter())
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
     handler.setFormatter(_main_formatter)
@@ -624,7 +624,7 @@ def init():
         TelegramLogsHandler((handler, rotating_handler), 7000)
     )
     logging.getLogger().setLevel(logging.NOTSET)
-    logging.getLogger("herokutl").setLevel(logging.WARNING)
+    logging.getLogger("hikkaritl").setLevel(logging.WARNING)
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.captureWarnings(True)

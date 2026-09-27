@@ -21,14 +21,14 @@ import logging
 import shlex
 import typing
 
-import herokutl
-import herokutl.extensions
-import herokutl.extensions.html
-from herokutl.tl.custom.message import Message
+import hikkaritl
+import hikkaritl.extensions
+import hikkaritl.extensions.html
+from hikkaritl.tl.custom.message import Message
 
 from .entity import escape_html, relocate_entities
 
-parser = herokutl.utils.sanitize_parse_mode("html")
+parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 
 
@@ -47,8 +47,8 @@ def validate_html(html: str) -> str:
     :param html: HTML to validate
     :return: Valid HTML
     """
-    text, entities = herokutl.extensions.html.parse(html)
-    return herokutl.extensions.html.unparse(escape_html(text), entities)
+    text, entities = hikkaritl.extensions.html.parse(html)
+    return hikkaritl.extensions.html.unparse(escape_html(text), entities)
 
 
 def get_kwargs() -> dict[str, typing.Any]:

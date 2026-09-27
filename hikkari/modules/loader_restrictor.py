@@ -23,15 +23,15 @@ import logging
 
 from dataclasses import dataclass
 
-from herokutl.extensions import html
-from herokutl.tl.types import (
+from hikkaritl.extensions import html
+from hikkaritl.tl.types import (
     InputMediaPoll,
     Poll,
     PollAnswer,
     TextWithEntities,
     UpdateMessagePollVote,
 )
-from herokutl.tl.custom import Message
+from hikkaritl.tl.custom import Message
 
 from .. import loader
 from ..inline.types import BotInlineCall, BotInlineMessage

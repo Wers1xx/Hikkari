@@ -24,8 +24,8 @@ import random
 import re
 import typing
 
-from herokutl.errors.rpcerrorlist import YouBlockedUserError
-from herokutl.tl.functions.contacts import UnblockRequest
+from hikkaritl.errors.rpcerrorlist import YouBlockedUserError
+from hikkaritl.tl.functions.contacts import UnblockRequest
 
 from .. import utils
 from .._internal import fw_protect

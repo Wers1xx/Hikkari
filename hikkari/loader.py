@@ -37,7 +37,7 @@ from pathlib import Path
 from types import FunctionType
 from uuid import uuid4
 
-from herokutl.tl.tlobject import TLObject
+from hikkaritl.tl.tlobject import TLObject
 
 from . import main, security, utils, validators
 from .database import Database
@@ -160,7 +160,7 @@ VALID_APT_PACKAGES = re.compile(
 IMPORT_PIP_ALIASES = {
     "sklearn": "scikit-learn",
     "pil": "Pillow",
-    "herokutl": "Hikkari-TL-New",
+    "hikkaritl": "hikkaritl",
     "markdown_it": "markdown-it-py",
 }
 
@@ -180,15 +180,19 @@ def patched_import(name: str, *args, **kwargs):
         match name:
             case s if s.startswith("telethon"):
                 try:
-                    return native_import("herokutl" + name[8:], *args, **kwargs)
-                except ImportError:
                     return native_import("hikkaritl" + name[8:], *args, **kwargs)
+                except ImportError:
+                    return native_import("herokutl" + name[8:], *args, **kwargs)
             case s if s.startswith("hikkatl"):
                 try:
-                    return native_import("herokutl" + name[7:], *args, **kwargs)
-                except ImportError:
                     return native_import("hikkaritl" + name[7:], *args, **kwargs)
-            # herokutl stays as herokutl (do not remap to broken PyPI hikkaritl)
+                except ImportError:
+                    return native_import("herokutl" + name[7:], *args, **kwargs)
+            case s if s.startswith("herokutl"):
+                try:
+                    return native_import("hikkaritl" + name[8:], *args, **kwargs)
+                except ImportError:
+                    return native_import(name, *args, **kwargs)
             case s if s.startswith("hikkalls"):
                 return native_import(name, *args, **kwargs)
             case s if s.startswith("hikka"):

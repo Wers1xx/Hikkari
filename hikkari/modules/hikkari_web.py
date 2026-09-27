@@ -24,7 +24,7 @@ import string
 import time
 from pathlib import Path
 
-from herokutl.errors import (
+from hikkaritl.errors import (
     FloodWaitError,
     PasswordHashInvalidError,
     PhoneCodeExpiredError,
@@ -32,10 +32,10 @@ from herokutl.errors import (
     PhoneNumberInvalidError,
     SessionPasswordNeededError,
 )
-from herokutl.sessions import MemorySession, SQLiteSession
-from herokutl.tl.custom import Message
-from herokutl.tl.types import User
-from herokutl.utils import parse_phone
+from hikkaritl.sessions import MemorySession, SQLiteSession
+from hikkaritl.tl.custom import Message
+from hikkaritl.tl.types import User
+from hikkaritl.utils import parse_phone
 
 from .. import loader, main, security, utils
 from ..loader import LOADED_MODULES_PATH

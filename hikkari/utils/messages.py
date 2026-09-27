@@ -24,8 +24,8 @@ import re
 import typing
 
 import grapheme
-import herokutl
-from herokutl.tl.types import (
+import hikkaritl
+from hikkaritl.tl.types import (
     Channel,
     Chat,
     InputDocument,
@@ -51,7 +51,7 @@ emoji_pattern = re.compile(
     flags=re.UNICODE,
 )
 
-parser = herokutl.utils.sanitize_parse_mode("html")
+parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 
 
@@ -140,7 +140,7 @@ def smart_split(
 
     :example:
         >>> utils.smart_split(
-            *herokutl.extensions.html.parse(
+            *hikkaritl.extensions.html.parse(
                 "<b>Hello, world!</b>"
             )
         )
@@ -336,7 +336,19 @@ async def answer(
         await message.edit(response)
         return message
 
-    kwargs.setdefault("link_preview", False)
+    # InputMediaWebPage needs link preview enabled for quote_media
+    file_arg = kwargs.get("file")
+    try:
+        from hikkaritl.tl.types import InputMediaWebPage as _IMWP
+    except Exception:
+        try:
+            from herokutl.tl.types import InputMediaWebPage as _IMWP
+        except Exception:
+            _IMWP = tuple()
+    if _IMWP and isinstance(file_arg, _IMWP):
+        kwargs["link_preview"] = True
+    else:
+        kwargs.setdefault("link_preview", False)
 
     edit = message.out and not message.via_bot_id and not message.fwd_from
     match True:
@@ -348,7 +360,7 @@ async def answer(
         case _ if "reply_to" in kwargs:
             kwargs.pop("reply_to")
 
-    parse_mode = herokutl.utils.sanitize_parse_mode(
+    parse_mode = hikkaritl.utils.sanitize_parse_mode(
         kwargs.pop(
             "parse_mode",
             message.client.parse_mode,

@@ -35,9 +35,9 @@ from dataclasses import dataclass, field
 from importlib.abc import SourceLoader
 
 import requests
-from herokutl.hints import EntityLike
-from herokutl.tl.functions.account import UpdateNotifySettingsRequest
-from herokutl.tl.types import (
+from hikkaritl.hints import EntityLike
+from hikkaritl.tl.functions.account import UpdateNotifySettingsRequest
+from hikkaritl.tl.types import (
     Channel,
     ChannelForbidden,
     ChannelFull,

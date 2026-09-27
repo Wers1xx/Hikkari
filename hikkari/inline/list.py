@@ -25,9 +25,9 @@ import time
 import traceback
 import typing
 
-from herokutl.errors.rpcerrorlist import FloodWaitError
-from herokutl.errors.rpcerrorlist import ChatSendInlineForbiddenError
-from herokutl.tl.types import Message
+from hikkaritl.errors.rpcerrorlist import FloodWaitError
+from hikkaritl.errors.rpcerrorlist import ChatSendInlineForbiddenError
+from hikkaritl.tl.types import Message
 
 from .. import main, utils
 from ..types import HikkariReplyMarkup

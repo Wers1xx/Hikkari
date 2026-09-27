@@ -27,13 +27,13 @@ import typing
 from urllib.parse import urlparse
 
 import emoji
-import herokutl
+import hikkaritl
 import requests
-from herokutl import hints
-from herokutl.tl.custom.message import Message
-from herokutl.tl.functions.account import UpdateNotifySettingsRequest
-from herokutl.tl.functions.channels import CreateChannelRequest, EditPhotoRequest
-from herokutl.tl.functions.messages import (
+from hikkaritl import hints
+from hikkaritl.tl.custom.message import Message
+from hikkaritl.tl.functions.account import UpdateNotifySettingsRequest
+from hikkaritl.tl.functions.channels import CreateChannelRequest, EditPhotoRequest
+from hikkaritl.tl.functions.messages import (
     CreateForumTopicRequest,
     EditForumTopicRequest,
     GetDialogFiltersRequest,
@@ -42,7 +42,7 @@ from herokutl.tl.functions.messages import (
     SetHistoryTTLRequest,
     UpdateDialogFilterRequest,
 )
-from herokutl.tl.types import (
+from hikkaritl.tl.types import (
     Channel,
     ForumTopic,
     ForumTopicDeleted,
@@ -100,7 +100,7 @@ FormattingEntity = typing.Union[
     MessageEntitySpoiler,
 ]
 
-parser = herokutl.utils.sanitize_parse_mode("html")
+parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 
 TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9\-]*)(?:\s[^<>]*)?>")
@@ -331,7 +331,7 @@ async def asset_channel(
             folder = next(
                 folder
                 for folder in folders
-                if not isinstance(folder, herokutl.tl.types.DialogFilterDefault)
+                if not isinstance(folder, hikkaritl.tl.types.DialogFilterDefault)
                 and folder.title.text.lower() == _folder.lower()
             )
         except Exception:
@@ -616,7 +616,7 @@ def get_chat_id(message: Message) -> int:
     :param message: Message to get chat ID from
     :return: Chat ID
     """
-    return herokutl.utils.resolve_id(
+    return hikkaritl.utils.resolve_id(
         getattr(message, "chat_id", None)
         or getattr(getattr(message, "chat", None), "id", None)
     )[0]
@@ -628,7 +628,7 @@ def get_entity_id(entity: hints.Entity) -> int:
     :param entity: Entity to get ID from
     :return: Entity ID
     """
-    return herokutl.utils.get_peer_id(entity)
+    return hikkaritl.utils.get_peer_id(entity)
 
 
 def escape_html(text: str, /) -> str:  # sourcery skip

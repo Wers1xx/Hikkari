@@ -18,8 +18,8 @@
 
 import logging
 
-from herokutl.tl.types import Message
-from herokutl.utils import get_display_name
+from hikkaritl.tl.types import Message
+from hikkaritl.utils import get_display_name
 
 from .. import loader, main, utils
 from ..inline.types import InlineCall

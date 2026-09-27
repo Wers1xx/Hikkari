@@ -23,10 +23,10 @@ import logging
 import random
 import time
 
-from herokutl.tl import functions
-from herokutl.tl.tlobject import TLRequest
-from herokutl.tl.types import Message
-from herokutl.utils import is_list_like
+from hikkaritl.tl import functions
+from hikkaritl.tl.tlobject import TLRequest
+from hikkaritl.tl.types import Message
+from hikkaritl.utils import is_list_like
 
 from .. import loader, utils
 from ..inline.types import InlineCall

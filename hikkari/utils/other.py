@@ -27,20 +27,20 @@ import sys
 import typing
 import warnings
 
-import herokutl
-from herokutl import hints
-from herokutl.tl.functions.channels import (
+import hikkaritl
+from hikkaritl import hints
+from hikkaritl.tl.functions.channels import (
     EditAdminRequest,
     InviteToChannelRequest,
 )
-from herokutl.tl.types import (
+from hikkaritl.tl.types import (
     ChatAdminRights,
 )
 
 from ..tl_cache import CustomTelegramClient
 from ..types import ListLike
 
-parser = herokutl.utils.sanitize_parse_mode("html")
+parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 
 

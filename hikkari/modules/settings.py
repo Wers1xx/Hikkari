@@ -17,8 +17,8 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import contextlib
-import herokutl
-from herokutl.tl.types import Message, User
+import hikkaritl
+from hikkaritl.tl.types import Message, User
 
 from .. import loader, main, utils, version
 from ..inline.types import InlineCall
@@ -118,7 +118,7 @@ class CoreMod(loader.Module):
                 ),
                 *version.__version__,
                 utils.get_commit_url(),
-                f"{herokutl.__version__} #{herokutl.tl.alltlobjects.LAYER}",
+                f"{hikkaritl.__version__} #{hikkaritl.tl.alltlobjects.LAYER}",
             )
             + (branch_text),
             reply_to=getattr(message, "reply_to_msg_id", None),

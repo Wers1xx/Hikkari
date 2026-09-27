@@ -19,7 +19,7 @@
 import logging
 import typing
 
-from herokutl.tl import types
+from hikkaritl.tl import types
 
 HikkariReplyMarkup = typing.Union[list[list[dict]], list[dict], dict]
 
