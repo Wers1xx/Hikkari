@@ -16,9 +16,12 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
-"""Represents current userbot version"""
+"""Represents current userbot version.
 
-__version__ = (1, 0, 0)
+Rule: each update/fix bumps patch by +0.0.1 (x.y.z → x.y.z+1).
+"""
+
+__version__ = (1, 0, 23)
 
 import os
 
