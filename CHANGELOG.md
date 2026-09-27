@@ -1,5 +1,5 @@
 # Hikkari Changelog
-## 🪐 Hikkari 2.1.0
+## ✨ Hikkari 2.1.0
 
  - fix security check in help
  - fix blockquote in config and info
@@ -130,7 +130,7 @@
  - store bot's ID and user information in client instance
  - enhance reaction handling and improve message text update logic
 
-## 🪐 Hikkari 2.0.0
+## ✨ Hikkari 2.0.0
 
 - rework utils
 - add prefix to start message
@@ -247,7 +247,7 @@
 - fix restore button invoke
 - improve logging logic
 
-## 🪐 Hikkari 1.7.2
+## ✨ Hikkari 1.7.2
 
 - added autoupdate
 - updated hikkari-tl to 1.7.2
@@ -284,7 +284,7 @@
 - added quote for list commands in help
 - fix banner in .presets command
 
-## 🪐 Hikkari 1.7.1
+## ✨ Hikkari 1.7.1
 
 - fixed bug with web 
 - fixed bug with executor
@@ -301,7 +301,7 @@
 - fixed error with "method not mounted"
 - added bot polling sleep log to ignore filter
 
-## 🪐 Hikkari 1.7.0
+## ✨ Hikkari 1.7.0
 
 - added banner to ping
 - added config for emoji in config (.cfg hikkariconfig)
@@ -325,7 +325,7 @@
 - updated inline bot stack
 - fix some bugs with buttons in inline
 
-## 🪐 Hikkari 1.6.8
+## ✨ Hikkari 1.6.8
 
 - Finally renamed to Hikkari and new Emoji
 - many changes and improvements

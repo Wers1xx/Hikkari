@@ -114,7 +114,7 @@ class CoreMod(loader.Module):
                 (
                     utils.get_platform_emoji()
                     if self._client.hikkari_me.premium
-                    else "🪐 <b>Hikkari userbot</b>"
+                    else "✨ <b>Hikkari userbot</b>"
                 ),
                 *version.__version__,
                 utils.get_commit_url(),

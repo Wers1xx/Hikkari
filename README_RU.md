@@ -152,7 +152,7 @@ sudo apt update && sudo apt upgrade -y && sudo apt install python3 git python3-p
   
  1. Перейдите в [@hikkahost_bot](https://.me/hikkahost_bot)
 2. Нажмите "Установить"
-3. Выберите "🪐 Hikkari"
+3. Выберите "✨ Hikkari"
 И продолжайте установку.
 
 > **После этого вы получите ссылку, откройте ее и войдите в свою учетную запись.**

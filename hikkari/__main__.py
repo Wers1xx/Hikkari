@@ -104,6 +104,19 @@ def get_file_hash(filename):
 
 
 def deps():
+    # Full hikkaritl from GitHub (public). If private, use token URL once.
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--force-reinstall",
+            "git+https://github.com/Wers1xx/hikkaritl.git@master",
+        ],
+        check=False,
+    )
     subprocess.run(
         [
             sys.executable,
@@ -117,7 +130,7 @@ def deps():
             "-r",
             "requirements.txt",
         ],
-        check=True,
+        check=False,
         timeout=600,
         capture_output=True,
     )
@@ -156,18 +169,46 @@ elif __package__ != "hikkari":
 else:
     try:
         import hikkaritl
-    except Exception:
-        pass
-    else:
-        try:
-            import hikkaritl  # noqa: F811
 
-            if tuple(map(int, hikkaritl.__version__.split("."))) < (1, 7, 2):
-                raise ImportError
-        except ImportError:
-            print("\U0001f504 Installing dependencies...")
+        # Full library must expose .tl (thin wrapper does not)
+        if not hasattr(hikkaritl, "tl"):
+            raise ImportError("hikkaritl missing .tl")
+    except Exception:
+        print("\U0001f504 Installing dependencies...")
+        try:
             deps()
-            restart()
+        except Exception as e:
+            print(f"requirements.txt install failed: {e}")
+            print("Trying hikkaritl from GitHub...")
+            import subprocess as _sp
+
+            _sp.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "--force-reinstall",
+                    "git+https://github.com/Wers1xx/hikkaritl.git@master",
+                ],
+                check=False,
+            )
+            _sp.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "-q",
+                    "--disable-pip-version-check",
+                    "-r",
+                    "requirements.txt",
+                ],
+                check=False,
+            )
+        restart()
 
     try:
         from . import log

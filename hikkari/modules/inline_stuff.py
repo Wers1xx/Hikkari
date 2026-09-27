@@ -66,7 +66,7 @@ class InlineStuff(loader.Module):
 
         await message.delete()
 
-        m = await message.respond("🪐", reply_to=utils.get_topic(message))
+        m = await message.respond("✨", reply_to=utils.get_topic(message))
 
         await self.inline.gallery(
             message=m,
@@ -155,7 +155,7 @@ class InlineStuff(loader.Module):
             self._db.set("hikkari.inline", "bot_token", None)
         await utils.answer(
             message,
-            "🪐 <b>Ок!</b> Создаю инлайн-бота через @BotFather.\n"
+            "✨ <b>Ок!</b> Создаю инлайн-бота через @BotFather.\n"
             "Перезапуск…",
         )
         await self._restart_userbot(message)
@@ -169,7 +169,7 @@ class InlineStuff(loader.Module):
         self._db.set("hikkari.inline", "bot_token", None)
         await utils.answer(
             message,
-            "🪐 <b>Инлайн отключён.</b>\n"
+            "✨ <b>Инлайн отключён.</b>\n"
             "Можно включить позже: <code>{}yesbot</code> или "
             "<code>{}ch_bot_token &lt;token&gt;</code>".format(
                 self.get_prefix(), self.get_prefix()
@@ -182,9 +182,9 @@ class InlineStuff(loader.Module):
             case "/start":
                 await message.answer(self.strings["this_is_hikkari"].format(
                         (
-                            "<tg-emoji emoji-id=5463379725441341739>🪐</tg-emoji>"
+                            "<tg-emoji emoji-id=5463379725441341739>✨</tg-emoji>"
                             if self._client.hikkari_me.premium is True
-                            else "🪐"
+                            else "✨"
                         ),
                         utils.get_platform_emoji() if self._client.hikkari_me.premium is True else "Hikkari",
                     ),

@@ -155,7 +155,7 @@ python3 -m hikkari
   
   1. Go to [@hikkahost_bot](https://t.me/hikkahost_bot)
   2. Press "Install"
-  3. Choose "🪐 Hikkari"
+  3. Choose "✨ Hikkari"
   And continue installation.
   > **After that, you will receive a link, open it and login in your account.**
 
