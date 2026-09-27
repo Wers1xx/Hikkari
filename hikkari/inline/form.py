@@ -352,10 +352,14 @@ class Form(InlineUnit):
             m = await self._invoke_unit(unit_id, message)
         except ChatSendInlineForbiddenError:
             await answer(self.translator.getkey("inline.inline403"))
+            with contextlib.suppress(Exception):
+                del self._units[unit_id]
+            return False
         except Exception as e:
             logger.exception("Can't send form")
 
-            del self._units[unit_id]
+            with contextlib.suppress(Exception):
+                del self._units[unit_id]
 
             if "No query results" in str(e):
                 await answer(
@@ -377,21 +381,37 @@ class Form(InlineUnit):
 
             return False
 
-        await self._units[unit_id]["future"].wait()
-        del self._units[unit_id]["future"]
-
+        # Save chat/msg immediately from clicked result
         self._units[unit_id]["chat"] = utils.get_chat_id(m)
         self._units[unit_id]["message_id"] = m.id
 
+        # Delete original command / status ASAP (do not wait for chosen feedback)
         if isinstance(message, Message) and message.out:
             with contextlib.suppress(Exception):
                 await message.delete()
-
-        if status_message and not message.out:
+        if status_message is not None:
             with contextlib.suppress(Exception):
                 await status_message.delete()
+            # if status was an edit of inbound reply path, also try delete original
+            if isinstance(message, Message) and not message.out:
+                with contextlib.suppress(Exception):
+                    await message.delete()
 
-        inline_message_id = self._units[unit_id]["inline_message_id"]
+        # Wait for UpdateBotInlineSend to get inline_message_id (needed for edit)
+        # Timeout: without BotFather /setinlinefeedback this never arrives
+        try:
+            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=8)
+        except (asyncio.TimeoutError, KeyError):
+            logger.warning(
+                "Inline form %s: no chosen_inline feedback in 8s "
+                "(enable /setinlinefeedback in @BotFather). Continuing without it.",
+                unit_id,
+            )
+        with contextlib.suppress(Exception):
+            if "future" in self._units.get(unit_id, {}):
+                del self._units[unit_id]["future"]
+
+        inline_message_id = self._units[unit_id].get("inline_message_id")
 
         msg = InlineMessage(
             inline_manager=self, unit_id=unit_id, inline_message_id=inline_message_id

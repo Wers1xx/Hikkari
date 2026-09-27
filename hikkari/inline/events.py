@@ -338,21 +338,31 @@ class Events(InlineUnit):
         self: "InlineManager",
         chosen_inline_query,
     ):
+        # Accept UpdateBotInlineSend or duck-typed updates with .query / .msg_id
         if not isinstance(chosen_inline_query, UpdateBotInlineSend):
-            return
+            if not (
+                hasattr(chosen_inline_query, "query")
+                and (
+                    hasattr(chosen_inline_query, "msg_id")
+                    or hasattr(chosen_inline_query, "id")
+                )
+            ):
+                return
 
-        query = chosen_inline_query.query
+        query = getattr(chosen_inline_query, "query", None)
 
         if not query:
             return
 
+        query_key = str(query).strip().split()[0] if query else ""
+
         for unit_id, unit in self._units.items():
             if (
-                unit_id == query
+                unit_id in (query, query_key)
                 and "future" in unit
                 and isinstance(unit["future"], Event)
             ):
-                unit["inline_message_id"] = chosen_inline_query.msg_id
+                unit["inline_message_id"] = getattr(chosen_inline_query, "msg_id", None)
                 unit["future"].set()
                 return
 
