@@ -16,6 +16,9 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+import contextlib
+import os
+import sys
 import re
 import string
 import random
@@ -141,7 +144,7 @@ class InlineStuff(loader.Module):
             "🪐 <b>Ок!</b> Создаю инлайн-бота через @BotFather.\n"
             "Перезапуск…",
         )
-        await self.invoke("restart", "-f", peer=message.peer_id)
+        await self._restart_userbot(message)
 
     @loader.command()
     async def nobot(self, message: Message):
@@ -182,7 +185,7 @@ class InlineStuff(loader.Module):
                             [
                                 {
                                     "text": self.strings["support_chat_caption"],
-                                    "url": "https://t.me/Hikkari_Support",
+                                    "url": "https://t.me/Hikkari_talks",
                                     "emoji_id": "5363805650327450240",
                                 }
                             ],

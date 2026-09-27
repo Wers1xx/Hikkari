@@ -44,6 +44,8 @@ class HikkariBackupMod(loader.Module):
     strings = {"name": "HikkariBackup"}
 
     async def client_ready(self):
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
         if not self.get("period"):
             await self.inline.bot.send_message(self.tg_id, self.strings["period"],
                 reply_markup=self.inline.generate_markup(

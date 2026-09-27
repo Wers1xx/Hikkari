@@ -300,8 +300,10 @@ async def asset_channel(
     ).chats[0]
 
     if invite_bot:
-        await fw_protect()
-        await invite_inline_bot(client, peer)
+        bot_u = getattr(getattr(getattr(client, "loader", None), "inline", None), "bot_username", None)
+        if bot_u:
+            await fw_protect()
+            await invite_inline_bot(client, peer)
 
     if silent:
         await fw_protect()

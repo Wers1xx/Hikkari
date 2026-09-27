@@ -31,6 +31,8 @@ class Quickstart(loader.Module):
     strings = {"name": "Quickstart"}
 
     async def client_ready(self):
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
         self.text = lambda: self.strings["base"].format(
             utils.get_platform_emoji()
             if self.client.hikkari_me.premium is True
@@ -152,7 +154,7 @@ class Quickstart(loader.Module):
             [
                 {
                     "text": self.strings["btn_support"],
-                    "url": "https://t.me/Hikkari_Support",
+                    "url": "https://t.me/Hikkari_talks",
                 }
             ],
         ] + utils.chunks(

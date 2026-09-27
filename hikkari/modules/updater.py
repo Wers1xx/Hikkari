@@ -650,6 +650,8 @@ class UpdaterMod(loader.Module):
         )
 
     async def client_ready(self):
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
         try:
             with git.Repo():
                 pass

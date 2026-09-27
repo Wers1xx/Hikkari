@@ -112,6 +112,8 @@ class Presets(loader.Module):
     strings = {"name": "Presets"}
 
     async def client_ready(self):
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
         self._markup_gen = functools.partial(
             utils.chunks,
             [

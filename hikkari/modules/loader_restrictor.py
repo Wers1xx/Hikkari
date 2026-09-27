@@ -79,6 +79,8 @@ class LoaderRestrictor(loader.Module):
     strings = {"name": "LoaderRestrictor"}
 
     async def client_ready(self):
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
         self.poll: PollStatus | None = None
 
         if not self.get("passed", False):
