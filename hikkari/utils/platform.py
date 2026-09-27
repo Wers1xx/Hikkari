@@ -122,32 +122,15 @@ def get_named_platform_emoji() -> str:
 
 def get_platform_emoji() -> str:
     """
-    Returns custom emoji for current platform
+    Returns Hikkari brand custom emoji row (start / restart / banners).
     :return: Emoji entity in string
     """
-
-    BASE = "".join(
-        (
-            "<tg-emoji emoji-id={}>✨</tg-emoji>",
-            "<tg-emoji emoji-id=5352934134618549768>✨</tg-emoji>",
-            "<tg-emoji emoji-id=5352663371290271790>✨</tg-emoji>",
-            "<tg-emoji emoji-id=5350822883314655367>✨</tg-emoji>",
-        )
+    # Fixed ✨ set (replaces old 🪐 quartet)
+    return (
+        "<tg-emoji emoji-id=5316508272168052168>✨</tg-emoji>"
+        "<tg-emoji emoji-id=5316660576003336067>✨</tg-emoji>"
+        "<tg-emoji emoji-id=5316801992096524468>✨</tg-emoji>"
     )
-
-    match True:
-
-        case _ if IS_HIKKAHOST:
-            return BASE.format(5395745114494624362)
-
-        case _ if IS_USERLAND:
-            return BASE.format(5458877818031077824)
-
-        case _ if IS_DOCKER:
-            return BASE.format(5352678227582152630)
-
-        case _:
-            return BASE.format(5393588431026674882)
 
 
 def uptime() -> int:
