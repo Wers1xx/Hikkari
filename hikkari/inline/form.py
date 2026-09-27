@@ -17,6 +17,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import contextlib
+from pathlib import Path
 import copy
 import logging
 import os
@@ -166,12 +167,19 @@ class Form(InlineUnit):
             )
             return False
 
-        if photo and (not isinstance(photo, str) or not utils.check_url(photo)):
-            logger.error(
-                "Invalid type for `photo`. Expected `str` with URL, got `%s`",
-                type(photo),
-            )
-            return False
+        if photo is not None:
+            if not isinstance(photo, str):
+                logger.error(
+                    "Invalid type for `photo`. Expected `str` (URL or local path), got `%s`",
+                    type(photo),
+                )
+                return False
+            if not utils.check_url(photo) and not Path(photo).is_file():
+                logger.error(
+                    "Invalid `photo`: not a URL and not an existing file: %s",
+                    photo,
+                )
+                return False
 
         try:
             path = urlparse(photo).path

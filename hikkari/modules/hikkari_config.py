@@ -1405,9 +1405,12 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
+        from .. import main as _main
+        _cfg_banner = _main.BASE_PATH / "assets" / "hikkari-config.jpg"
         await utils.answer(
             call,
             self.strings["choose_core"],
+            photo=str(_cfg_banner) if _cfg_banner.is_file() else None,
             reply_markup=[
                 [
                     {
@@ -1461,6 +1464,10 @@ class HikkariConfigMod(loader.Module):
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
 
+        from .. import main as _main
+        _cfg_banner = _main.BASE_PATH / "assets" / "hikkari-config.jpg"
+        if "photo" not in form_kwargs and _cfg_banner.is_file():
+            form_kwargs["photo"] = str(_cfg_banner)
         await self.inline.form(
             draft.text,
             message=message,
