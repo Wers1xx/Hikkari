@@ -113,7 +113,7 @@ def deps():
             "install",
             "--upgrade",
             "--force-reinstall",
-            "git+https://github.com/Wers1xx/hikkaritl.git@master",
+            "hikkaritl>=1.1.2",
         ],
         check=False,
     )
@@ -190,7 +190,7 @@ else:
                     "install",
                     "--upgrade",
                     "--force-reinstall",
-                    "git+https://github.com/Wers1xx/hikkaritl.git@master",
+                    "hikkaritl>=1.1.2",
                 ],
                 check=False,
             )
