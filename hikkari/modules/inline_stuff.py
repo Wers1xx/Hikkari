@@ -35,6 +35,19 @@ class InlineStuff(loader.Module):
 
     strings = {"name": "InlineStuff"}
 
+
+    async def _restart_userbot(self, message: Message = None):
+        """Soft restart without requiring RestartMod."""
+        if message is not None:
+            with contextlib.suppress(Exception):
+                await utils.answer(message, "🔄 <b>Restarting…</b>")
+        # flush db if possible
+        with contextlib.suppress(Exception):
+            if hasattr(self, "_db") and hasattr(self._db, "save"):
+                await self._db.save()
+        os.execl(sys.executable, sys.executable, "-m", "hikkari", *sys.argv[1:])
+
+
     @loader.watcher(
         "out",
         "only_inline",
@@ -161,6 +174,7 @@ class InlineStuff(loader.Module):
                 self.get_prefix(), self.get_prefix()
             ),
         )
+        await self._restart_userbot(message)
 
     async def bot_watcher(self, message: BotInlineMessage):
         match message.text:
