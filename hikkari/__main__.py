@@ -211,6 +211,10 @@ else:
         restart()
 
     try:
+        os.environ.pop('HIKKARI_DO_NOT_RESTART', None)
+        os.environ.pop('HIKKARI_DO_NOT_RESTART2', None)
+        os.environ.pop('HEROKU_DO_NOT_RESTART', None)
+        os.environ.pop('HEROKU_DO_NOT_RESTART2', None)
         from . import log
 
         log.init()

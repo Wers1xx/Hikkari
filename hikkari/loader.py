@@ -193,9 +193,12 @@ def patched_import(name: str, *args, **kwargs):
                     return native_import("hikkaritl" + name[8:], *args, **kwargs)
                 except ImportError:
                     return native_import(name, *args, **kwargs)
+            case s if s.startswith("hikkaritl"):
+                return native_import(name, *args, **kwargs)
             case s if s.startswith("hikkalls"):
                 return native_import(name, *args, **kwargs)
-            case s if s.startswith("hikka"):
+            case s if s.startswith("hikka") and not s.startswith("hikkaritl"):
+                # hikka.* → hikkari.*  (NOT hikkaritl)
                 return native_import("hikkari" + name[5:], *args, **kwargs)
 
         return native_import(name, *args, **kwargs)

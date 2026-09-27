@@ -56,9 +56,9 @@ def restart():
     if "--sandbox" in " ".join(sys.argv):
         exit(0)
 
-    if "HEROKU_DO_NOT_RESTART2" in os.environ:
+    if "HIKKARI_DO_NOT_RESTART2" in os.environ:
         print(
-            "HerokuTL version 1.0.2 or higher is required, use `pip install heroku-tl-new -U` for update."
+            "hikkaritl is required. Run: pip install -U hikkaritl"
         )
         sys.exit(0)
 
@@ -66,10 +66,10 @@ def restart():
 
     print("🔄 Restarting...")
 
-    if "HEROKU_DO_NOT_RESTART" not in os.environ:
-        os.environ["HEROKU_DO_NOT_RESTART"] = "1"
+    if "HIKKARI_DO_NOT_RESTART" not in os.environ:
+        os.environ["HIKKARI_DO_NOT_RESTART"] = "1"
     else:
-        os.environ["HEROKU_DO_NOT_RESTART2"] = "1"
+        os.environ["HIKKARI_DO_NOT_RESTART2"] = "1"
 
     if "DOCKER" in os.environ or sys.platform == "win32":
         atexit.register(get_startup_callback())
