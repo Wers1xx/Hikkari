@@ -341,18 +341,12 @@ class TestMod(loader.Module):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
         message = await utils.answer(message, self.config["ping_emoji"])
-        banner = self.config["banner_url"]
-        if not banner:
+        banner = str(self.config["banner_url"]) if self.config["banner_url"] else None
+
+        if self.config["banner_url"] and self.config["quote_media"] is True:
+            banner = InputMediaWebPage(str(self.config["banner_url"]), optional=True)
+        elif not self.config["banner_url"]:
             banner = None
-        else:
-            banner = str(banner)
-            # webpage preview only for http(s) links when quote_media enabled
-            if self.config["quote_media"] and banner.startswith(("http://", "https://")):
-                # if looks like audio file extension, send as file not webpage
-                if any(banner.lower().endswith(ext) for ext in (".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus")):
-                    pass  # keep as URL/file for telethon to handle
-                else:
-                    banner = InputMediaWebPage(banner, optional=True)
 
         from .. import version as ver_mod
         import hikkaritl
@@ -399,14 +393,6 @@ class TestMod(loader.Module):
             placeholders_msg,
             file=banner,
             invert_media=self.config["invert_media"],
-            link_preview=bool(
-                self.config["quote_media"]
-                and banner is not None
-                and (
-                    isinstance(banner, InputMediaWebPage)
-                    or (isinstance(banner, str) and banner.startswith(("http://", "https://")))
-                )
-            ),
         )
 
     async def client_ready(self):

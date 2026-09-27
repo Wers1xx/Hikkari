@@ -205,7 +205,7 @@ class HikkariInfoMod(loader.Module):
                 media = _main.BASE_PATH / "assets" / raw_banner[6:]
                 if not media.is_file():
                     media = None
-            elif self.config["quote_media"] is True and raw_banner.startswith(("http://", "https://")):
+            elif self.config["quote_media"] is True:
                 media = InputMediaWebPage(raw_banner, optional=True)
             else:
                 media = raw_banner
@@ -219,7 +219,7 @@ class HikkariInfoMod(loader.Module):
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
                         invert_media=self.config["invert_media"],
-                        link_preview=bool(self.config["quote_media"] and media is not None),
+                        
                     )
                 case _:
                     if "{ping}" in self.config["custom_message"]:
@@ -230,7 +230,7 @@ class HikkariInfoMod(loader.Module):
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
                         invert_media=self.config["invert_media"],
-                        link_preview=bool(self.config["quote_media"] and media is not None),
+                        
                     )
         except WebpageMediaEmptyError:
             await utils.answer(

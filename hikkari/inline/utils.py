@@ -232,28 +232,56 @@ class Utils(InlineUnit):
     generate_markup = _generate_markup
 
     async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        if call._units is None:
-            logger.error(
-                "call._units is None. Please report this issue to the developers. "
-                "Debug info: %s",
-                call.model_dump_json(),
-            )
-            try:
+        """Close/delete an inline form message (Heroku-compatible, None-safe)."""
+        try:
+            unit = None
+            if getattr(call, "_units", None) and getattr(call, "unit_id", None):
+                unit = call._units.get(call.unit_id)
+
+            chat = None
+            msg_id = None
+            if isinstance(unit, dict):
+                chat = unit.get("chat")
+                msg_id = unit.get("message_id")
+
+            if chat is None:
+                chat = getattr(call, "chat_id", None)
+            if msg_id is None:
+                msg_id = getattr(call, "message_id", None)
+
+            deleted = False
+            if chat is not None and msg_id is not None:
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(chat, [msg_id])
+                    deleted = True
+
+            if not deleted:
+                # Fallback: InlineMessage.delete / unit unload
+                with contextlib.suppress(Exception):
+                    if hasattr(call, "delete"):
+                        await call.delete()
+                        deleted = True
+
+            with contextlib.suppress(Exception):
+                await call.answer()
+
+            if unit and isinstance(unit, dict):
+                on_unload = unit.get("on_unload")
+                if callable(on_unload):
+                    with contextlib.suppress(Exception):
+                        r = on_unload()
+                        if hasattr(r, "__await__"):
+                            await r
+                if call._units is not None and call.unit_id in call._units:
+                    with contextlib.suppress(Exception):
+                        del call._units[call.unit_id]
+        except Exception:
+            logger.exception("Failed to close inline unit")
+            with contextlib.suppress(Exception):
                 await call.answer(
-                    "❌ The userbot couldn't delete this inline message. "
-                    "See logs for more details."
+                    "❌ Could not close this message",
+                    show_alert=True,
                 )
-            except Exception:
-                logger.exception(
-                    "I can't even properly notify the user about the error 😭"
-                )
-
-            return
-
-        return await self._client.delete_messages(
-            call._units.get(call.unit_id).get("chat"),
-            call._units.get(call.unit_id).get("message_id"),
-        )
 
     async def _unload_unit_handler(self: "InlineManager", call: InlineCall):
         await call.unload()

@@ -336,19 +336,7 @@ async def answer(
         await message.edit(response)
         return message
 
-    # InputMediaWebPage needs link preview enabled for quote_media
-    file_arg = kwargs.get("file")
-    try:
-        from hikkaritl.tl.types import InputMediaWebPage as _IMWP
-    except Exception:
-        try:
-            from herokutl.tl.types import InputMediaWebPage as _IMWP
-        except Exception:
-            _IMWP = tuple()
-    if _IMWP and isinstance(file_arg, _IMWP):
-        kwargs["link_preview"] = True
-    else:
-        kwargs.setdefault("link_preview", False)
+    kwargs.setdefault("link_preview", False)
 
     edit = message.out and not message.via_bot_id and not message.fwd_from
     match True:
@@ -407,26 +395,28 @@ async def answer(
 
                 return result
 
-        if edit:
-            result = await message.edit(
-                text,
-                parse_mode=lambda t: (t, entities),
-                **kwargs,
-            )
-        else:
-            file = kwargs.pop("file", None)
-            invert_media = kwargs.pop("invert_media", False)
+        # Heroku-style: always pop file/invert_media, handle on edit and send paths
+        file = kwargs.pop("file", None)
+        invert_media = kwargs.pop("invert_media", False)
 
-            if file is not None and invert_media:
-                reply_to = kwargs.pop("reply_to", None)
-
+        if file is not None and invert_media:
+            # Quote/invert: send plain text then edit with InputMediaWebPage + invert
+            reply_to = kwargs.pop("reply_to", None)
+            if edit:
+                result = await message.edit(
+                    text,
+                    file=file,
+                    parse_mode=lambda t: (t, entities),
+                    invert_media=True,
+                    **{k: v for k, v in kwargs.items() if k != "reply_to"},
+                )
+            else:
                 sent = await message.respond(
                     text,
                     parse_mode=lambda t: (t, entities),
                     reply_to=reply_to,
                     **kwargs,
                 )
-
                 result = await sent.edit(
                     text,
                     file=file,
@@ -434,7 +424,16 @@ async def answer(
                     invert_media=True,
                     **{k: v for k, v in kwargs.items() if k != "reply_to"},
                 )
-            elif file is not None:
+        elif file is not None:
+            if edit:
+                # Edit existing outbound message with media (InputMediaWebPage works here)
+                result = await message.edit(
+                    text,
+                    file=file,
+                    parse_mode=lambda t: (t, entities),
+                    **kwargs,
+                )
+            else:
                 reply_to = kwargs.pop(
                     "reply_to",
                     getattr(message, "reply_to_msg_id", get_topic(message)),
@@ -449,12 +448,18 @@ async def answer(
                 )
                 if message.out:
                     await message.delete()
-            else:
-                result = await message.respond(
-                    text,
-                    parse_mode=lambda t: (t, entities),
-                    **kwargs,
-                )
+        elif edit:
+            result = await message.edit(
+                text,
+                parse_mode=lambda t: (t, entities),
+                **kwargs,
+            )
+        else:
+            result = await message.respond(
+                text,
+                parse_mode=lambda t: (t, entities),
+                **kwargs,
+            )
     elif isinstance(response, Message):
         if message.media is None and (
             response.media is None
