@@ -123,9 +123,12 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                None,
+                [
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
+                ],
                 lambda: self.strings["banner_url"],
-                validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
+                validator=loader.validators.RandomLink(),
             ),
             loader.ConfigValue(
                 "quote_media",

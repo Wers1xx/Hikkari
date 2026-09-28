@@ -486,38 +486,61 @@ async def get_topic_id(db: "Database", topic_name: str) -> int | None:
 async def set_avatar(
     client: CustomTelegramClient,
     peer: hints.Entity,
-    avatar: str,
+    avatar: "str | bytes | None",
 ) -> bool:
     """
     Sets an entity avatar
     :param client: Client to use
     :param peer: Peer to set avatar to
-    :param avatar: Avatar to set
+    :param avatar: Avatar URL, local path, or raw bytes
     :return: True if avatar was set, False otherwise
     """
-    try:
-        if isinstance(avatar, str) and check_url(avatar):
-            f = (
-                await run_sync(
-                    requests.get,
-                    avatar,
-                )
-            ).content
-        elif isinstance(avatar, bytes):
-            f = avatar
-        else:
-            return False
+    from pathlib import Path as _Path
 
-        # Skip if downloaded content is empty or too small
-        if not f or len(f) < 1024:
+    try:
+        f = None
+        if isinstance(avatar, bytes):
+            f = avatar
+        elif isinstance(avatar, (str, _Path)):
+            avatar_s = str(avatar)
+            if check_url(avatar_s):
+                f = (
+                    await run_sync(
+                        requests.get,
+                        avatar_s,
+                    )
+                ).content
+            else:
+                path = _Path(avatar_s)
+                if path.is_file():
+                    f = path.read_bytes()
+        if not f or len(f) < 100:
             logger.warning("Avatar is empty or too small, skipping")
             return False
+
+        # Normalize image size for Telegram (avoid PhotoCropSizeSmallError)
+        try:
+            from io import BytesIO
+            from PIL import Image
+
+            im = Image.open(BytesIO(f))
+            w, h = im.size
+            if min(w, h) < 160:
+                scale = 160 / float(min(w, h))
+                im = im.resize((max(160, int(w * scale)), max(160, int(h * scale))), Image.LANCZOS)
+            if max(im.size) > 1280:
+                im.thumbnail((1280, 1280), Image.LANCZOS)
+            buf = BytesIO()
+            im.convert("RGB").save(buf, format="JPEG", quality=90)
+            f = buf.getvalue()
+        except Exception:
+            pass
 
         await fw_protect()
         res = await client(
             EditPhotoRequest(
                 channel=peer,
-                photo=await client.upload_file(f, file_name="photo.png"),
+                photo=await client.upload_file(f, file_name="photo.jpg"),
             )
         )
 

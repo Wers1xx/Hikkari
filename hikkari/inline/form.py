@@ -461,6 +461,15 @@ class Form(InlineUnit):
                     + self._client.dispatcher.security._owner
                     + unit.get("always_allow", [])
                 ):
+                    if not getattr(self, "_pending_config_input", None):
+                        self._pending_config_input = {}
+                    if button.get("handler"):
+                        self._pending_config_input[inline_query.from_user.id] = (
+                            button["handler"],
+                            unit.get("uid") if isinstance(unit, dict) else None,
+                            list(button.get("args") or []),
+                            dict(button.get("kwargs") or {}),
+                        )
                     await inline_query.answer(
                         [
                             await inline_query.builder.article(

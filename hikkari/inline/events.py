@@ -16,6 +16,7 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+import contextlib
 import inspect
 import logging
 import typing
@@ -37,6 +38,48 @@ class Events(InlineUnit):
         """Processes incoming messages"""
         if not message.is_private:
             return
+
+        # Config "enter value" PM fallback (when chosen_inline is unavailable)
+        pending = getattr(self, "_pending_config_input", None) or {}
+        uid = getattr(message, "sender_id", None) or getattr(
+            getattr(message, "from_id", None), "user_id", None
+        )
+        if uid in pending and (message.raw_text or message.message):
+            entry = pending.pop(uid, None)
+            if entry:
+                try:
+                    handler, unit_id, args, kwargs = entry
+                    value = (message.raw_text or message.message or "").strip()
+                    from .types import InlineCall
+
+                    self_ref = self
+
+                    class _PmCall:
+                        data = b""
+                        chat_id = None
+                        message_id = None
+                        inline_message_id = None
+                        sender_id = uid
+                        query = None
+
+                        async def answer(self, *a, **k):
+                            return None
+
+                        async def edit(self, *a, **k):
+                            try:
+                                return await self_ref._edit_unit(
+                                    *a, unit_id=unit_id, **k
+                                )
+                            except Exception:
+                                return False
+
+                    call = InlineCall(_PmCall(), self, unit_id)
+                    await handler(call, value, *args, **kwargs)
+                    with contextlib.suppress(Exception):
+                        await message.delete()
+                    return
+                except Exception:
+                    logger.exception("Pending config PM input failed")
 
         wrapped_message = self._bot_message(message)
         match True:

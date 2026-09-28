@@ -18,10 +18,10 @@
 
 """Represents current userbot version.
 
-Rule: each update/fix bumps patch by +0.0.1 (x.y.z → x.y.z+1).
+Rule: each update/fix bumps patch by +0.0.1 (e.g. 1.0.30 → 1.0.31) (x.y.z → x.y.z+1).
 """
 
-__version__ = (1, 0, 30)
+__version__ = (1, 0, 31)
 
 import os
 

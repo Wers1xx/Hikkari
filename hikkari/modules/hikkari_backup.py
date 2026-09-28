@@ -228,8 +228,10 @@ class HikkariBackupMod(loader.Module):
             with zipfile.ZipFile(io.BytesIO(file)) as zf:
                 db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
 
-            with contextlib.suppress(KeyError):
-                db_data["hikkari.inline"].pop("bot_token")
+            with contextlib.suppress(Exception):
+                if isinstance(db_data.get("hikkari.inline"), dict):
+                    db_data["hikkari.inline"].pop("bot_token", None)
+            db_data = self._protect_local_runtime(db_data)
 
             if not self._db.process_db_autofix(db_data):
                 raise RuntimeError("Attempted to restore broken database")
@@ -382,7 +384,8 @@ class HikkariBackupMod(loader.Module):
             return
 
         with contextlib.suppress(KeyError):
-            decoded_text["hikkari.inline"].pop("bot_token")
+            decoded_text["hikkari.inline"].pop("bot_token", None)
+            decoded_text = self._protect_local_runtime(decoded_text)
 
         if not self._db.process_db_autofix(decoded_text):
             raise RuntimeError("Attempted to restore broken database")
@@ -571,18 +574,116 @@ class HikkariBackupMod(loader.Module):
             ),
         )
 
-    @loader.command()
     def _normalize_db_dict(self, db_data: dict) -> dict:
         """Convert foreign package keys inside a loaded DB dict to hikkari.*"""
+        if not isinstance(db_data, dict):
+            return {}
         out = {}
         for key, value in db_data.items():
             new_key = key
-            for prefix in ("hikka.", "heroku.", "legacy."):
-                if isinstance(key, str) and key.startswith(prefix):
-                    new_key = "hikkari." + key[len(prefix) :]
-                    break
-            out[new_key] = value
+            if isinstance(key, str):
+                for prefix in ("hikka.", "heroku.", "legacy.", "friendly-telegram."):
+                    if key.startswith(prefix):
+                        new_key = "hikkari." + key[len(prefix) :]
+                        break
+            out[new_key] = self._scrub_foreign_value(value)
         return out
+
+    def _scrub_foreign_value(self, value):
+        """Recursively replace Heroku/Hikka/Legacy branding in strings."""
+        if isinstance(value, dict):
+            return {self._scrub_foreign_key(k): self._scrub_foreign_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._scrub_foreign_value(v) for v in value]
+        if isinstance(value, str):
+            s = value
+            repl = (
+                ("heroku.", "hikkari."),
+                ("hikka.", "hikkari."),
+                ("legacy.", "hikkari."),
+                ("Heroku userbot", "Hikkari userbot"),
+                ("Heroku Userbot", "Hikkari Userbot"),
+                ("Hikka userbot", "Hikkari userbot"),
+                ("Hikka Userbot", "Hikkari Userbot"),
+                ("Legacy userbot", "Hikkari userbot"),
+                ("Legacy Userbot", "Hikkari Userbot"),
+                ("heroku-userbot", "hikkari-userbot"),
+                ("hikka-userbot", "hikkari-userbot"),
+                ("legacy-userbot", "hikkari-userbot"),
+                ("@codrago", "@Wers1xx"),
+                ("@Codrago", "@Wers1xx"),
+                ("@zetgo", "@Wers1xx"),
+                ("@ZetGo", "@Wers1xx"),
+                ("@hikariatama", "@Wers1xx"),
+                ("github.com/coddrago/Heroku", "github.com/Wers1xx/Hikkari"),
+                ("github.com/hikariatama/Hikka", "github.com/Wers1xx/Hikkari"),
+                ("herokutl", "hikkaritl"),
+                ("heroku_tl", "hikkaritl"),
+            )
+            for a, b in repl:
+                s = s.replace(a, b)
+            return s
+        return value
+
+    def _scrub_foreign_key(self, key):
+        if not isinstance(key, str):
+            return key
+        for prefix in ("hikka.", "heroku.", "legacy.", "friendly-telegram."):
+            if key.startswith(prefix):
+                return "hikkari." + key[len(prefix) :]
+        return key
+
+    def _protect_local_runtime(self, db_data: dict) -> dict:
+        """Do not overwrite local inline bot, log chat, content channel on restore."""
+        if not isinstance(db_data, dict):
+            return db_data
+
+        def keep(owner: str, *keys):
+            cur = self._db.get(owner, None)
+            if not isinstance(cur, dict):
+                # flat get API: owner+key
+                section = db_data.setdefault(owner, {})
+                if not isinstance(section, dict):
+                    db_data[owner] = {}
+                    section = db_data[owner]
+                for k in keys:
+                    val = self._db.get(owner, k, None)
+                    if val is not None:
+                        section[k] = val
+                return
+            section = db_data.setdefault(owner, {})
+            if not isinstance(section, dict):
+                db_data[owner] = {}
+                section = db_data[owner]
+            for k in keys:
+                if k in cur and cur[k] is not None:
+                    section[k] = cur[k]
+
+        # Inline bot identity
+        keep(
+            "hikkari.inline",
+            "bot_token",
+            "bot_username",
+            "custom_bot",
+            "skip_inline",
+            "allow_auto_create",
+            "setup_prompted",
+        )
+        # Content / forums / assets channel
+        keep("hikkari.forums", "channel_id", "forums_cache")
+        keep("hikkari.main", "logchat", "log_chat", "logs_chat")
+        # Logger module may store logchat
+        for owner in list(db_data.keys()):
+            if not isinstance(owner, str):
+                continue
+            if owner.endswith(".log") or "logger" in owner.lower() or owner == "hikkari.modules.logger":
+                keep(owner, "logchat", "log_chat", "logs_chat")
+
+        # Never import foreign tokens leftover keys
+        for fk in ("hikka.inline", "heroku.inline", "legacy.inline"):
+            db_data.pop(fk, None)
+
+        return db_data
 
     def _extract_db_and_mods_from_zip(self, zf: "zipfile.ZipFile"):
         """
@@ -637,6 +738,7 @@ class HikkariBackupMod(loader.Module):
 
         return db_data, db_mods, mod_files
 
+    @loader.command()
     async def restoreall(self, message: Message):
         """Restore full backup (DB + modules) from Hikkari / Heroku / Legacy .backup"""
         if not (reply := await message.get_reply_message()) or not reply.media:
@@ -653,8 +755,10 @@ class HikkariBackupMod(loader.Module):
                     if self._is_foreign_backup(raw):
                         raw = self._convert(raw).getvalue().decode()
                     db_data = self._normalize_db_dict(orjson.loads(raw))
-                    with contextlib.suppress(KeyError):
-                        db_data["hikkari.inline"].pop("bot_token")
+                    with contextlib.suppress(Exception):
+                        if isinstance(db_data.get("hikkari.inline"), dict):
+                            db_data["hikkari.inline"].pop("bot_token", None)
+                    db_data = self._protect_local_runtime(db_data)
                     if not self._db.process_db_autofix(db_data):
                         raise RuntimeError("Broken database")
                     self._db.clear()
@@ -670,8 +774,10 @@ class HikkariBackupMod(loader.Module):
             with zipfile.ZipFile(zipfile_bytes) as zf:
                 db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
 
-            with contextlib.suppress(KeyError):
-                db_data["hikkari.inline"].pop("bot_token")
+            with contextlib.suppress(Exception):
+                if isinstance(db_data.get("hikkari.inline"), dict):
+                    db_data["hikkari.inline"].pop("bot_token", None)
+                db_data = self._protect_local_runtime(db_data)
             for foreign_key in (
                 "hikka.inline",
                 "heroku.inline",
@@ -679,6 +785,8 @@ class HikkariBackupMod(loader.Module):
             ):
                 with contextlib.suppress(KeyError):
                     db_data.get(foreign_key, {}).pop("bot_token", None)
+
+            db_data = self._protect_local_runtime(db_data)
 
             if not self._db.process_db_autofix(db_data):
                 raise RuntimeError("Attempted to restore broken database")

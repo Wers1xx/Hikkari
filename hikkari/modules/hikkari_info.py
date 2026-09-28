@@ -57,9 +57,12 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                "https://raw.githubusercontent.com/Wers1xx/assets/refs/heads/main/hikkari/hikkari_info.png",
-                lambda: self.strings["_cfg_banner"],
-                validator=loader.validators.Union(loader.validators.String(), loader.validators.NoneType()),
+                [
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+                ],
+                lambda: self.strings.get("_cfg_banner", self.strings.get("banner_url", "Banner URL(s)")),
+                validator=loader.validators.RandomLink(),
             ),
             loader.ConfigValue(
                 "ping_emoji",
