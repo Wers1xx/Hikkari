@@ -34,7 +34,7 @@ from hikkaritl.tl.types import Message
 
 from .. import loader, main, utils
 from .._internal import restart
-from ..inline.types import BotInlineCall
+from ..inline.types import BotInlineCall, InlineCall
 
 logger = logging.getLogger(__name__)
 
