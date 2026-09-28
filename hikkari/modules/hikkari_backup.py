@@ -815,7 +815,7 @@ class HikkariBackupMod(loader.Module):
 
     @loader.command()
     async def resetting(self, message: Message):
-        """Full factory reset — wipe DB, modules, sessions, config (like a fresh install)"""
+        """Factory reset — wipe DB and modules; Telegram session is kept"""
         await self.inline.form(
             message=message,
             text=self.strings["resetting_warn"],
@@ -882,16 +882,13 @@ class HikkariBackupMod(loader.Module):
         restart()
 
     def _factory_reset_files(self) -> int:
-        """Delete all user data so the next start is a clean install."""
+        """Wipe DB/settings/modules. Keep Telegram sessions (no re-login)."""
         root = Path(main.BASE_DIR)
         removed = 0
 
+        # NOTE: do NOT delete *.session / sessions/ — account stays authorized
         file_patterns = (
-            "config.json",
-            "config-*.json",
-            "*.session",
-            "*.session-journal",
-            "api_token.txt",
+            "config-*.json",  # per-account database
             ".requirements_hash",
             "db.json",
             "hikkari.db.json",
@@ -903,22 +900,19 @@ class HikkariBackupMod(loader.Module):
                         path.unlink()
                         removed += 1
 
-        # Nested session journals under sessions/
-        for pattern in ("*.session", "*.session-journal", "config-*.json"):
-            for path in root.rglob(pattern):
-                if path.is_file():
-                    with contextlib.suppress(Exception):
-                        path.unlink()
-                        removed += 1
+        # DB files nested anywhere except under .git
+        for path in root.rglob("config-*.json"):
+            if path.is_file() and ".git" not in path.parts:
+                with contextlib.suppress(Exception):
+                    path.unlink()
+                    removed += 1
 
         dir_names = (
             "loaded_modules",
-            "sessions",
             "hosted_bots",
             "bots_data",
             "timebot_files",
             "downloads",
-            "__pycache__",
         )
         for name in dir_names:
             path = root / name
@@ -927,7 +921,6 @@ class HikkariBackupMod(loader.Module):
                     shutil.rmtree(path, ignore_errors=True)
                     removed += 1
 
-        # BASE_PATH may differ slightly; wipe there too
         try:
             base = Path(main.BASE_PATH)
             if base != root and base.is_dir():
@@ -937,7 +930,7 @@ class HikkariBackupMod(loader.Module):
                             with contextlib.suppress(Exception):
                                 path.unlink()
                                 removed += 1
-                for name in ("loaded_modules", "sessions"):
+                for name in ("loaded_modules",):
                     path = base / name
                     if path.is_dir():
                         with contextlib.suppress(Exception):
