@@ -22,6 +22,7 @@ import datetime
 import io
 import logging
 import os
+import shutil
 import re
 import time
 import zipfile
@@ -31,7 +32,8 @@ from pathlib import Path
 
 from hikkaritl.tl.types import Message
 
-from .. import loader, utils
+from .. import loader, main, utils
+from .._internal import restart
 from ..inline.types import BotInlineCall
 
 logger = logging.getLogger(__name__)
@@ -809,3 +811,139 @@ class HikkariBackupMod(loader.Module):
 
         await utils.answer(status_message, self.strings["all_restored"])
         await self.invoke("restart", "-f", peer=message.peer_id)
+
+
+    @loader.command()
+    async def resetting(self, message: Message):
+        """Full factory reset — wipe DB, modules, sessions, config (like a fresh install)"""
+        await self.inline.form(
+            message=message,
+            text=self.strings["resetting_warn"],
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["resetting_yes"],
+                        "callback": self._resetting_confirm,
+                    }
+                ],
+                [
+                    {
+                        "text": self.strings["resetting_no"],
+                        "action": "close",
+                    }
+                ],
+            ],
+        )
+
+    async def _resetting_confirm(self, call: InlineCall):
+        await call.edit(
+            self.strings["resetting_warn2"],
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["resetting_yes_final"],
+                        "callback": self._resetting_run,
+                    }
+                ],
+                [
+                    {
+                        "text": self.strings["resetting_no"],
+                        "action": "close",
+                    }
+                ],
+            ],
+        )
+
+    async def _resetting_run(self, call: InlineCall):
+        with contextlib.suppress(Exception):
+            await call.edit(self.strings["resetting_running"])
+
+        removed = await utils.run_sync(self._factory_reset_files)
+
+        # Wipe in-memory database so nothing is rewritten on shutdown
+        with contextlib.suppress(Exception):
+            self._db.clear()
+            # prevent autosave of old data
+            if hasattr(self._db, "_saving_task") and self._db._saving_task:
+                self._db._saving_task.cancel()
+            db_file = getattr(self._db, "_db_file", None)
+            if db_file is not None and Path(db_file).exists():
+                Path(db_file).unlink(missing_ok=True)
+            if getattr(self._db, "_redis", None):
+                with contextlib.suppress(Exception):
+                    self._db._redis.delete(str(self._client.tg_id))
+
+        logger.warning("Factory reset done, removed=%s — restarting", removed)
+
+        with contextlib.suppress(Exception):
+            await call.edit(self.strings["resetting_done"].format(removed))
+
+        await asyncio.sleep(1)
+        restart()
+
+    def _factory_reset_files(self) -> int:
+        """Delete all user data so the next start is a clean install."""
+        root = Path(main.BASE_DIR)
+        removed = 0
+
+        file_patterns = (
+            "config.json",
+            "config-*.json",
+            "*.session",
+            "*.session-journal",
+            "api_token.txt",
+            ".requirements_hash",
+            "db.json",
+            "hikkari.db.json",
+        )
+        for pattern in file_patterns:
+            for path in root.glob(pattern):
+                if path.is_file():
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+                        removed += 1
+
+        # Nested session journals under sessions/
+        for pattern in ("*.session", "*.session-journal", "config-*.json"):
+            for path in root.rglob(pattern):
+                if path.is_file():
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+                        removed += 1
+
+        dir_names = (
+            "loaded_modules",
+            "sessions",
+            "hosted_bots",
+            "bots_data",
+            "timebot_files",
+            "downloads",
+            "__pycache__",
+        )
+        for name in dir_names:
+            path = root / name
+            if path.is_dir():
+                with contextlib.suppress(Exception):
+                    shutil.rmtree(path, ignore_errors=True)
+                    removed += 1
+
+        # BASE_PATH may differ slightly; wipe there too
+        try:
+            base = Path(main.BASE_PATH)
+            if base != root and base.is_dir():
+                for pattern in file_patterns:
+                    for path in base.glob(pattern):
+                        if path.is_file():
+                            with contextlib.suppress(Exception):
+                                path.unlink()
+                                removed += 1
+                for name in ("loaded_modules", "sessions"):
+                    path = base / name
+                    if path.is_dir():
+                        with contextlib.suppress(Exception):
+                            shutil.rmtree(path, ignore_errors=True)
+                            removed += 1
+        except Exception:
+            logger.exception("factory reset BASE_PATH wipe failed")
+
+        return removed
