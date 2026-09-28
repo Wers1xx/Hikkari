@@ -17,6 +17,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import asyncio
+import contextlib
 import io
 import json
 import logging
@@ -87,7 +88,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "threshold",
-                100,
+                120,
                 lambda: self.strings["_cfg_threshold"],
                 validator=loader.validators.Integer(minimum=10),
             ),
@@ -96,6 +97,18 @@ class APIRatelimiterMod(loader.Module):
                 30,
                 lambda: self.strings["_cfg_local_floodwait"],
                 validator=loader.validators.Integer(minimum=10, maximum=3600),
+            ),
+            loader.ConfigValue(
+                "read_weight",
+                0.35,
+                lambda: "Weight of bulk-read requests (ReadHistory/ReadMentions/GetChannels) toward freeze threshold",
+                validator=loader.validators.Float(minimum=0.05, maximum=1.0),
+            ),
+            loader.ConfigValue(
+                "soft_throttle_ms",
+                80,
+                lambda: "Soft delay (ms) between bulk-read requests when approaching limit",
+                validator=loader.validators.Integer(minimum=0, maximum=2000),
             ),
             loader.ConfigValue(
                 "forbidden_methods",
@@ -132,6 +145,18 @@ class APIRatelimiterMod(loader.Module):
 
         old_call = self._client._call
 
+        # Bulk-read TL methods often flood when InstantRead / dialogs sync runs
+        _READ_BULK = {
+            "ReadMentionsRequest",
+            "ReadHistoryRequest",
+            "GetChannelsRequest",
+            "GetFullChannelRequest",
+            "GetDialogsRequest",
+            "GetPeerDialogsRequest",
+            "GetParticipantRequest",
+            "GetParticipantsRequest",
+        }
+
         async def new_call(
             sender: "MTProtoSender",  # type: ignore  # noqa: F821
             request: TLRequest,
@@ -153,42 +178,61 @@ class APIRatelimiterMod(loader.Module):
                     )
                 ):
                     request_name = type(r).__name__
-                    self._ratelimiter += [(request_name, time.perf_counter())]
+                    now = time.perf_counter()
+                    is_read = request_name in _READ_BULK
+                    weight = float(self.config.get("read_weight", 0.35)) if is_read else 1.0
 
-                    self._ratelimiter = list(
-                        filter(
-                            lambda x: time.perf_counter() - x[1]
-                            < int(self.config["time_sample"]),
-                            self._ratelimiter,
-                        )
-                    )
+                    self._ratelimiter += [(request_name, now, weight)]
 
-                    if (
-                        len(self._ratelimiter) > int(self.config["threshold"])
-                        and not self._lock
-                    ):
+                    sample = int(self.config["time_sample"])
+                    self._ratelimiter = [
+                        x
+                        for x in self._ratelimiter
+                        if now - x[1] < sample
+                    ]
+
+                    # Weighted score: bulk-reads count less toward hard freeze
+                    score = sum(x[2] if len(x) > 2 else 1.0 for x in self._ratelimiter)
+                    threshold = float(self.config["threshold"])
+
+                    # Soft throttle when mostly bulk-reads and approaching limit
+                    if is_read and score > threshold * 0.45:
+                        delay_ms = int(self.config.get("soft_throttle_ms", 80) or 0)
+                        if delay_ms > 0:
+                            await asyncio.sleep(delay_ms / 1000)
+
+                    if score > threshold and not self._lock:
                         self._lock = True
-                        report_bytes = json.dumps(
-                            self._ratelimiter,
-                            indent=4,
-                        ).encode()
+                        # Strip weights for report compatibility
+                        report_data = [
+                            [name, ts] for name, ts, *_ in (
+                                (x[0], x[1], x[2] if len(x) > 2 else 1.0) for x in self._ratelimiter
+                            )
+                        ]
+                        report_bytes = json.dumps(report_data, indent=4).encode()
                         report = io.BytesIO(report_bytes)
                         report.name = "local_fw_report.json"
 
-                        await self.inline.bot.send_document(
-                            self.tg_id,
-                            report,
-                            caption=self.inline.sanitise_text(
-                                self.strings["warning"].format(
-                                    self.config["local_floodwait"],
-                                    prefix=utils.escape_html(self.get_prefix()),
-                                )
-                            ),
-                        )
+                        with contextlib.suppress(Exception):
+                            await self.inline.bot.send_document(
+                                self.tg_id,
+                                report,
+                                caption=self.inline.sanitise_text(
+                                    self.strings["warning"].format(
+                                        self.config["local_floodwait"],
+                                        prefix=utils.escape_html(self.get_prefix()),
+                                    )
+                                ),
+                            )
 
-                        # It is intented to use time.sleep instead of asyncio.sleep
-                        time.sleep(int(self.config["local_floodwait"]))
+                        # Non-blocking freeze: wait without freezing the whole process
+                        await asyncio.sleep(int(self.config["local_floodwait"]))
+                        self._ratelimiter.clear()
                         self._lock = False
+
+            # While locked, wait a bit so callers don't pile up more requests
+            while self._lock and time.perf_counter() > self._suspend_until:
+                await asyncio.sleep(0.2)
 
             return await old_call(sender, request, ordered, flood_sleep_threshold)
 
