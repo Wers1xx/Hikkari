@@ -564,7 +564,7 @@ api_protection:
 help:
   name: "Help"
   undoc: "🦥 No docs"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} mods available, {} hidden:</b>"
+  all_header: "<b>{} mods available, {} hidden:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>Specify module to hide</b>"

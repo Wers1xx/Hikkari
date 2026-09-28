@@ -530,7 +530,7 @@ api_protection:
 help:
   name: "Help"
   undoc: "🦥 No Man Page"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} mods installed, {} hidden:</b>"
+  all_header: "<b>{} mods installed, {} hidden:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>Specify module</b>"

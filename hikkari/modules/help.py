@@ -19,6 +19,7 @@
 import asyncio
 import difflib
 import inspect
+import contextlib
 import logging
 import re
 
@@ -93,7 +94,15 @@ class Help(loader.Module):
             ),
         )
 
+    async def client_ready(self):
+        # Overwrite stale Help config from old installs (▪️ / 🪐)
+        with contextlib.suppress(Exception):
+            self.config["core_emoji"] = "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>"
+            self.config["plain_emoji"] = "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"
+            self.config["desc_icon"] = "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
+
     def _get_banner_url(self, doc: str):
+
         match = re.search(r"# ?meta banner: ?(.+)", doc)
         return match.group(1).strip() if match else None
 
@@ -385,7 +394,7 @@ class Help(loader.Module):
             core = mod.__origin__.startswith("<core")
 
             tmp += "\n{} <code>{}</code>".format(
-                self.config["core_emoji"] if core else self.config["plain_emoji"], name
+                ("<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>" if core else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"), name
             )
             first = True
 
@@ -464,7 +473,7 @@ class Help(loader.Module):
                 await utils.answer(
                     message,
                     (
-                        self.config["desc_icon"]
+                        "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
@@ -482,7 +491,7 @@ class Help(loader.Module):
                 await utils.answer(
                     message,
                     (
-                        self.config["desc_icon"]
+                        "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
@@ -500,7 +509,7 @@ class Help(loader.Module):
                 await utils.answer(
                     message,
                     (
-                        self.config["desc_icon"]
+                        "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,

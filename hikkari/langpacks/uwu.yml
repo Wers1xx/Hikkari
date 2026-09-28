@@ -530,7 +530,7 @@ api_protection:
 help:
   name: "Hewp"
   undoc: "🦥 Nyo docs"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} mods avaiwabwe, {} hidden:</b>"
+  all_header: "<b>{} mods avaiwabwe, {} hidden:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>Specify moduwe to hide</b>"

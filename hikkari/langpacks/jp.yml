@@ -529,7 +529,7 @@ api_protection:
 help:
   name: "Help"
   undoc: "🦥 ドキュメントなし"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} 個のモジュールが利用可能、{} 個が非表示:</b>"
+  all_header: "<b>{} 個のモジュールが利用可能、{} 個が非表示:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>非表示にするモジュールを指定してください</b>"

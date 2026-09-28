@@ -529,7 +529,7 @@ api_protection:
 help:
   name: "H3lp"
   undoc: "🦥 N0 d0c5"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} m0d5 4v41l4bl3, {} h1dd3n:</b>"
+  all_header: "<b>{} m0d5 4v41l4bl3, {} h1dd3n:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>Sp3c1fy m0dul3 2 h1d3</b>"

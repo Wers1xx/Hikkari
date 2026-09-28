@@ -533,7 +533,7 @@ api_protection:
   _cls_doc: Помогает юзерботу не спамить Telegram API
 help:
   undoc: "<tg-emoji emoji-id=5469741319330996757>💫</tg-emoji> Нет описания"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} модулей доступно, {} скрыто:</b>"
+  all_header: "<b>{} модулей доступно, {} скрыто:</b>"
   help_core: "Встроенные"
   help_loaded: "Внешние"
   no_mod: "🚫 <b>Укажи модуль(-и), которые нужно скрыть</b>"

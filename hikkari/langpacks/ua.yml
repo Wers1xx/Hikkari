@@ -514,7 +514,7 @@ api_protection:
   _cls_doc: Допомагає юзерботу не спамити Telegram API
 help:
   undoc: "🦥 Немає опису"
-  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} модулів доступно, {} приховано:</b>"
+  all_header: "<b>{} модулів доступно, {} приховано:</b>"
   help_core: "Built-in"
   help_loaded: "External"
   no_mod: "🚫 <b>Вкажи модуль(-і), які потрібно приховати</b>"
