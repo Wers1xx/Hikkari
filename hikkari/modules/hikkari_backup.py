@@ -816,58 +816,94 @@ class HikkariBackupMod(loader.Module):
     @loader.command()
     async def resetting(self, message: Message):
         """Factory reset — wipe DB and modules; Telegram session is kept"""
-        await self.inline.form(
-            message=message,
-            text=self.strings["resetting_warn"],
-            reply_markup=[
-                [
+        args = (utils.get_args_raw(message) or "").strip().lower()
+        if args in {"yes", "confirm", "force", "-f", "--force"}:
+            await utils.answer(message, self.strings["resetting_running"])
+            await self._resetting_execute()
+            return
+
+        # Inline form (force_me + disable_security so owner button always works)
+        try:
+            await self.inline.form(
+                message=message,
+                text=self.strings["resetting_warn"],
+                force_me=True,
+                disable_security=True,
+                reply_markup=[
                     {
                         "text": self.strings["resetting_yes"],
                         "callback": self._resetting_confirm,
-                    }
-                ],
-                [
+                    },
                     {
                         "text": self.strings["resetting_no"],
                         "action": "close",
-                    }
+                    },
                 ],
-            ],
-        )
+            )
+        except Exception:
+            logger.exception("resetting form failed")
+            await utils.answer(
+                message,
+                self.strings["resetting_warn"]
+                + "
+
+<code>.resetting yes</code>",
+            )
 
     async def _resetting_confirm(self, call: InlineCall):
-        await call.edit(
-            self.strings["resetting_warn2"],
-            reply_markup=[
-                [
+        with contextlib.suppress(Exception):
+            await call.answer()
+
+        # New form instead of edit — more reliable for callback rebinding
+        try:
+            await self.inline.form(
+                message=None,
+                text=self.strings["resetting_warn2"],
+                force_me=True,
+                disable_security=True,
+                silent=True,
+                reply_markup=[
                     {
                         "text": self.strings["resetting_yes_final"],
                         "callback": self._resetting_run,
-                    }
-                ],
-                [
+                    },
                     {
                         "text": self.strings["resetting_no"],
                         "action": "close",
-                    }
+                    },
                 ],
-            ],
-        )
+            )
+            # Try to close/edit the first form
+            with contextlib.suppress(Exception):
+                await call.edit(self.strings["resetting_warn2"])
+        except Exception:
+            logger.exception("resetting confirm form failed")
+            with contextlib.suppress(Exception):
+                await call.edit(
+                    self.strings["resetting_warn2"]
+                    + "
+
+<code>.resetting yes</code>"
+                )
 
     async def _resetting_run(self, call: InlineCall):
         with contextlib.suppress(Exception):
+            await call.answer()
+        with contextlib.suppress(Exception):
             await call.edit(self.strings["resetting_running"])
 
+        await self._resetting_execute(call)
+
+    async def _resetting_execute(self, call: InlineCall | None = None):
         removed = await utils.run_sync(self._factory_reset_files)
 
-        # Wipe in-memory database so nothing is rewritten on shutdown
         with contextlib.suppress(Exception):
             self._db.clear()
-            # prevent autosave of old data
             if hasattr(self._db, "_saving_task") and self._db._saving_task:
-                self._db._saving_task.cancel()
+                with contextlib.suppress(Exception):
+                    self._db._saving_task.cancel()
             db_file = getattr(self._db, "_db_file", None)
-            if db_file is not None and Path(db_file).exists():
+            if db_file is not None:
                 Path(db_file).unlink(missing_ok=True)
             if getattr(self._db, "_redis", None):
                 with contextlib.suppress(Exception):
@@ -875,11 +911,17 @@ class HikkariBackupMod(loader.Module):
 
         logger.warning("Factory reset done, removed=%s — restarting", removed)
 
-        with contextlib.suppress(Exception):
-            await call.edit(self.strings["resetting_done"].format(removed))
+        msg = self.strings["resetting_done"].format(removed)
+        if call is not None:
+            with contextlib.suppress(Exception):
+                await call.edit(msg)
+        else:
+            with contextlib.suppress(Exception):
+                await self.inline.bot.send_message(self.tg_id, msg)
 
         await asyncio.sleep(1)
         restart()
+
 
     def _factory_reset_files(self) -> int:
         """Wipe DB/settings/modules. Keep Telegram sessions (no re-login)."""
