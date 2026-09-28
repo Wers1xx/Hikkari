@@ -41,12 +41,12 @@ class Help(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "core_emoji",
-                "<tg-emoji emoji-id=4974681956907221809>▪️</tg-emoji>",
+                "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>",
                 lambda: "Core module bullet",
             ),
             loader.ConfigValue(
                 "plain_emoji",
-                "<tg-emoji emoji-id=4974508259839836856>▪️</tg-emoji>",
+                "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>",
                 lambda: "Plain module bullet",
             ),
             loader.ConfigValue(
@@ -458,19 +458,6 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
-        # Section headers for .help (premium custom emoji)
-        _core_hdr = "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji> <b>{}</b>\n".format(
-            self.strings.get("help_core", "Built-in")
-        )
-        _ext_hdr = "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji> <b>{}</b>\n".format(
-            self.strings.get("help_loaded", "External")
-        )
-        core_block = (_core_hdr + "".join(core_)) if core_ else ""
-        plain_block = (
-            (_ext_hdr + "".join(plain_ + (no_commands_ if force else [])))
-            if (plain_ or (no_commands_ and force))
-            else ""
-        )
 
         match True:
             case _ if only_core:
@@ -481,7 +468,7 @@ class Help(loader.Module):
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
-                        core_block,
+                        "".join(core_),
                         (
                             ""
                             if self.lookup("LoaderMod").fully_loaded
@@ -499,7 +486,7 @@ class Help(loader.Module):
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
-                        plain_block,
+                        "".join(plain_ + (no_commands_ if force else [])),
                         (
                             ""
                             if self.lookup("LoaderMod").fully_loaded
@@ -517,8 +504,8 @@ class Help(loader.Module):
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
-                        core_block,
-                        plain_block,
+                        "".join(core_),
+                        "".join(plain_ + (no_commands_ if force else [])),
                         (
                             ""
                             if self.lookup("LoaderMod").fully_loaded
