@@ -845,9 +845,7 @@ class HikkariBackupMod(loader.Module):
             await utils.answer(
                 message,
                 self.strings["resetting_warn"]
-                + "
-
-<code>.resetting yes</code>",
+                + "\n\n<code>.resetting yes</code>",
             )
 
     async def _resetting_confirm(self, call: InlineCall):
@@ -881,9 +879,7 @@ class HikkariBackupMod(loader.Module):
             with contextlib.suppress(Exception):
                 await call.edit(
                     self.strings["resetting_warn2"]
-                    + "
-
-<code>.resetting yes</code>"
+                    + "\n\n<code>.resetting yes</code>"
                 )
 
     async def _resetting_run(self, call: InlineCall):
