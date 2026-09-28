@@ -489,6 +489,24 @@ class Utils(InlineUnit):
         if isinstance(media, io.BytesIO):
             media.name = getattr(media, "name", "upload.mp4")
 
+        def _media_ok_for_inline(m) -> bool:
+            """Telegram inline edit accepts only HTTP(S) URLs or already-uploaded file ids."""
+            if m is None:
+                return True
+            if isinstance(m, (bytes, io.BytesIO)):
+                return False
+            if not isinstance(m, str):
+                return False
+            low = m.strip().lower()
+            if low.startswith(("http://", "https://")):
+                return True
+            # local path / file:// — not valid for EditInlineBotMessage
+            return False
+
+        inline_media_unsupported = bool(
+            media is not None and inline_message_id and not _media_ok_for_inline(media)
+        )
+
         kind = (
             "file"
             if file
@@ -538,11 +556,18 @@ class Utils(InlineUnit):
                 await asyncio.sleep(e.seconds)
                 return await self._edit_unit(**utils.get_kwargs())
             except RPCError as e:
-                logger.warning(
-                    "RPCError while editing inline message via inline_message_id: %s. "
-                    "Attempting fallback via chat_id + message_id...",
-                    e,
-                )
+                err_s = str(e)
+                if "document file was invalid" in err_s.lower() or "MEDIA_EMPTY" in err_s:
+                    logger.debug(
+                        "Inline edit media rejected (%s); fallback via chat_id + message_id",
+                        e,
+                    )
+                else:
+                    logger.warning(
+                        "RPCError while editing inline message via inline_message_id: %s. "
+                        "Attempting fallback via chat_id + message_id...",
+                        e,
+                    )
                 if inline_message_id and chat_id and message_id:
                     with contextlib.suppress(Exception):
                         await self._bot_client.edit_message(
@@ -567,14 +592,22 @@ class Utils(InlineUnit):
                 commit_unit_update()
                 return True
 
+        # Local files / non-URL media cannot be attached via EditInlineBotMessageRequest
+        edit_file = None if inline_media_unsupported else media
         try:
             await self._bot_client.edit_message(
                 inline_message_id or chat_id,
                 None if inline_message_id else message_id,
                 text,
                 parse_mode="HTML",
-                file=media,
-                force_document=kind == "file",
+                **(
+                    {
+                        "file": edit_file,
+                        "force_document": kind == "file",
+                    }
+                    if edit_file is not None
+                    else {}
+                ),
                 buttons=self.generate_markup(
                     reply_markup
                     if isinstance(reply_markup, list)
@@ -585,11 +618,37 @@ class Utils(InlineUnit):
             logger.info("Sleeping %ss on Telethon FloodWait...", e.seconds)
             await asyncio.sleep(e.seconds)
             return await self._edit_unit(**utils.get_kwargs())
-        except (RPCError, MediaPrevInvalidError):
-            with contextlib.suppress(Exception):
-                await query.answer(
-                    "I should have edited some message, but it is deleted :("
+        except (RPCError, MediaPrevInvalidError) as e:
+            err = str(e)
+            # Expected when media is invalid for inline — try chat_id+message_id
+            if chat_id and message_id:
+                logger.debug(
+                    "Inline media edit failed (%s); fallback chat_id=%s msg_id=%s",
+                    err,
+                    chat_id,
+                    message_id,
                 )
+                with contextlib.suppress(Exception):
+                    await self._bot_client.edit_message(
+                        chat_id,
+                        message_id,
+                        text,
+                        parse_mode="HTML",
+                        file=media,
+                        force_document=kind == "file",
+                        buttons=self.generate_markup(
+                            reply_markup
+                            if isinstance(reply_markup, list)
+                            else unit.get("buttons", [])
+                        ),
+                    )
+                    commit_unit_update()
+                    return True
+            with contextlib.suppress(Exception):
+                if query:
+                    await query.answer(
+                        "I should have edited some message, but it is deleted :("
+                    )
             return False
         else:
             commit_unit_update()
