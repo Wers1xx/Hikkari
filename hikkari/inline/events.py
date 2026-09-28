@@ -111,11 +111,25 @@ class Events(InlineUnit):
         """Inline query handler (forms' calls)"""
         wrapped_query = InlineQuery(inline_query=inline_query)
         inline_query.inline_manager = self
-        if (
-            not self._db.get(security.__name__, "allow_inline_query", False)
-            and wrapped_query.from_user.id
-            not in self._client.dispatcher.security.all_users
+        uid = getattr(wrapped_query.from_user, "id", None) or wrapped_query.sender_id
+        owners = []
+        try:
+            owners = list(self._client.dispatcher.security._owner or [])
+        except Exception:
+            pass
+        all_users = []
+        try:
+            all_users = list(self._client.dispatcher.security.all_users or [])
+        except Exception:
+            pass
+        # Owner / self always allowed (fixes empty inline results / No query results)
+        if not (
+            self._db.get(security.__name__, "allow_inline_query", False)
+            or uid == self._me
+            or uid in owners
+            or uid in all_users
         ):
+            logger.debug("Inline query denied for user %s", uid)
             return
 
         if not (query := wrapped_query.query):

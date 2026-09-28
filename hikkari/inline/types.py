@@ -344,11 +344,22 @@ class InlineQuery:
 
     def __init__(self, inline_query):
         self.inline_query = inline_query
-        self.id = inline_query.id
-        self.query = inline_query.text or ""
+        self.id = getattr(inline_query, "id", None)
+        # Telethon uses .text; some layers expose .query as str or object
+        q = getattr(inline_query, "text", None)
+        if not q:
+            raw = getattr(inline_query, "query", None)
+            if isinstance(raw, str):
+                q = raw
+            elif raw is not None:
+                q = getattr(raw, "query", None) or getattr(raw, "text", None) or ""
+        self.query = q or ""
         self.text = self.query
-        self.from_user = _User(inline_query.sender_id)
-        self.sender_id = inline_query.sender_id
+        sid = getattr(inline_query, "sender_id", None)
+        if sid is None:
+            sid = getattr(getattr(inline_query, "from_id", None), "user_id", None)
+        self.from_user = _User(sid)
+        self.sender_id = sid
         self.args = (
             self.query.split(maxsplit=1)[1] if len(self.query.split()) > 1 else ""
         )

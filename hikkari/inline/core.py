@@ -503,14 +503,37 @@ class InlineManager(
         q: "InlineResults" = None  # type: ignore  # noqa: F821
         exception: Exception = None
 
+        bot_un = self.bot_username
+        if not bot_un:
+            raise Exception("Inline bot username is not set")
+        if not str(bot_un).startswith("@"):
+            bot_un = f"@{bot_un}"
+
+        # Ensure bot client is alive and handlers registered
+        if not self.init_complete or not self._bot_client:
+            logger.warning("Inline manager not ready, re-registering…")
+            with contextlib.suppress(Exception):
+                await self.register_manager(ignore_token_checks=True)
+
         async def result_getter():
             nonlocal unit_id, q
-            with contextlib.suppress(Exception):
-                q = await self._client.inline_query(self.bot_username, unit_id)
+            last_err = None
+            for attempt in range(3):
+                try:
+                    q = await self._client.inline_query(bot_un, unit_id)
+                    if q:
+                        return
+                    await asyncio.sleep(0.4 * (attempt + 1))
+                except Exception as e:
+                    last_err = e
+                    logger.debug("inline_query attempt %s failed: %s", attempt, e)
+                    await asyncio.sleep(0.4 * (attempt + 1))
+            if last_err:
+                logger.warning("inline_query failed: %s", last_err)
 
         async def event_poller():
             nonlocal exception
-            await asyncio.wait_for(event.wait(), timeout=10)
+            await asyncio.wait_for(event.wait(), timeout=12)
             if self._error_events.get(unit_id):
                 exception = self._error_events[unit_id]
 
@@ -531,6 +554,13 @@ class InlineManager(
             raise exception  # skipcq: PYL-E0702
 
         if not q:
+            logger.error(
+                "No query results for unit=%s bot=%s init=%s units=%s",
+                unit_id,
+                bot_un,
+                self.init_complete,
+                unit_id in self._units,
+            )
             raise Exception("No query results")
 
         return await q[0].click(
