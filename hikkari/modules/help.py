@@ -481,7 +481,7 @@ class Help(loader.Module):
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
-                        "".join(core_),
+                        core_block,
                         (
                             ""
                             if self.lookup("LoaderMod").fully_loaded
@@ -499,7 +499,7 @@ class Help(loader.Module):
                         + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
-                        "".join(plain_ + (no_commands_ if force else [])),
+                        plain_block,
                         (
                             ""
                             if self.lookup("LoaderMod").fully_loaded
