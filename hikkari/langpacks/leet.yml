@@ -529,7 +529,9 @@ api_protection:
 help:
   name: "H3lp"
   undoc: "🦥 N0 d0c5"
-  all_header: "<b>{} m0d5 4v41l4bl3, {} h1dd3n:</b>"
+  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} m0d5 4v41l4bl3, {} h1dd3n:</b>"
+  help_core: "Built-in"
+  help_loaded: "External"
   no_mod: "🚫 <b>Sp3c1fy m0dul3 2 h1d3</b>"
   help_lib: "<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>P4ck4g3</b> <code>{}</code> <b>15 4 l1b.</b>\n<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>L1b5 d0 n07 h4v3 d35cr1p710n5...</b>"
   developer: "<tg-emoji emoji-id=5287454910059654880>🫶</tg-emoji> D3v3l0p3r: {}"

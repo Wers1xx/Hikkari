@@ -513,7 +513,9 @@ api_protection:
   _cls_doc: Следит, чтобы юзербот не долбил Telegram API
 help:
   undoc: "🦥 Хз че это"
-  all_header: "<b>{} модов тут, {} в стелсе:</b>"
+  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} модов тут, {} в стелсе:</b>"
+  help_core: "Built-in"
+  help_loaded: "External"
   no_mod: "🚫 <b>Какой модуль прячем?</b>"
   help_lib: "<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Пакет</b> <code>{}</code> <b>это либа.</b>\n<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>У либ нет описания, лол...</b>"
   developer: "<tg-emoji emoji-id=5287454910059654880>🫶</tg-emoji> Разработчик: {}"

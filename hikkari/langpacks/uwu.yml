@@ -530,7 +530,9 @@ api_protection:
 help:
   name: "Hewp"
   undoc: "🦥 Nyo docs"
-  all_header: "<b>{} mods avaiwabwe, {} hidden:</b>"
+  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} mods avaiwabwe, {} hidden:</b>"
+  help_core: "Built-in"
+  help_loaded: "External"
   no_mod: "🚫 <b>Specify moduwe to hide</b>"
   help_lib: "<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Package</b> <code>{}</code> <b>is a wibwawy.</b>\n<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Wibwawies do nyot have descwiptions...</b>"
   developer: "<tg-emoji emoji-id=5287454910059654880>🫶</tg-emoji> Devewopew: {}"

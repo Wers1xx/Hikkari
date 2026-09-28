@@ -514,7 +514,9 @@ api_protection:
   _cls_doc: Hilft dem Userbot, Telegram API nicht zu spammen
 help:
   undoc: "🦥 Keine Beschreibung"
-  all_header: "<b>{} Module verfügbar, {} verborgen:</b>"
+  all_header: "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji> <b>{} Module verfügbar, {} verborgen:</b>"
+  help_core: "Built-in"
+  help_loaded: "External"
   no_mod: "🚫 <b>Gib das Modul(-e) an, das(-e) versteckt werden soll(en)</b>"
   help_lib: "<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Das Paket</b> <code>{}</code> <b>ist eine Bibliothek.</b>\n<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Bibliotheken haben keine Beschreibung...</b>"
   developer: "<tg-emoji emoji-id=5287454910059654880>🫶</tg-emoji> Entwickler: {}"
