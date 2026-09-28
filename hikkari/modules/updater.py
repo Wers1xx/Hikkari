@@ -375,6 +375,7 @@ class UpdaterMod(loader.Module):
 
         return "\n\n".join(entries)
 
+    @loader.command()
     async def changelog(self, message: Message):
         """Shows what changed in recent updates and fixes"""
         changelog = self._recent_commits_changelog(15)
