@@ -349,6 +349,15 @@ class Utils(InlineUnit):
         return reply_markup
 
     def sanitise_text(self: "InlineManager", text: str) -> str:
+        # Keep <tg-emoji> for premium so custom emoji render in forms
+        if getattr(getattr(self._client, "hikkari_me", None), "premium", False):
+            return text
+        text = re.sub(
+            r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
+            r"\\1",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
         return re.sub(r"</?emoji.*?>", "", text)
 
     async def _edit_unit(
