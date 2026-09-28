@@ -244,11 +244,9 @@ hikkari_backup:
 • кэши ботов
 
 <b>Как после чистой установки.</b> Сделай <code>.backupall</code> заранее."
-
   resetting_warn2: "<tg-emoji emoji-id=5287611409854485527>⚠️</tg-emoji> <b>Последнее подтверждение</b>
 
 Точно стереть <b>всё</b> и перезапустить как чистую установку?"
-
   resetting_yes: "⚠️ Да, продолжить"
   resetting_yes_final: "🗑 Стереть всё"
   resetting_no: "❌ Отмена"
