@@ -277,17 +277,18 @@ hikkari_backup:
   resetting_warn: "<tg-emoji emoji-id=5287611409854485527>⚠️</tg-emoji> <b>Factory reset</b>
 
 This will <b>permanently delete</b>:
-• database & settings
+• database &amp; settings
 • loaded modules
-• sessions (you will need to log in again)
-• config / API tokens file
+• sessions (login again)
+• config / API tokens
 • bot data caches
 
-<b>The userbot will look like a fresh install.</b>
-This cannot be undone (make a <code>.backupall</code> first)."
+<b>Like a fresh install.</b> Make <code>.backupall</code> first."
+
   resetting_warn2: "<tg-emoji emoji-id=5287611409854485527>⚠️</tg-emoji> <b>Last confirmation</b>
 
 Really wipe <b>everything</b> and restart as a clean install?"
+
   resetting_yes: "⚠️ Yes, continue"
   resetting_yes_final: "🗑 Wipe everything"
   resetting_no: "❌ Cancel"
