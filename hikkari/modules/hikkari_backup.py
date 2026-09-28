@@ -854,8 +854,9 @@ class HikkariBackupMod(loader.Module):
 
         # New form instead of edit — more reliable for callback rebinding
         try:
+            chat = getattr(call, "chat_id", None) or self.tg_id
             await self.inline.form(
-                message=None,
+                message=chat,
                 text=self.strings["resetting_warn2"],
                 force_me=True,
                 disable_security=True,
