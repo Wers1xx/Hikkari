@@ -482,7 +482,8 @@ updater:
   more: "\n<i><b>🎥 И еще {}...</b></i>"
   latest_disabled: "Уведомление о последнем обновлении было выключено"
   _cfg_doc_disable_notifications: "Выключить уведомления об обновлениях"
-  changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Список изменений последнего масштабного обновления:</b><blockquote expandable>{}</blockquote>'
+  changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Последние обновления и фиксы:</b><blockquote expandable>{}</blockquote>'
+  changelog_empty: '✨ <b>Changelog пуст</b>'
   _cfg_doc_autoupdate: "<tg-emoji emoji-id=5469741319330996757>💫</tg-emoji> Автоматические обновления для вашей Hikkari"
   _cmd_doc_restart: "Перезагружает юзербот"
   _cmd_doc_source: "Показать ссылку на исходный код проекта"
@@ -491,7 +492,7 @@ updater:
 
   name: Updater
   _cmd_doc_autoupdate: Переключить автообновления
-  _cmd_doc_changelog: Показать changelog последнего крупного обновления
+  _cmd_doc_changelog: Показать changelog последних обновлений и фиксов
   _cmd_doc_ubstop: Остановить юзербота
 hikkari_plugin_security:
   name: "HikkaPluginSecurity"

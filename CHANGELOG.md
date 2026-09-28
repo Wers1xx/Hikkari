@@ -1,4 +1,17 @@
 # Hikkari Changelog
+
+## ✨ Hikkari 1.0.36
+
+ - changelog shows recent git commits (updates & fixes), not only CHANGELOG.md
+ - fix inline No query results (owner always allowed, query parse, retries)
+ - help emojis forced (⭐ / 🛡) so stale DB config cannot show old icons
+ - restoreall: convert Heroku/Hikka/Legacy, protect bot token & log chat
+ - multi-banner support in Tester and Info (RandomLink)
+ - yesbot creates inline bot in-place and saves token + backup file
+ - never auto-wipe inline bot token on errors
+ - group/channel avatar from hikkari-ava.png with resize
+ - API banner and terminal logo rebranded to Hikkari
+
 ## ✨ Hikkari 2.1.0
 
  - fix security check in help

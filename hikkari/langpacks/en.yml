@@ -536,10 +536,11 @@ updater:
   latest_disabled: "Notifications about the latest update have been suppressed"
   update: "🔄 Update"
   ignore: "🚫 Ignore"
-  changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Changelog of the last major update:</b><blockquote expandable>{}</blockquote>'
+  changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Recent updates & fixes:</b><blockquote expandable>{}</blockquote>'
+  changelog_empty: '✨ <b>Changelog is empty</b>'
 
   _cmd_doc_autoupdate: Toggle automatic updates
-  _cmd_doc_changelog: Show changelog of the last major update
+  _cmd_doc_changelog: Show changelog of recent updates and fixes
   _cmd_doc_ubstop: Stop your userbot
 api_protection:
   name: "APILimiter"

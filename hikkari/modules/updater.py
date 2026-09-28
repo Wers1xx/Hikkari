@@ -337,17 +337,85 @@ class UpdaterMod(loader.Module):
         await self.invoke("update", "-f", peer=self.inline.bot_username)
 
     @loader.command()
-    async def changelog(self, message: Message):
-        """Shows the changelog of the last major update"""
-        with open("CHANGELOG.md", encoding="utf-8") as f:
-            changelog = f.read().split("##")[1].strip()
-        if (await self._client.get_me()).premium:
-            changelog.replace(
-                "🌑 Hikkari",
-                "<tg-emoji emoji-id=5192765204898783881>🌘</tg-emoji><tg-emoji emoji-id=5195311729663286630>🌘</tg-emoji><tg-emoji emoji-id=5195045669324201904>🌘</tg-emoji>",
-            )
+    def _recent_commits_changelog(self, limit: int = 15) -> str:
+        """Build changelog text from recent git commits (latest updates/fixes)."""
+        if NO_GIT:
+            return ""
+        try:
+            with git.Repo() as repo:
+                commits = list(repo.iter_commits(version.branch, max_count=limit))
+        except Exception:
+            try:
+                with git.Repo() as repo:
+                    commits = list(repo.iter_commits("HEAD", max_count=limit))
+            except Exception:
+                return ""
 
-        await utils.answer(message, self.strings["changelog"].format(changelog))
+        entries = []
+        for commit in commits:
+            message = commit.message
+            if isinstance(message, bytes):
+                message = message.decode(errors="replace")
+            lines = [ln.strip() for ln in message.strip().splitlines() if ln.strip()]
+            if not lines:
+                continue
+            title = lines[0]
+            body = lines[1:]
+            block = f"<b>{commit.hexsha[:7]}</b> · <i>{utils.escape_html(title)}</i>"
+            if body:
+                details = [
+                    utils.escape_html(ln.lstrip("- ").strip())
+                    for ln in body
+                    if not ln.lower().startswith(
+                        ("co-authored", "signed-off", "made-with")
+                    )
+                ]
+                if details:
+                    block += "\n" + "\n".join(f"  • {d}" for d in details[:8])
+            entries.append(block)
+
+        return "\n\n".join(entries)
+
+    async def changelog(self, message: Message):
+        """Shows what changed in recent updates and fixes"""
+        changelog = self._recent_commits_changelog(15)
+
+        if not changelog:
+            try:
+                with open("CHANGELOG.md", encoding="utf-8") as f:
+                    parts = f.read().split("##")
+                if len(parts) > 1:
+                    changelog = parts[1].strip()
+            except Exception:
+                changelog = ""
+
+        if not changelog:
+            await utils.answer(
+                message,
+                self.strings.get(
+                    "changelog_empty",
+                    "✨ <b>Changelog is empty</b>",
+                ),
+            )
+            return
+
+        try:
+            ver = ".".join(map(str, version.__version__))
+        except Exception:
+            ver = "?"
+        try:
+            build = utils.get_commit_url()
+        except Exception:
+            build = ""
+
+        body = self.strings["changelog"].format(changelog)
+        if build or ver:
+            prefix = f"✨ <b>Hikkari</b> <code>v{ver}</code>"
+            if build:
+                prefix += f" · {build}"
+            body = prefix + "\n" + body
+
+        await utils.answer(message, body)
 
     @loader.command()
     async def restart(self, message: Message):
