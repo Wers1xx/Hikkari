@@ -336,7 +336,6 @@ class UpdaterMod(loader.Module):
 
         await self.invoke("update", "-f", peer=self.inline.bot_username)
 
-    @loader.command()
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
         if NO_GIT:
