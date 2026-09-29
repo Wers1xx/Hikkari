@@ -549,7 +549,7 @@ help:
   help_lib: "<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>Пакет</b> <code>{}</code> <b>является библиотекой.</b>\n<tg-emoji emoji-id=5404553572727660202>❌</tg-emoji> <b>У библиотек нет описания...</b>"
   developer: "<tg-emoji emoji-id=5287454910059654880>🫶</tg-emoji> Разработчик: {}"
   hidden_shown: "<b>{} модулей скрыто, {} модулей показано:</b>\n{}\n{}"
-  offchats: "<tg-emoji emoji-id=6019130940012370273>❔</tg-emoji> <a href=\"https://t.me/Hikkari_talks\"><b>Чат поддержки</b></a>\n\n<tg-emoji emoji-id=6019151079114021083>💬</tg-emoji> <a href=\"https://t.me/hikkari_offtop\"><b>Оффтоп чат</b></a>\n\n<tg-emoji emoji-id=6019094432790354513>📢</tg-emoji> <a href=\"https://t.me/hikkari_ub\"><b>Официальный канал</b></a>"
+  offchats: "<tg-emoji emoji-id=6019130940012370273>❔</tg-emoji> <a href=\"https://t.me/Hikkari_talks\"><b>Чат поддержки</b></a>\n\n<tg-emoji emoji-id=6019151079114021083>💬</tg-emoji> <a href=\"https://t.me/Hikkari_Offtop\"><b>Оффтоп чат</b></a>\n\n<tg-emoji emoji-id=6019094432790354513>📢</tg-emoji> <a href=\"https://t.me/Hikkari_Channel\"><b>Официальный канал</b></a>"
   _cls_doc: "Показывает помощь по модулям"
   partial_load: "<tg-emoji emoji-id=5355133243773435190>☝️</tg-emoji> <b>Юзербот еще не загрузился полностью, поэтому показаны не все модули</b>"
   not_exact: "<tg-emoji emoji-id=5355133243773435190>☝️</tg-emoji> <b>Точного совпадения не нашлось, поэтому было выбрано наиболее подходящее</b>"
