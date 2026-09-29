@@ -20,6 +20,11 @@ import asyncio
 import collections
 import copy
 import json
+
+try:
+    import orjson as _orjson
+except ImportError:
+    _orjson = None
 import logging
 import os
 import re
@@ -85,7 +90,7 @@ class Database(dict):
         with self._redis.pipeline() as pipe:
             pipe.set(
                 str(self._client.tg_id),
-                json.dumps(self, ensure_ascii=True),
+                self._fast_dumps(self, compact=True),
             )
             pipe.execute()
 
@@ -198,7 +203,7 @@ class Database(dict):
             if re.search(r'"(legacy\.)(\S+\":)', db):
                 logging.warning("Converting db after update")
                 db = re.sub(r"(legacy\.)(\S+\":)", lambda m: "hikkari." + m.group(2), db)
-            self._update_from_read(json.loads(db))
+            self._update_from_read(self._fast_loads(db))
         except json.decoder.JSONDecodeError:
             logger.warning("Database read failed! Creating new one...")
         except FileNotFoundError:
@@ -280,7 +285,7 @@ class Database(dict):
             return True
 
         try:
-            self._db_file.write_text(json.dumps(self, indent=4))
+            self._db_file.write_text(self._fast_dumps(self))
         except Exception:
             logger.exception("Database save failed!")
             return False

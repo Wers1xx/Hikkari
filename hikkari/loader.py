@@ -615,7 +615,7 @@ class Modules:
         modules to prevent zombie handlers
         """
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(90)
             commands = {}
             inline_handlers = {}
             callback_handlers = {}

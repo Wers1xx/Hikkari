@@ -206,7 +206,7 @@ class UpdaterMod(loader.Module):
     async def client_ready(self):
         # Immediate update check on start (don't wait for first poll interval)
         async def _boot_check():
-            await asyncio.sleep(8)  # let inline bot / net settle
+            await asyncio.sleep(3)  # let inline bot / net settle
             with contextlib.suppress(Exception):
                 await self.poller()
         asyncio.ensure_future(_boot_check())

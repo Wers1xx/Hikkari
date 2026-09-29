@@ -106,7 +106,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "soft_throttle_ms",
-                80,
+                40,
                 lambda: "Soft delay (ms) between bulk-read requests when approaching limit",
                 validator=loader.validators.Integer(minimum=0, maximum=2000),
             ),
@@ -139,7 +139,7 @@ class APIRatelimiterMod(loader.Module):
         )
 
     async def _install_protection(self):
-        await asyncio.sleep(30)  # Restart lock
+        await asyncio.sleep(8)  # Restart lock (was 30; faster ready on weak hosts)
         if hasattr(self._client._call, "_old_call_rewritten"):
             raise loader.SelfUnload("Already installed")
 
@@ -163,7 +163,7 @@ class APIRatelimiterMod(loader.Module):
             ordered: bool = False,
             flood_sleep_threshold: int = None,
         ):
-            await asyncio.sleep(random.randint(1, 5) / 100)
+            await asyncio.sleep(random.randint(0, 2) / 1000)
             req = (request,) if not is_list_like(request) else request
             for r in req:
                 if (
