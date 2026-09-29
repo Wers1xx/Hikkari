@@ -131,12 +131,13 @@ class _MessageProxy:
         )
 
     async def edit_text(self, text: str, *, reply_markup=None, **kwargs):
-        return await self.inline_manager.bot.client.edit_message(
+        bot = self.inline_manager.bot
+        return await bot.client.edit_message(
             self.chat_id,
             self.message_id,
             text,
             parse_mode="HTML",
-            buttons=reply_markup,
+            buttons=bot._build_reply_markup(reply_markup),
         )
 
 
