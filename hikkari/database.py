@@ -185,7 +185,7 @@ class Database(dict):
         if self._redis:
             try:
                 self._update_from_read(
-                    json.loads(
+                    self._fast_loads(
                         self._redis.get(
                             str(self._client.tg_id),
                         ).decode(),
@@ -204,10 +204,16 @@ class Database(dict):
                 logging.warning("Converting db after update")
                 db = re.sub(r"(legacy\.)(\S+\":)", lambda m: "hikkari." + m.group(2), db)
             self._update_from_read(self._fast_loads(db))
-        except json.decoder.JSONDecodeError:
-            logger.warning("Database read failed! Creating new one...")
-        except FileNotFoundError:
-            logger.debug("Database file not found, creating new one...")
+        except Exception as e:
+            if _orjson is not None and isinstance(e, _orjson.JSONDecodeError):
+                logger.warning("Database read failed! Creating new one...")
+            elif isinstance(e, json.JSONDecodeError):
+                logger.warning("Database read failed! Creating new one...")
+            elif isinstance(e, FileNotFoundError):
+                logger.debug("Database file not found, creating new one...")
+                return
+            else:
+                raise
 
     def _update_from_read(self, items: dict) -> None:
         """Update DB from persisted storage without write-protection checks."""
@@ -250,6 +256,21 @@ class Database(dict):
                     continue
 
         return True
+
+    @staticmethod
+    def _fast_dumps(obj, compact: bool = False) -> str:
+        """Serialize DB; prefer orjson on weak hosts (UserLand)."""
+        if _orjson is not None:
+            opt = 0 if compact else _orjson.OPT_INDENT_2
+            return _orjson.dumps(obj, option=opt).decode()
+        return json.dumps(obj, ensure_ascii=not compact, indent=None if compact else 4)
+
+    @staticmethod
+    def _fast_loads(data):
+        if _orjson is not None:
+            return _orjson.loads(data)
+        return json.loads(data)
+
 
     def save(self) -> bool:
         """Save database"""
