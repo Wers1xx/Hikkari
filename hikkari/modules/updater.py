@@ -59,7 +59,7 @@ class UpdaterMod(loader.Module):
     """Updates itself, tracks latest Hikkari releases, and notifies you, if update is required"""
 
     strings = {"name": "Updater"}
-    _GIT_FETCH_INTERVAL = 300
+    _GIT_FETCH_INTERVAL = 60
     _EMFILE_FETCH_BACKOFF = 900
 
     def __init__(self):
@@ -151,7 +151,11 @@ class UpdaterMod(loader.Module):
             origin = repo.remote("origin")
             now = time.monotonic()
             if now >= self._git_fetch_backoff_until:
-                if now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL:
+                # First poll always fetches; then every _GIT_FETCH_INTERVAL seconds
+                if (
+                    self._last_git_fetch == 0.0
+                    or now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL
+                ):
                     logger.debug("Fetching changelog from %s", origin.url)
                     subprocess.run(
                         ["git", "fetch", "--quiet", "origin"],
@@ -198,6 +202,14 @@ class UpdaterMod(loader.Module):
                 ).hexsha
         except Exception:
             return ""
+
+    async def client_ready(self):
+        # Immediate update check on start (don't wait for first poll interval)
+        async def _boot_check():
+            await asyncio.sleep(8)  # let inline bot / net settle
+            with contextlib.suppress(Exception):
+                await self.poller()
+        asyncio.ensure_future(_boot_check())
 
     @loader.loop(interval=60, autostart=True)
     async def poller_announcement(self):
