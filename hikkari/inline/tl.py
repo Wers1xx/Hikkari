@@ -83,6 +83,12 @@ class TelethonBot:
         return message
 
     def _build_reply_markup(self, reply_markup):
+        """Convert Hikka-style dict buttons / Button objects to TL ReplyMarkup.
+
+        Dict format is still the public API for modules:
+          {"text": "...", "callback": fn} / {"text": "...", "data": "..."} / url / input
+        Telethon/hikkaritl only accepts Button / KeyboardButton* / Reply*Markup.
+        """
         if reply_markup is None:
             return None
         if isinstance(
@@ -95,7 +101,125 @@ class TelethonBot:
             ),
         ):
             return reply_markup
-        return self.client.build_reply_markup(reply_markup)
+
+        # Already a list of Button / KeyboardButton objects (or nested rows)
+        def _is_tl_button(obj) -> bool:
+            if obj is None:
+                return False
+            # Telethon Button helpers and raw KeyboardButton*
+            if hasattr(obj, "SUBCLASS_OF_ID"):
+                return True
+            # Button from hikkaritl.Button is often a custom object until built
+            name = type(obj).__name__
+            if name.startswith("KeyboardButton") or name in {
+                "Button",
+                "InlineButton",
+            }:
+                return True
+            return False
+
+        def _convert_button(btn):
+            if btn is None:
+                return None
+            if _is_tl_button(btn) and not isinstance(btn, dict):
+                return btn
+            if not isinstance(btn, dict):
+                # unknown object — try as-is
+                return btn
+
+            # Hikka/Hikkari dict button
+            text = btn.get("text") or "·"
+            style = btn.get("style")
+            icon = btn.get("emoji_id") or btn.get("icon")
+            if icon is not None:
+                try:
+                    icon = int(icon)
+                except Exception:
+                    icon = None
+
+            if "url" in btn:
+                return make_button(text=text, url=btn["url"], style=style, icon=icon)
+            if "data" in btn:
+                return make_button(text=text, data=btn["data"], style=style, icon=icon)
+            if "_callback_data" in btn:
+                return make_button(
+                    text=text, data=btn["_callback_data"], style=style, icon=icon
+                )
+            if "callback" in btn:
+                # callback without pre-assigned data — use text as data fallback
+                data = btn.get("_callback_data") or text
+                return make_button(text=text, data=data, style=style, icon=icon)
+            if "input" in btn or "switch_inline_query_current_chat" in btn:
+                q = btn.get("switch_inline_query_current_chat") or btn.get(
+                    "_switch_query", ""
+                )
+                if q and not str(q).endswith(" "):
+                    q = f"{q} "
+                return make_button(
+                    text=text,
+                    switch_inline_query_current_chat=str(q),
+                    style=style,
+                    icon=icon,
+                )
+            if "switch_inline_query" in btn:
+                return make_button(
+                    text=text,
+                    switch_inline_query=btn["switch_inline_query"],
+                    style=style,
+                    icon=icon,
+                )
+            if "web_app" in btn:
+                return make_button(text=text, web_app=btn["web_app"], style=style, icon=icon)
+            if "copy" in btn:
+                return make_button(text=text, copy_text=btn["copy"], style=style, icon=icon)
+            if "action" in btn and btn["action"] == "close":
+                # close is handled via callback data in generate_markup; plain data
+                return make_button(text=text, data=btn.get("data") or "close", style=style, icon=icon)
+            return make_button(text=text, data=text, style=style, icon=icon)
+
+        def _normalize_rows(markup):
+            # single dict → one button row
+            if isinstance(markup, dict):
+                return [[_convert_button(markup)]]
+            if not isinstance(markup, (list, tuple)):
+                return markup
+            if not markup:
+                return []
+            # flat list of buttons
+            if markup and not isinstance(markup[0], (list, tuple)):
+                return [[_convert_button(b) for b in markup]]
+            # list of rows
+            rows = []
+            for row in markup:
+                if isinstance(row, dict):
+                    rows.append([_convert_button(row)])
+                elif isinstance(row, (list, tuple)):
+                    rows.append([_convert_button(b) for b in row])
+                else:
+                    rows.append([_convert_button(row)])
+            return rows
+
+        try:
+            rows = _normalize_rows(reply_markup)
+            if rows is None:
+                return None
+            # Drop Nones
+            cleaned = []
+            for row in rows:
+                if not isinstance(row, list):
+                    continue
+                r = [b for b in row if b is not None]
+                if r:
+                    cleaned.append(r)
+            if not cleaned:
+                return None
+            return self.client.build_reply_markup(cleaned)
+        except Exception:
+            # Last resort: if already Button-like rows
+            try:
+                return self.client.build_reply_markup(reply_markup)
+            except Exception:
+                return None
 
     @staticmethod
     def _peer_owner_id(peer) -> int:
@@ -182,7 +306,7 @@ class TelethonBot:
                 chat_id,
                 text,
                 parse_mode="HTML",
-                buttons=reply_markup,
+                buttons=self._build_reply_markup(reply_markup),
                 silent=(
                     disable_notification
                     if disable_notification is not None
@@ -210,7 +334,7 @@ class TelethonBot:
                 caption=caption,
                 parse_mode="HTML",
                 force_document=True,
-                buttons=reply_markup,
+                buttons=self._build_reply_markup(reply_markup),
                 silent=kwargs.get("disable_notification"),
                 **self._thread_kwargs(message_thread_id),
             )
@@ -232,7 +356,7 @@ class TelethonBot:
                 self._normalise_file(photo),
                 caption=caption,
                 parse_mode="HTML",
-                buttons=reply_markup,
+                buttons=self._build_reply_markup(reply_markup),
                 silent=kwargs.get("disable_notification"),
                 **self._thread_kwargs(message_thread_id),
             )
@@ -266,7 +390,7 @@ class TelethonBot:
                 thumb=(
                     self._normalise_file(thumbnail) if thumbnail is not None else None
                 ),
-                buttons=reply_markup,
+                buttons=self._build_reply_markup(reply_markup),
                 silent=kwargs.get("disable_notification"),
                 **self._thread_kwargs(message_thread_id),
             )
@@ -328,7 +452,7 @@ class TelethonBot:
             chat_id,
             message_id,
             file=media,
-            buttons=reply_markup,
+            buttons=self._build_reply_markup(reply_markup),
         )
 
     async def edit_message_text(
