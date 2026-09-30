@@ -25,24 +25,38 @@ class HikkariWebAppMod(loader.Module):
 
     strings = {
         "name": "HikkariWebApp",
-        "started": (
-            "✨ <b>Hikkari WebApp</b>\n\n"
-            "🔗 <code>{url}</code>\n"
-            "🔑 <code>{token}</code>\n\n"
-            "Открой ссылку в браузере и вставь токен (или открой URL с ?token=…)."
+        "link_admin": (
+            '✨ <a href="{url}">WebApp Hikkari</a>
+
+'
+            "🔑 Админ-доступ (owner / co-owner)
+"
+            "<code>{token}</code>"
         ),
-        "already": "✨ WebApp уже запущен:\n<code>{url}</code>\n🔑 <code>{token}</code>",
+        "link_view": (
+            '✨ <a href="{url}">WebApp Hikkari</a>
+
+'
+            "👁 Только обзор (без конфигов и команд)
+"
+            "<code>{token}</code>"
+        ),
+        "denied": "🚫 Только owner или co-owner может получить полный WebApp.",
         "stopped": "🛑 WebApp остановлен",
         "not_running": "WebApp не запущен",
         "info": (
-            "✨ <b>WebApp</b> — панель управления юзерботом\n"
-            "• конфиги core и внешних модулей\n"
-            "• запуск команд\n"
-            "• загрузка медиа\n"
-            "• работает, пока жив юзербот\n\n"
-            "<code>.webapp</code> — ссылка и токен\n"
-            "<code>.webapp stop</code> — остановить\n"
-            "<code>.webapp restart</code> — перезапуск"
+            "✨ <b>WebApp Hikkari</b>
+"
+            "• owner / co-owner — полный доступ
+"
+            "• остальные — только обзор (view-токен)
+
+"
+            "<code>.webapp</code> — ссылка
+"
+            "<code>.webapp view</code> — публичный обзор
+"
+            "<code>.webapp stop</code> / <code>restart</code>"
         ),
     }
 
@@ -69,12 +83,17 @@ class HikkariWebAppMod(loader.Module):
         )
         self._runner = None
         self._web_token = None
+        self._web_view_token = None
 
     async def client_ready(self):
         self._web_token = self.get("token")
         if not self._web_token:
             self._web_token = secrets.token_urlsafe(24)
             self.set("token", self._web_token)
+        self._web_view_token = self.get("view_token")
+        if not self._web_view_token:
+            self._web_view_token = secrets.token_urlsafe(24)
+            self.set("view_token", self._web_view_token)
 
         if self.config["autostart"]:
             await self._ensure_server()
@@ -95,8 +114,20 @@ class HikkariWebAppMod(loader.Module):
                 return "127.0.0.1"
         return host
 
-    def _url(self) -> str:
-        return f"http://{self._public_host()}:{int(self.config['port'])}/?token={self._web_token}"
+    def _url(self, *, admin: bool = True) -> str:
+        tok = self._web_token if admin else self._web_view_token
+        return (
+            f"http://{self._public_host()}:{int(self.config['port'])}/?token={tok}"
+        )
+
+    def _is_admin_user(self, user_id: int) -> bool:
+        if user_id == self.tg_id:
+            return True
+        try:
+            owners = list(self._client.dispatcher.security.owner or [])
+        except Exception:
+            owners = []
+        return int(user_id) in {int(x) for x in owners}
 
     async def _ensure_server(self):
         if self._runner is not None:
@@ -122,14 +153,19 @@ class HikkariWebAppMod(loader.Module):
 
     @loader.command()
     async def webapp(self, message: Message):
-        """WebApp panel: link, stop, restart"""
+        """WebApp Hikkari — clickable link; admin for owners only"""
         args = (utils.get_args_raw(message) or "").strip().lower()
+        uid = message.sender_id or self.tg_id
+        is_admin = self._is_admin_user(uid)
 
         if args in {"help", "?"}:
             await utils.answer(message, self.strings["info"])
             return
 
         if args in {"stop", "off", "disable"}:
+            if not is_admin:
+                await utils.answer(message, self.strings["denied"])
+                return
             if not self._runner:
                 await utils.answer(message, self.strings["not_running"])
                 return
@@ -138,39 +174,49 @@ class HikkariWebAppMod(loader.Module):
             return
 
         if args in {"restart", "reboot"}:
+            if not is_admin:
+                await utils.answer(message, self.strings["denied"])
+                return
             await self._stop_server()
             await asyncio.sleep(0.3)
             await self._ensure_server()
-            await utils.answer(
-                message,
-                self.strings["started"].format(url=self._url(), token=self._web_token),
-            )
-            return
 
         if args in {"newtoken", "token"}:
+            if not is_admin:
+                await utils.answer(message, self.strings["denied"])
+                return
             self._web_token = secrets.token_urlsafe(24)
             self.set("token", self._web_token)
+            self._web_view_token = secrets.token_urlsafe(24)
+            self.set("view_token", self._web_view_token)
             if self._runner:
                 await self._stop_server()
                 await self._ensure_server()
 
+        want_view = args in {"view", "public", "readonly"}
+        if not is_admin:
+            want_view = True  # guests only get overview link
+
         try:
             if not self._runner:
                 await self._ensure_server()
-                await utils.answer(
-                    message,
-                    self.strings["started"].format(
-                        url=self._url(), token=self._web_token
-                    ),
-                )
-            else:
-                await utils.answer(
-                    message,
-                    self.strings["already"].format(
-                        url=self._url(), token=self._web_token
-                    ),
-                )
         except Exception as e:
-            await utils.answer(message, f"WebApp error: <code>{utils.escape_html(str(e))}</code>")
+            await utils.answer(
+                message,
+                f"WebApp error: <code>{utils.escape_html(str(e))}</code>",
+            )
+            return
 
+        if want_view or not is_admin:
+            url = self._url(admin=False)
+            await utils.answer(
+                message,
+                self.strings["link_view"].format(url=url, token=self._web_view_token),
+            )
+        else:
+            url = self._url(admin=True)
+            await utils.answer(
+                message,
+                self.strings["link_admin"].format(url=url, token=self._web_token),
+            )
 

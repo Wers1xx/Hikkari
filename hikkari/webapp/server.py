@@ -29,7 +29,8 @@ def _json(data: Any, status: int = 200) -> web.Response:
 class WebAppState:
     def __init__(self, module: Any):
         self.module = module
-        self.token = module._web_token
+        self.token = module._web_token  # admin
+        self.view_token = module._web_view_token  # read-only
         self.started = time.time()
 
     @property
@@ -44,16 +45,55 @@ class WebAppState:
     def allmodules(self):
         return self.module.allmodules
 
+    def role_for_token(self, token: str | None) -> str | None:
+        if not token:
+            return None
+        try:
+            if self.token and secrets.compare_digest(str(token), str(self.token)):
+                return "admin"
+            if self.view_token and secrets.compare_digest(
+                str(token), str(self.view_token)
+            ):
+                return "view"
+        except Exception:
+            return None
+        return None
+
+
+def _extract_token(request: web.Request) -> str | None:
+    auth = request.headers.get("Authorization", "")
+    token = request.query.get("token") or request.cookies.get("hikkari_token")
+    if auth.startswith("Bearer "):
+        token = auth[7:].strip()
+    return token or None
+
 
 def require_auth(handler: Callable):
+    """Any valid token (admin or view)."""
+
     async def wrapper(request: web.Request):
         state: WebAppState = request.app["state"]
-        auth = request.headers.get("Authorization", "")
-        token = request.query.get("token") or request.cookies.get("hikkari_token")
-        if auth.startswith("Bearer "):
-            token = auth[7:].strip()
-        if not token or not secrets.compare_digest(str(token), str(state.token)):
+        role = state.role_for_token(_extract_token(request))
+        if not role:
             return _json({"ok": False, "error": "unauthorized"}, 401)
+        request["hikkari_role"] = role
+        return await handler(request)
+
+    return wrapper
+
+
+def require_admin(handler: Callable):
+    """Only admin token (owner / co-owner issued)."""
+
+    async def wrapper(request: web.Request):
+        state: WebAppState = request.app["state"]
+        role = state.role_for_token(_extract_token(request))
+        if role != "admin":
+            return _json(
+                {"ok": False, "error": "forbidden", "role": role or "none"},
+                403,
+            )
+        request["hikkari_role"] = "admin"
         return await handler(request)
 
     return wrapper
@@ -88,6 +128,7 @@ def create_app(module: Any) -> web.Application:
                 "version": ".".join(map(str, version.__version__)),
                 "uptime": int(time.time() - st.started),
                 "modules": len(mods),
+                "role": request.get("hikkari_role") or "view",
                 "user": {
                     "id": getattr(me, "id", None),
                     "name": getattr(me, "first_name", None),
@@ -96,7 +137,7 @@ def create_app(module: Any) -> web.Application:
             }
         )
 
-    @require_auth
+    @require_admin
     async def api_modules(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         out = []
@@ -135,7 +176,7 @@ def create_app(module: Any) -> web.Application:
                 pass
         return None
 
-    @require_auth
+    @require_admin
     async def api_module_config(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         name = request.match_info["name"]
@@ -173,7 +214,7 @@ def create_app(module: Any) -> web.Application:
             )
         return _json({"ok": True, "module": name, "options": opts})
 
-    @require_auth
+    @require_admin
     async def api_module_config_set(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         name = request.match_info["name"]
@@ -202,7 +243,7 @@ def create_app(module: Any) -> web.Application:
             return _json({"ok": False, "error": str(e)}, 400)
         return _json({"ok": True, "key": key, "value": mod.config[key]})
 
-    @require_auth
+    @require_admin
     async def api_run_command(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         try:
@@ -224,7 +265,7 @@ def create_app(module: Any) -> web.Application:
             return _json({"ok": False, "error": str(e)}, 500)
         return _json({"ok": True, "sent": text})
 
-    @require_auth
+    @require_admin
     async def api_upload(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         reader = await request.multipart()
@@ -245,7 +286,7 @@ def create_app(module: Any) -> web.Application:
             logger.warning("upload send failed: %s", e)
         return _json({"ok": True, "path": str(dest), "size": len(data)})
 
-    @require_auth
+    @require_admin
     async def api_db_get(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         owner = request.query.get("owner") or "hikkari.main"
