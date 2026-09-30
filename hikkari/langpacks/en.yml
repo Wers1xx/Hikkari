@@ -558,6 +558,10 @@ api_protection:
   on: "<tg-emoji emoji-id=5458450833857322148>👌</tg-emoji> <b>Protection enabled</b>"
   off: "<tg-emoji emoji-id=5458450833857322148>👌</tg-emoji> <b>Protection disabled</b>"
   u_sure: "<tg-emoji emoji-id=5312383351217201533>⚠️</tg-emoji> <b>Are you sure?</b>"
+  u_sure_off: "<tg-emoji emoji-id=5312383351217201533>⚠️</tg-emoji> <b>Disable API flood protection?</b>"
+  u_sure_on: "<tg-emoji emoji-id=5312383351217201533>⚠️</tg-emoji> <b>Enable API flood protection?</b>"
+  already_off: "<tg-emoji emoji-id=5458450833857322148>👌</tg-emoji> <b>API flood protection is already OFF</b>"
+  already_on: "<tg-emoji emoji-id=5458450833857322148>👌</tg-emoji> <b>API flood protection is already ON</b>"
   _cfg_time_sample: "Time sample through which the bot will count requests"
   _cfg_threshold: "Threshold of requests to trigger protection"
   _cfg_local_floodwait: "Freeze userbot for this amount of time, if request limit exceeds"
@@ -566,8 +570,8 @@ api_protection:
   btn_yes: "✅ Yes"
   proxied_url: "🌐 Proxied URL"
   local_url: "🏠 Local URL"
-  _cmd_doc_api_fw_protection: "Toggle API Ratelimiter"
-  _cmd_doc_suspend_api_protect: "<time in seconds> - Suspend API Ratelimiter for n seconds"
+  _cmd_doc_api_fw_protection: "Status/toggle API protection. Args: on | off | status"
+  _cmd_doc_suspend_api_protect: "Temporarily disable API protection for N seconds"
   _cls_doc: "Helps userbot avoid spamming Telegram API"
 
 help:

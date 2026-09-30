@@ -540,8 +540,8 @@ api_protection:
   btn_yes: "✅ Да"
   proxied_url: "🌐 Проксированная ссылка"
   local_url: "🏠 Локальная ссылка"
-  _cmd_doc_api_fw_protection: "Включить/выключить защиту API"
-  _cmd_doc_suspend_api_protect: "<время в секундах> - Заморозить защиту API на N секунд"
+  _cmd_doc_api_fw_protection: "Статус/вкл/выкл защиты API. Аргументы: on | off | status"
+  _cmd_doc_suspend_api_protect: "Временно отключить защиту API на N секунд"
   name: APILimiter
   _cls_doc: Помогает юзерботу не спамить Telegram API
 help:
