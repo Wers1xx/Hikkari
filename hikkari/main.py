@@ -62,7 +62,7 @@ from hikkaritl.tl.functions.account import GetPasswordRequest
 from hikkaritl.tl.functions.auth import CheckPasswordRequest
 from hikkaritl.tl.functions.contacts import UnblockRequest
 
-from . import database, loader, utils, version
+from . import database, session_repair, loader, utils, version
 from ._internal import print_banner, restart
 from .dispatcher import CommandDispatcher
 from .qr import QRCode
@@ -586,6 +586,13 @@ class Hikkari:
 
     def _read_sessions(self):
         """Gets sessions from environment and data directory"""
+        try:
+            session_repair.patch_sqlite_session_class()
+            n = session_repair.repair_sessions_dir(SESSIONS_DIR)
+            if n:
+                logger.info("Repaired %s session file(s) missing entities table", n)
+        except Exception:
+            logger.exception("Session self-heal failed (non-fatal)")
         self.sessions = []
         with os.scandir(SESSIONS_DIR) as entries:
             self.sessions += [
