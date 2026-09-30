@@ -618,6 +618,10 @@ class HikkariSecurityMod(loader.Module):
             getattr(self._client.dispatcher.security, group).append(user.id)
             self._client.dispatcher.security._reload_rights(force=True)
 
+        # Owners always need nonick to actually control the userbot in chats
+        if group == "owner":
+            enable_nonick = True
+
         if enable_nonick:
             self._db.set(
                 main.__name__,
@@ -680,7 +684,8 @@ class HikkariSecurityMod(loader.Module):
     async def owneradd(self, message: Message):
         args = utils.get_args(message)
         force = any(arg in {"-f", "--force"} for arg in args)
-        enable_nonick = any(arg in {"-n", "--nonick"} for arg in args)
+        # Co-owners always get nonick so they can run commands without @mention
+        enable_nonick = True
         user_args = " ".join(
             arg for arg in args if arg not in {"-f", "--force", "-n", "--nonick"}
         )

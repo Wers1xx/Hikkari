@@ -275,7 +275,18 @@ class CommandDispatcher:
         if not hasattr(event, "message") or not hasattr(event.message, "message"):
             return False
 
-        initiator = getattr(event, "sender_id", 0)
+        # Reliable sender id (incoming co-owners often break with bare event.sender_id)
+        initiator = (
+            getattr(event, "sender_id", None)
+            or getattr(getattr(event, "message", None), "sender_id", None)
+            or 0
+        )
+        if not initiator and getattr(event, "message", None) is not None:
+            from_id = getattr(event.message, "from_id", None)
+            if from_id is not None:
+                with contextlib.suppress(Exception):
+                    initiator = utils.get_entity_id(from_id) or 0
+        initiator = int(initiator) if initiator else 0
 
         main_prefix = self._db.get(main.__name__, "command_prefix", ".")
         if initiator == self._client.tg_id:
@@ -374,6 +385,9 @@ class CommandDispatcher:
             and not self._db.get(main.__name__, "no_nickname", False)
             and command not in self._db.get(main.__name__, "nonickcmds", [])
             and initiator not in self._db.get(main.__name__, "nonickusers", [])
+            # Co-owners must control ub without @mention / nonick flag
+            and initiator not in (self.security.owner or [])
+            and initiator != self._client.tg_id
             and not self.security.check_tsec(initiator, command)
             and utils.get_chat_id(event)
             not in self._db.get(main.__name__, "nonickchats", [])

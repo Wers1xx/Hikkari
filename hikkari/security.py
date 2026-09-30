@@ -439,11 +439,24 @@ class SecurityManager:
         if not (config := self.get_flags(func)):
             return False
 
-        if not user_id:
-            user_id = message.sender_id
+        if not user_id and message is not None:
+            user_id = getattr(message, "sender_id", None)
+            if not user_id:
+                from_id = getattr(message, "from_id", None)
+                if from_id is not None:
+                    with contextlib.suppress(Exception):
+                        user_id = utils.get_entity_id(from_id)
+            # Never fall back to chat peer_id for groups — that is not the user
+            if not user_id and getattr(message, "is_private", False):
+                peer = getattr(message, "peer_id", None)
+                if peer is not None:
+                    with contextlib.suppress(Exception):
+                        user_id = utils.get_entity_id(peer)
 
-        if not user_id:
-            user_id = message.peer_id
+        try:
+            user_id = int(user_id) if user_id else 0
+        except (TypeError, ValueError):
+            user_id = 0
 
         is_channel = False
 
