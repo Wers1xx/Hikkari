@@ -121,21 +121,25 @@ def create_app(module: Any) -> web.Application:
         me = getattr(st.client, "hikkari_me", None) or getattr(st.client, "_me", None)
         from .. import version
 
+        role = request.get("hikkari_role") or "view"
         mods = list(st.allmodules.modules)
-        return _json(
-            {
-                "ok": True,
-                "version": ".".join(map(str, version.__version__)),
-                "uptime": int(time.time() - st.started),
-                "modules": len(mods),
-                "role": request.get("hikkari_role") or "view",
-                "user": {
-                    "id": getattr(me, "id", None),
-                    "name": getattr(me, "first_name", None),
-                    "username": getattr(me, "username", None),
-                },
-            }
-        )
+        payload = {
+            "ok": True,
+            "version": ".".join(map(str, version.__version__)),
+            "uptime": int(time.time() - st.started),
+            "role": role,
+            "user": {
+                "id": getattr(me, "id", None),
+                "name": getattr(me, "first_name", None),
+                "username": getattr(me, "username", None),
+            },
+        }
+        # Full stats only for admin; viewers get overview without module inventory
+        if role == "admin":
+            payload["modules"] = len(mods)
+        else:
+            payload["modules"] = None
+        return _json(payload)
 
     @require_admin
     async def api_modules(request: web.Request) -> web.Response:
