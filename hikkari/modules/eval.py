@@ -65,13 +65,51 @@ class Evaluator(loader.Module):
 
             return self._db.set(*args, **kwargs)
 
+
+    async def _get_reply(self, message: Message):
+        """Resolve replied message even if get_reply_message() returns None."""
+        reply = None
+        with contextlib.suppress(Exception):
+            reply = await message.get_reply_message()
+        if reply is not None:
+            return reply
+
+        reply_to = getattr(message, "reply_to", None)
+        if reply_to is None:
+            return None
+
+        msg_id = getattr(reply_to, "reply_to_msg_id", None) or getattr(
+            reply_to, "reply_to_top_id", None
+        )
+        if not msg_id:
+            return None
+
+        with contextlib.suppress(Exception):
+            peer = utils.get_chat_id(message) or message.peer_id
+            fetched = await self._client.get_messages(peer, ids=int(msg_id))
+            if isinstance(fetched, list):
+                return fetched[0] if fetched else None
+            return fetched
+        return None
+
     @loader.command(alias="eval")
     async def e(self, message: Message):
-        args = utils.get_args_raw(message)
-        reply = await message.get_reply_message()
+        args = utils.get_args_raw(message) or ""
+        reply = await self._get_reply(message)
 
-        if not args and reply and reply.text:
-            args = reply.message
+        if not args and reply and (getattr(reply, "text", None) or getattr(reply, "message", None)):
+            args = reply.message or reply.text or ""
+
+        if not (args or "").strip():
+            await utils.answer(
+                message,
+                "💻 <b>Eval</b>
+<code>.e &lt;python&gt;</code> or reply to a message with code.
+"
+                "Vars: <code>c</code>/<code>client</code>, <code>m</code>/<code>message</code>, "
+                "<code>r</code>/<code>reply</code>, <code>db</code>, <code>utils</code>",
+            )
+            return
 
         skip_output = args.startswith(("-so ", "--skip-output "))
         if skip_output:
@@ -94,9 +132,19 @@ class Evaluator(loader.Module):
                 )
             print_output = output_print.getvalue()
 
-        except Exception:
+        except Exception as e:
             item = HikkariException.from_exc_info(*sys.exc_info())
             print_output = output_print.getvalue()
+            extra_hint = ""
+            if isinstance(e, AttributeError) and "NoneType" in str(e) and (
+                "r." in args or "reply." in args
+            ):
+                extra_hint = (
+                    "
+
+💡 <b>Hint:</b> <code>r</code>/<code>reply</code> is "
+                    "<code>None</code> — reply to a message when using them."
+                )
 
             await utils.answer(
                 message,
@@ -119,7 +167,8 @@ class Evaluator(loader.Module):
                     )
                     if print_output
                     else ""
-                ),
+                )
+                + extra_hint,
             )
 
             return
@@ -474,7 +523,7 @@ class Evaluator(loader.Module):
         return ret
 
     async def getattrs(self, message: Message) -> dict:
-        reply = await message.get_reply_message()
+        reply = await self._get_reply(message)
         return {
             "message": message,
             "client": self._client,
