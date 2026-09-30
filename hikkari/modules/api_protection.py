@@ -247,8 +247,13 @@ class APIRatelimiterMod(loader.Module):
             delattr(self._client, "_old_call_rewritten")
             logger.debug("Successfully uninstalled ratelimiter")
 
+    def _protection_enabled(self) -> bool:
+        # disable_protection=True means ratelimiter is OFF
+        return not bool(self.get("disable_protection", True))
+
     @loader.command()
     async def suspend_api_protect(self, message: Message):
+        """Temporarily disable API flood protection for N seconds"""
         if not (args := utils.get_args_raw(message)) or not args.isdigit():
             await utils.answer(message, self.strings["args_invalid"])
             return
@@ -258,16 +263,68 @@ class APIRatelimiterMod(loader.Module):
 
     @loader.command()
     async def api_fw_protection(self, message: Message):
+        """Toggle / status API flood protection. Args: on | off | status"""
+        args = (utils.get_args_raw(message) or "").strip().lower()
+        enabled = self._protection_enabled()
+
+        if args in {"status", "state", "info", "?"}:
+            await utils.answer(
+                message,
+                self.strings["already_on"] if enabled else self.strings["already_off"],
+            )
+            return
+
+        if args in {"on", "enable", "1", "true", "yes"}:
+            if enabled:
+                await utils.answer(message, self.strings["already_on"])
+                return
+            self.set("disable_protection", False)
+            await utils.answer(message, self.strings["on"])
+            return
+
+        if args in {"off", "disable", "0", "false", "no"}:
+            if not enabled:
+                await utils.answer(message, self.strings["already_off"])
+                return
+            self.set("disable_protection", True)
+            await utils.answer(message, self.strings["off"])
+            return
+
+        # No args: interactive toggle with status-aware prompt
+        if enabled:
+            text = self.strings["u_sure_off"]
+            want_enable = False
+        else:
+            text = self.strings["u_sure_on"]
+            want_enable = True
+
         await self.inline.form(
             message=message,
-            text=self.strings["u_sure"],
+            text=text,
+            force_me=True,
             reply_markup=[
                 {"text": self.strings["btn_no"], "action": "close"},
-                {"text": self.strings["btn_yes"], "callback": self._finish},
+                {
+                    "text": self.strings["btn_yes"],
+                    "callback": self._finish,
+                    "args": (want_enable,),
+                },
             ],
         )
 
-    async def _finish(self, call: InlineCall):
-        state = self.get("disable_protection", True)
-        self.set("disable_protection", not state)
-        await call.edit(self.strings["on" if state else "off"])
+    async def _finish(self, call: InlineCall, want_enable: bool = None):
+        enabled = self._protection_enabled()
+
+        if want_enable is None:
+            # legacy toggle
+            want_enable = not enabled
+
+        if want_enable and enabled:
+            await call.edit(self.strings["already_on"])
+            return
+        if not want_enable and not enabled:
+            await call.edit(self.strings["already_off"])
+            return
+
+        self.set("disable_protection", not want_enable)
+        await call.edit(self.strings["on" if want_enable else "off"])
