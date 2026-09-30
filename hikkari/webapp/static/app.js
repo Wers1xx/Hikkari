@@ -197,7 +197,11 @@ if ($("#cmdRun"))
         method: "POST",
         json: { command: $("#cmdName").value, args: $("#cmdArgs").value },
       });
-      $("#cmdOut").textContent = JSON.stringify(res, null, 2);
+      const out = res.output || res.error || JSON.stringify(res, null, 2);
+      // strip simple HTML tags for readability
+      const tmp = document.createElement("div");
+      tmp.innerHTML = out;
+      $("#cmdOut").textContent = tmp.textContent || tmp.innerText || out;
     } catch (e) {
       $("#cmdOut").textContent = e.message;
     }

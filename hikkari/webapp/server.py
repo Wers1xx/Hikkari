@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import mimetypes
@@ -24,6 +25,76 @@ def _json(data: Any, status: int = 200) -> web.Response:
         status=status,
         content_type="application/json",
     )
+
+
+
+class WebAppMessage:
+    """In-memory message shim: run commands without posting to Saved Messages."""
+
+    def __init__(self, client, text: str, chat_id: int):
+        from hikkaritl.tl.types import PeerUser
+
+        self.client = client
+        self._client = client
+        self.message = text
+        self.raw_text = text
+        self.text = text
+        self.out = True
+        self.id = int(time.time() * 1000) % 2_000_000_000
+        self.chat_id = chat_id
+        self.sender_id = getattr(client, "tg_id", chat_id)
+        self.is_private = True
+        self.is_channel = False
+        self.is_group = False
+        self.media = None
+        self.entities = None
+        self.via_bot_id = None
+        self.reply_to = None
+        self.fwd_from = None
+        self.file = None
+        self.sticker = None
+        self.video = None
+        self.photo = None
+        self.document = None
+        self.voice = None
+        self.audio = None
+        self.web_preview = None
+        self.peer_id = PeerUser(int(chat_id))
+        self.to_id = self.peer_id
+        self._responses: list[str] = []
+
+    async def get_reply_message(self):
+        return None
+
+    async def get_chat(self):
+        return None
+
+    async def get_sender(self):
+        return getattr(self.client, "hikkari_me", None)
+
+    async def edit(self, text=None, *args, **kwargs):
+        if text is not None:
+            s = text if isinstance(text, str) else str(text)
+            self._responses.append(s)
+            self.message = s
+            self.text = s
+            self.raw_text = s
+        return self
+
+    async def respond(self, text=None, *args, **kwargs):
+        if text is not None:
+            s = text if isinstance(text, str) else str(text)
+            self._responses.append(s)
+        return self
+
+    async def reply(self, text=None, *args, **kwargs):
+        return await self.respond(text, *args, **kwargs)
+
+    async def delete(self, *args, **kwargs):
+        return None
+
+    def __str__(self):
+        return self.message or ""
 
 
 class WebAppState:
@@ -254,20 +325,76 @@ def create_app(module: Any) -> web.Application:
             body = await request.json()
         except Exception:
             return _json({"ok": False, "error": "invalid json"}, 400)
-        cmd = (body.get("command") or "").strip().lstrip(".")
-        args = body.get("args") or ""
+
+        cmd = (body.get("command") or "").strip()
+        # strip any accidental prefix characters
+        while cmd and cmd[0] in ".!/":
+            cmd = cmd[1:].strip()
+        args = (body.get("args") or "").strip()
         if not cmd:
             return _json({"ok": False, "error": "empty command"}, 400)
-        # Send as message to Saved Messages so full dispatcher handles it
-        prefix = st.db.get("hikkari", "command_prefix", st.db.get(__import__("hikkari.main", fromlist=["main"]).__name__ if False else "hikkari.main", "command_prefix", "."))
-        text = f"{prefix}{cmd}"
+
+        # Resolve alias / command name like the dispatcher does
+        commands = getattr(st.allmodules, "commands", {}) or {}
+        resolved = cmd.lower()
+        func = commands.get(resolved)
+        if not func:
+            # try find_alias
+            with contextlib.suppress(Exception):
+                alias = st.allmodules.find_alias(resolved, include_legacy=True)
+                if alias:
+                    resolved = alias
+                    func = commands.get(resolved)
+        if not func:
+            return _json(
+                {"ok": False, "error": f"command not found: {cmd}"},
+                404,
+            )
+
+        try:
+            from .. import main as hmain
+
+            prefix = st.db.get(hmain.__name__, "command_prefix", ".") or "."
+        except Exception:
+            prefix = "."
+        if not isinstance(prefix, str) or not prefix:
+            prefix = "."
+
+        text = f"{prefix}{resolved}"
         if args:
             text = f"{text} {args}"
+
+        chat_id = int(getattr(st.client, "tg_id", 0) or 0)
+        message = WebAppMessage(st.client, text, chat_id)
+
         try:
-            await st.client.send_message("me", text)
+            await func(message)
         except Exception as e:
-            return _json({"ok": False, "error": str(e)}, 500)
-        return _json({"ok": True, "sent": text})
+            logger.exception("WebApp command %s failed", resolved)
+            # still return captured output if any
+            out = "\n\n".join(message._responses) if message._responses else ""
+            return _json(
+                {
+                    "ok": False,
+                    "error": str(e),
+                    "command": resolved,
+                    "output": out,
+                },
+                500,
+            )
+
+        output = "\n\n".join(message._responses) if message._responses else (
+            message.text if message.text != text else ""
+        )
+        return _json(
+            {
+                "ok": True,
+                "command": resolved,
+                "args": args,
+                "output": output,
+            }
+        )
+
 
     @require_admin
     async def api_upload(request: web.Request) -> web.Response:
