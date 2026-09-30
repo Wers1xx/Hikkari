@@ -17,6 +17,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -547,3 +548,222 @@ class HikkariWebMod(loader.Module):
             return
 
         asyncio.ensure_future(self.schedule_restart(call, client, is_switch=is_switch))
+
+
+    def _owner_only(self, message: Message) -> bool:
+        """Only the primary account owner (this client), not co-owners."""
+        uid = getattr(message, "sender_id", None) or 0
+        return int(uid) == int(self.tg_id)
+
+    def _list_session_ids(self) -> list[int]:
+        ids: set[int] = set()
+        sessions_dir = Path(main.SESSIONS_DIR)
+        if sessions_dir.is_dir():
+            for entry in sessions_dir.iterdir():
+                name = entry.name
+                if not (name.startswith("hikkari-") and name.endswith(".session")):
+                    continue
+                if name.endswith("-journal") or ".session-journal" in name:
+                    continue
+                raw = name[len("hikkari-") : -len(".session")]
+                if raw.isdigit():
+                    ids.add(int(raw))
+        # live clients
+        for client in getattr(self, "allclients", None) or []:
+            with contextlib.suppress(Exception):
+                tid = int(getattr(client, "tg_id", 0) or 0)
+                if tid:
+                    ids.add(tid)
+        with contextlib.suppress(Exception):
+            ids.add(int(self.tg_id))
+        return sorted(ids)
+
+    def _client_by_id(self, uid: int):
+        for client in getattr(self, "allclients", None) or []:
+            with contextlib.suppress(Exception):
+                if int(getattr(client, "tg_id", 0) or 0) == int(uid):
+                    return client
+        return None
+
+    @loader.command()
+    async def acclist(self, message: Message):
+        """List accounts connected to this userbot (primary owner only)"""
+        if not self._owner_only(message):
+            await utils.answer(message, self.strings["owner_only"])
+            return
+
+        ids = self._list_session_ids()
+        if not ids:
+            await utils.answer(message, self.strings["no_accounts"])
+            return
+
+        lines = []
+        for uid in ids:
+            live = self._client_by_id(uid) is not None
+            mark = "🟢" if live else "⚪"
+            current = " ← current" if uid == int(self.tg_id) else ""
+            name = str(uid)
+            client = self._client_by_id(uid)
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    me = getattr(client, "hikkari_me", None) or await client.get_me()
+                    if me:
+                        uname = f"@{me.username}" if getattr(me, "username", None) else ""
+                        name = f"{utils.escape_html(me.first_name or '')} {uname}".strip()
+            else:
+                # try resolve offline
+                with contextlib.suppress(Exception):
+                    ent = await self._client.get_entity(uid)
+                    uname = f"@{ent.username}" if getattr(ent, "username", None) else ""
+                    name = f"{utils.escape_html(ent.first_name or '')} {uname}".strip()
+
+            session_path = Path(main.SESSIONS_DIR) / f"hikkari-{uid}.session"
+            cfg_path = main.BASE_PATH / f"config-{uid}.json"
+            bits = []
+            if session_path.exists():
+                bits.append("session")
+            if cfg_path.exists():
+                bits.append("db")
+            extra = f" [{', '.join(bits)}]" if bits else ""
+            lines.append(
+                self.strings["acc_line"].format(
+                    mark=mark,
+                    name=name or str(uid),
+                    uid=uid,
+                    current=current,
+                    extra=extra,
+                )
+            )
+
+        await utils.answer(
+            message,
+            self.strings["acc_list"].format(
+                count=len(ids),
+                lines="\n".join(lines),
+            ),
+        )
+
+    @loader.command()
+    async def accdel(self, message: Message):
+        """Remove userbot from an account: close session, delete files, drop from list"""
+        if not self._owner_only(message):
+            await utils.answer(message, self.strings["owner_only"])
+            return
+
+        args = (utils.get_args_raw(message) or "").strip()
+        force = "-f" in args.split() or "--force" in args.split()
+        parts = [p for p in args.split() if p not in {"-f", "--force"}]
+        if not parts:
+            await utils.answer(message, self.strings["accdel_usage"])
+            return
+
+        target_raw = parts[0]
+        target_id = None
+        if target_raw.isdigit():
+            target_id = int(target_raw)
+        else:
+            with contextlib.suppress(Exception):
+                ent = await self._client.get_entity(target_raw)
+                target_id = int(ent.id)
+
+        if not target_id:
+            await utils.answer(message, self.strings["acc_not_found"])
+            return
+
+        known = set(self._list_session_ids())
+        if target_id not in known and not force:
+            await utils.answer(message, self.strings["acc_not_found"])
+            return
+
+        if target_id == int(self.tg_id) and not force:
+            await utils.answer(message, self.strings["accdel_current"])
+            return
+
+        await self.inline.form(
+            message=message,
+            text=self.strings["accdel_confirm"].format(uid=target_id),
+            force_me=True,
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["btn_yes"],
+                        "callback": self._accdel_run,
+                        "args": (target_id,),
+                    }
+                ],
+                [{"text": self.strings["btn_no"], "action": "close"}],
+            ],
+        )
+
+    async def _accdel_run(self, call: InlineCall, target_id: int):
+        if not self._owner_only(
+            type("M", (), {"sender_id": getattr(getattr(call, "from_user", None), "id", self.tg_id)})()
+        ):
+            # only primary owner
+            with contextlib.suppress(Exception):
+                from_id = int(getattr(call.from_user, "id", 0))
+                if from_id != int(self.tg_id):
+                    await call.edit(self.strings["owner_only"])
+                    return
+
+        errors = []
+        # 1) Disconnect live client
+        client = self._client_by_id(target_id)
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+            # remove from allclients lists
+            for holder in (getattr(self, "allclients", None), getattr(main.hikkari, "clients", None)):
+                if holder is None:
+                    continue
+                with contextlib.suppress(Exception):
+                    while client in holder:
+                        holder.remove(client)
+            with contextlib.suppress(Exception):
+                sessions = getattr(main.hikkari, "sessions", None)
+                if sessions is not None:
+                    main.hikkari.sessions = [
+                        s
+                        for s in sessions
+                        if not str(getattr(s, "filename", getattr(s, "_filename", ""))).endswith(
+                            f"hikkari-{target_id}.session"
+                        )
+                        and f"hikkari-{target_id}" not in str(s)
+                    ]
+
+        # 2) Delete session files
+        base = Path(main.SESSIONS_DIR)
+        for path in (
+            base / f"hikkari-{target_id}.session",
+            base / f"hikkari-{target_id}.session-journal",
+        ):
+            try:
+                if path.exists():
+                    path.unlink()
+            except Exception as e:
+                errors.append(f"{path.name}: {e}")
+
+        # 3) Delete per-account config/db
+        cfg = main.BASE_PATH / f"config-{target_id}.json"
+        try:
+            if cfg.exists():
+                cfg.unlink()
+        except Exception as e:
+            errors.append(f"config: {e}")
+
+        # 4) Cannot fully unload current process account without exit
+        if target_id == int(self.tg_id):
+            await call.edit(self.strings["accdel_current_done"])
+            return
+
+        if errors:
+            await call.edit(
+                self.strings["accdel_partial"].format(
+                    uid=target_id,
+                    err=utils.escape_html("; ".join(errors)),
+                )
+            )
+            return
+
+        await call.edit(self.strings["accdel_done"].format(uid=target_id))
+

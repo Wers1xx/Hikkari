@@ -171,8 +171,8 @@ hikkari_settings:
   user_nn_list: "<tg-emoji emoji-id=5469791106591890404>🪄</tg-emoji> <b>NoNick is enabled for these users:</b>\n\n<blockquote expandable>{}</blockquote>"
   chat_nn_list: "<tg-emoji emoji-id=5469791106591890404>🪄</tg-emoji> <b>NoNick is enabled for these chats:</b>\n\n<blockquote expandable>{}</blockquote>"
   nothing: "<tg-emoji emoji-id=5427052514094619126>🤷‍♀️</tg-emoji> <b>Nothing to show...</b>"
-  btn_yes: "🚸 Open anyway"
-  btn_no: "🔻 Cancel"
+  btn_yes: "✅ Yes"
+  btn_no: "🚫 No"
   _cmd_doc_invoke: "<module or `core` for built-in methods> <method> - Only for debugging purposes. DO NOT USE IF YOU'RE NOT A DEVELOPER"
   _cmd_doc_nonickchat: "Allow no nickname in certain chat"
   _cmd_doc_nonickchats: "Returns the list of NoNick chats"
@@ -261,7 +261,20 @@ hikkari_web:
   name: HikkariAccounts
   _cls_doc: Inline account management
   _cmd_doc_addacc: '[user/id/reply] - Add another account through inline login'
-hikkari_backup:
+hikkari_back  owner_only: "🚫 Only the primary account owner can do this."
+  no_accounts: "📭 No saved accounts."
+  acc_list: "✨ <b>Hikkari accounts</b> ({count}):\n\n{lines}"
+  acc_line: "{mark} <b>{name}</b> — <code>{uid}</code>{current}{extra}"
+  accdel_usage: "ℹ️ <code>accdel &lt;id|@user&gt;</code> — remove userbot from account.\nCurrent account: only with <code>-f</code>."
+  acc_not_found: "🚫 Account not found in session list."
+  accdel_current: "⚠️ This is the current account. Force with <code>accdel ID -f</code> (then stop the process)."
+  accdel_confirm: "⚠️ Remove userbot from account <code>{uid}</code>?\nSession will close, session/db files deleted, account removed from list."
+  accdel_done: "✅ Account <code>{uid}</code> removed: session closed, files deleted."
+  accdel_partial: "⚠️ Account <code>{uid}</code> partially cleaned:\n<code>{err}</code>"
+  accdel_current_done: "✅ Current account files deleted. Restart/stop the userbot to finish."
+  _cmd_doc_acclist: "List accounts linked to this userbot (primary owner only)"
+  _cmd_doc_accdel: "Remove userbot from an account: close session and delete files"
+up:
   period: "⌚️ <b>The unit «ALPHA»</b> creates regular backups. These settings can be changed later.\n\nPlease select the backup frequency\n\n<b>🚫 It is thus impossible to restore modules downloaded from files with the .lm command! Be careful and do .backupmods before restoring.</b>"
   saved: "✅ The periodicity is saved! It can be changed with <code>{prefix}set_backup_period</code>"
   saved_bot: "✅ The periodicity is saved! It can be changed with {prefix}set_backup_period"
