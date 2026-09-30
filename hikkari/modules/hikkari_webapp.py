@@ -85,8 +85,11 @@ class HikkariWebAppMod(loader.Module):
             self.set("view_token", self._web_view_token)
 
         if self.config["autostart"]:
-            with contextlib.suppress(Exception):
-                await self._ensure_server()
+            # never block client_ready / restart on bind errors
+            async def _boot():
+                with contextlib.suppress(Exception):
+                    await self._ensure_server()
+            asyncio.ensure_future(_boot())
 
     async def on_unload(self):
         await self._stop_server()

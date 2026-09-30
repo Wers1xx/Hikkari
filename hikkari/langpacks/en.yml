@@ -261,7 +261,7 @@ hikkari_web:
   name: HikkariAccounts
   _cls_doc: Inline account management
   _cmd_doc_addacc: '[user/id/reply] - Add another account through inline login'
-hikkari_back  owner_only: "🚫 Only the primary account owner can do this."
+  owner_only: "🚫 Only the primary account owner can do this."
   no_accounts: "📭 No saved accounts."
   acc_list: "✨ <b>Hikkari accounts</b> ({count}):\n\n{lines}"
   acc_line: "{mark} <b>{name}</b> — <code>{uid}</code>{current}{extra}"
@@ -274,7 +274,7 @@ hikkari_back  owner_only: "🚫 Only the primary account owner can do this."
   accdel_current_done: "✅ Current account files deleted. Restart/stop the userbot to finish."
   _cmd_doc_acclist: "List accounts linked to this userbot (primary owner only)"
   _cmd_doc_accdel: "Remove userbot from an account: close session and delete files"
-up:
+hikkari_backup:
   period: "⌚️ <b>The unit «ALPHA»</b> creates regular backups. These settings can be changed later.\n\nPlease select the backup frequency\n\n<b>🚫 It is thus impossible to restore modules downloaded from files with the .lm command! Be careful and do .backupmods before restoring.</b>"
   saved: "✅ The periodicity is saved! It can be changed with <code>{prefix}set_backup_period</code>"
   saved_bot: "✅ The periodicity is saved! It can be changed with {prefix}set_backup_period"
