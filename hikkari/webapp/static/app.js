@@ -26,8 +26,19 @@ async function tryAuth(token) {
   localStorage.setItem("hikkari_web_token", TOKEN);
   showApp();
   renderDash(data);
-  loadModules();
-  $("#sideStatus").textContent = "v" + data.version + " · @" + (data.user.username || data.user.id);
+  const role = data.role || "view";
+  window.HIKKARI_ROLE = role;
+  document.querySelectorAll("nav button").forEach((btn) => {
+    if (role !== "admin" && btn.dataset.tab !== "dash") {
+      btn.classList.add("hidden");
+      btn.disabled = true;
+    }
+  });
+  if (role === "admin") {
+    loadModules();
+  }
+  $("#sideStatus").textContent =
+    "v" + data.version + " · " + role + " · @" + (data.user.username || data.user.id);
 }
 
 $("#authBtn").onclick = async () => {

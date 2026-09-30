@@ -26,36 +26,24 @@ class HikkariWebAppMod(loader.Module):
     strings = {
         "name": "HikkariWebApp",
         "link_admin": (
-            '✨ <a href="{url}">WebApp Hikkari</a>
-
-'
-            "🔑 Админ-доступ (owner / co-owner)
-"
+            "✨ <a href=\"{url}\">WebApp Hikkari</a>\n\n"
+            "🔑 Админ-доступ (owner / co-owner)\n"
             "<code>{token}</code>"
         ),
         "link_view": (
-            '✨ <a href="{url}">WebApp Hikkari</a>
-
-'
-            "👁 Только обзор (без конфигов и команд)
-"
+            "✨ <a href=\"{url}\">WebApp Hikkari</a>\n\n"
+            "👁 Только обзор (без конфигов и команд)\n"
             "<code>{token}</code>"
         ),
         "denied": "🚫 Только owner или co-owner может получить полный WebApp.",
         "stopped": "🛑 WebApp остановлен",
         "not_running": "WebApp не запущен",
         "info": (
-            "✨ <b>WebApp Hikkari</b>
-"
-            "• owner / co-owner — полный доступ
-"
-            "• остальные — только обзор (view-токен)
-
-"
-            "<code>.webapp</code> — ссылка
-"
-            "<code>.webapp view</code> — публичный обзор
-"
+            "✨ <b>WebApp Hikkari</b>\n"
+            "• owner / co-owner — полный доступ\n"
+            "• остальные — только обзор (view-токен)\n\n"
+            "<code>.webapp</code> — ссылка\n"
+            "<code>.webapp view</code> — публичный обзор\n"
             "<code>.webapp stop</code> / <code>restart</code>"
         ),
     }
