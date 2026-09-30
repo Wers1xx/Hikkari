@@ -2,66 +2,166 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0b12" />
   <title>Hikkari WebApp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/app.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23A78BFA'/%3E%3Cstop offset='1' stop-color='%2322D3EE'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M32 4l7.2 18.2L58 24l-14 12.6L48 56 32 46.2 16 56l4-19.4L6 24l18.8-1.8z'/%3E%3C/svg%3E" />
 </head>
 <body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+  <div class="bg-orb orb-c"></div>
+  <div class="bg-grid"></div>
+
   <div id="auth" class="panel auth">
-    <div class="card">
-      <h1>✨ Hikkari</h1>
-      <p>Вставь токен из <code>.webapp</code></p>
-      <input id="tokenInput" type="password" placeholder="Token" autocomplete="off" />
-      <button id="authBtn" class="primary">Войти</button>
+    <div class="auth-card glass">
+      <div class="logo-wrap">
+        <svg class="logo-star" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#C4B5FD"/>
+              <stop offset="50%" stop-color="#A78BFA"/>
+              <stop offset="100%" stop-color="#22D3EE"/>
+            </linearGradient>
+            <filter id="starGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path filter="url(#starGlow)" fill="url(#starGrad)" d="M32 4.5l7.4 18.6 20.1 1.9-15 13.5 4.4 19.7L32 47.6 15.1 58.2l4.4-19.7-15-13.5 20.1-1.9z"/>
+        </svg>
+      </div>
+      <h1>Hikkari <span>WebApp</span></h1>
+      <p class="auth-sub">Панель управления юзерботом</p>
+      <div class="field">
+        <label for="tokenInput">Токен доступа</label>
+        <input id="tokenInput" type="password" placeholder="Вставь токен из ссылки .webapp" autocomplete="off" />
+      </div>
+      <button id="authBtn" class="btn primary block">
+        <span>Войти</span>
+      </button>
       <p id="authErr" class="err"></p>
+      <p class="auth-foot">✨ Secure · Owner / View roles</p>
     </div>
   </div>
 
-  <div id="app" class="hidden">
-    <aside class="sidebar">
-      <div class="brand">✨ Hikkari</div>
+  <div id="app" class="hidden shell">
+    <aside class="sidebar glass">
+      <div class="brand">
+        <svg class="logo-star sm" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="starGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#C4B5FD"/>
+              <stop offset="100%" stop-color="#22D3EE"/>
+            </linearGradient>
+          </defs>
+          <path fill="url(#starGrad2)" d="M32 4.5l7.4 18.6 20.1 1.9-15 13.5 4.4 19.7L32 47.6 15.1 58.2l4.4-19.7-15-13.5 20.1-1.9z"/>
+        </svg>
+        <div>
+          <div class="brand-title">Hikkari</div>
+          <div class="brand-sub">WebApp</div>
+        </div>
+      </div>
       <nav>
-        <button data-tab="dash" class="active">Обзор</button>
-        <button data-tab="modules">Модули</button>
-        <button data-tab="config">Конфиг</button>
-        <button data-tab="run">Команды</button>
-        <button data-tab="media">Медиа</button>
+        <button data-tab="dash" class="nav-btn active"><span class="ico">◈</span> Обзор</button>
+        <button data-tab="modules" class="nav-btn"><span class="ico">▣</span> Модули</button>
+        <button data-tab="config" class="nav-btn"><span class="ico">⚙</span> Конфиг</button>
+        <button data-tab="run" class="nav-btn"><span class="ico">▶</span> Команды</button>
+        <button data-tab="media" class="nav-btn"><span class="ico">⬆</span> Медиа</button>
       </nav>
-      <div class="side-foot" id="sideStatus">—</div>
+      <div class="side-foot">
+        <div class="pill" id="rolePill">—</div>
+        <div class="side-meta" id="sideStatus">—</div>
+      </div>
     </aside>
-    <main>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <h2 id="pageTitle">Обзор</h2>
+          <p class="page-desc" id="pageDesc">Состояние юзербота в реальном времени</p>
+        </div>
+        <div class="top-actions">
+          <button id="refreshBtn" class="btn ghost" title="Обновить">↻</button>
+        </div>
+      </header>
+
       <section id="tab-dash" class="tab active">
-        <h2>Обзор</h2>
+        <div class="hero glass">
+          <div class="hero-left">
+            <svg class="logo-star lg" viewBox="0 0 64 64" aria-hidden="true">
+              <defs>
+                <linearGradient id="starGrad3" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#E9D5FF"/>
+                  <stop offset="45%" stop-color="#A78BFA"/>
+                  <stop offset="100%" stop-color="#22D3EE"/>
+                </linearGradient>
+              </defs>
+              <path fill="url(#starGrad3)" d="M32 4.5l7.4 18.6 20.1 1.9-15 13.5 4.4 19.7L32 47.6 15.1 58.2l4.4-19.7-15-13.5 20.1-1.9z"/>
+            </svg>
+          </div>
+          <div class="hero-right">
+            <div class="eyebrow">Userbot control panel</div>
+            <h3>Hikkari is online</h3>
+            <p id="heroLine">Загрузка статуса…</p>
+          </div>
+        </div>
         <div class="grid" id="dashCards"></div>
       </section>
+
       <section id="tab-modules" class="tab">
-        <h2>Модули</h2>
-        <div class="toolbar">
-          <input id="modFilter" placeholder="Поиск…" />
-          <label><input type="checkbox" id="coreOnly" /> только core</label>
+        <div class="toolbar glass">
+          <div class="search-wrap">
+            <span class="search-ico">⌕</span>
+            <input id="modFilter" placeholder="Поиск модулей и команд…" />
+          </div>
+          <label class="check"><input type="checkbox" id="coreOnly" /> только core</label>
         </div>
         <div id="modList" class="list"></div>
       </section>
+
       <section id="tab-config" class="tab">
-        <h2>Конфиг модуля</h2>
-        <select id="cfgMod"></select>
+        <div class="toolbar glass">
+          <select id="cfgMod"></select>
+        </div>
         <div id="cfgOpts" class="list"></div>
       </section>
+
       <section id="tab-run" class="tab">
-        <h2>Выполнить команду</h2>
-        <p class="hint">Команда выполняется внутри юзербота; результат — как в Telegram.</p>
-        <div class="row">
-          <input id="cmdName" placeholder="ping" />
-          <input id="cmdArgs" placeholder="аргументы" />
-          <button id="cmdRun" class="primary">Run</button>
+        <div class="panel-card glass">
+          <h3 class="card-title">Выполнить команду</h3>
+          <p class="hint">Выполняется внутри юзербота. Результат — как в Telegram.</p>
+          <div class="row">
+            <div class="field grow">
+              <label>Команда</label>
+              <input id="cmdName" placeholder="ping / e / help" />
+            </div>
+            <div class="field grow">
+              <label>Аргументы</label>
+              <input id="cmdArgs" placeholder="например 1+1" />
+            </div>
+            <button id="cmdRun" class="btn primary">Run</button>
+          </div>
+          <pre id="cmdOut" class="log"></pre>
         </div>
-        <pre id="cmdOut" class="log"></pre>
       </section>
+
       <section id="tab-media" class="tab">
-        <h2>Загрузка медиа</h2>
-        <input type="file" id="fileIn" />
-        <button id="uploadBtn" class="primary">Загрузить</button>
-        <pre id="upOut" class="log"></pre>
+        <div class="panel-card glass">
+          <h3 class="card-title">Загрузка медиа</h3>
+          <p class="hint">Файл сохранится локально и отправится в Избранное.</p>
+          <div class="upload-zone" id="dropZone">
+            <input type="file" id="fileIn" />
+            <div class="upload-illus">⬆</div>
+            <div>Выбери файл или перетащи сюда</div>
+          </div>
+          <button id="uploadBtn" class="btn primary block">Загрузить</button>
+          <pre id="upOut" class="log"></pre>
+        </div>
       </section>
     </main>
   </div>

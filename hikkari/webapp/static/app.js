@@ -56,8 +56,18 @@ async function tryAuth(token) {
     loadModules();
   }
   renderDash(data);
-  $("#sideStatus").textContent =
-    "v" + data.version + " · " + window.HIKKARI_ROLE + " · @" + (data.user.username || data.user.id);
+  const role = window.HIKKARI_ROLE;
+  const pill = $("#rolePill");
+  if (pill) {
+    pill.textContent = role === "admin" ? "ADMIN" : "VIEW";
+    pill.classList.toggle("view", role !== "admin");
+  }
+  const who = data.user.username ? "@" + data.user.username : (data.user.name || data.user.id);
+  $("#sideStatus").textContent = "v" + data.version + " · " + who;
+  const hero = $("#heroLine");
+  if (hero) {
+    hero.textContent = who + " · uptime " + data.uptime + "s · " + (role === "admin" ? "полный доступ" : "только обзор");
+  }
 }
 
 $("#authBtn").onclick = async () => {
@@ -76,16 +86,43 @@ if (TOKEN) {
   });
 }
 
-document.querySelectorAll("nav button").forEach((btn) => {
+const PAGE_META = {
+  dash: ["Обзор", "Состояние юзербота в реальном времени"],
+  modules: ["Модули", "Встроенные и внешние модули"],
+  config: ["Конфиг", "Параметры модулей"],
+  run: ["Команды", "Запуск команд внутри юзербота"],
+  media: ["Медиа", "Загрузка файлов"],
+};
+
+document.querySelectorAll("nav button, .nav-btn").forEach((btn) => {
   btn.onclick = () => {
     if (window.HIKKARI_ROLE !== "admin" && btn.dataset.tab !== "dash") return;
-    document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll("nav button, .nav-btn").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
     btn.classList.add("active");
     const tab = $("#tab-" + btn.dataset.tab);
     if (tab) tab.classList.add("active");
+    const meta = PAGE_META[btn.dataset.tab] || ["Hikkari", ""];
+    if ($("#pageTitle")) $("#pageTitle").textContent = meta[0];
+    if ($("#pageDesc")) $("#pageDesc").textContent = meta[1];
   };
 });
+
+if ($("#refreshBtn")) {
+  $("#refreshBtn").onclick = async () => {
+    try {
+      const headers = { Authorization: "Bearer " + TOKEN };
+      const r = await fetch("/api/status", { headers });
+      const data = await r.json();
+      if (r.ok) {
+        renderDash(data);
+        const hero = $("#heroLine");
+        const who = data.user.username ? "@" + data.user.username : (data.user.name || data.user.id);
+        if (hero) hero.textContent = who + " · uptime " + data.uptime + "s";
+      }
+    } catch (e) {}
+  };
+}
 
 function renderDash(data) {
   const cards = [
@@ -131,7 +168,7 @@ function drawModules() {
     .map(
       (m) => `<div class="item">
       <div>
-        <div><b>${m.name}</b> ${m.core ? '<span class="badge">core</span>' : '<span class="badge">ext</span>'}</div>
+        <div><b>${m.name}</b> ${m.core ? '<span class="badge core">core</span>' : '<span class="badge">ext</span>'}</div>
         <div class="meta">${(m.commands || []).slice(0, 8).join(" · ") || "—"}</div>
       </div>
       <div>
@@ -228,3 +265,27 @@ if ($("#uploadBtn"))
       $("#upOut").textContent = e.message;
     }
   };
+
+
+(function setupDrop() {
+  const zone = $("#dropZone");
+  const input = $("#fileIn");
+  if (!zone || !input) return;
+  ["dragenter", "dragover"].forEach((ev) => {
+    zone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      zone.classList.add("drag");
+    });
+  });
+  ["dragleave", "drop"].forEach((ev) => {
+    zone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      zone.classList.remove("drag");
+    });
+  });
+  zone.addEventListener("drop", (e) => {
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      input.files = e.dataTransfer.files;
+    }
+  });
+})();
