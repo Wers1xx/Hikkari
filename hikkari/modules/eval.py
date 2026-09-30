@@ -97,15 +97,16 @@ class Evaluator(loader.Module):
         args = utils.get_args_raw(message) or ""
         reply = await self._get_reply(message)
 
-        if not args and reply and (getattr(reply, "text", None) or getattr(reply, "message", None)):
+        if not args and reply and (
+            getattr(reply, "text", None) or getattr(reply, "message", None)
+        ):
             args = reply.message or reply.text or ""
 
         if not (args or "").strip():
             await utils.answer(
                 message,
-                "💻 <b>Eval</b>
-<code>.e &lt;python&gt;</code> or reply to a message with code.
-"
+                "💻 <b>Eval</b>\n"
+                "<code>.e &lt;python&gt;</code> or reply to a message with code.\n"
                 "Vars: <code>c</code>/<code>client</code>, <code>m</code>/<code>message</code>, "
                 "<code>r</code>/<code>reply</code>, <code>db</code>, <code>utils</code>",
             )
@@ -140,9 +141,7 @@ class Evaluator(loader.Module):
                 "r." in args or "reply." in args
             ):
                 extra_hint = (
-                    "
-
-💡 <b>Hint:</b> <code>r</code>/<code>reply</code> is "
+                    "\n\n💡 <b>Hint:</b> <code>r</code>/<code>reply</code> is "
                     "<code>None</code> — reply to a message when using them."
                 )
 
@@ -209,6 +208,7 @@ class Evaluator(loader.Module):
                 )
                 + (self.strings["time_exec"].format(round(exec_time, 2))),
             )
+
 
     @loader.command()
     async def ecpp(self, message: Message, c: bool = False):
