@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Hikkari WebApp</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div id="auth" class="panel auth">
+    <div class="card">
+      <h1>✨ Hikkari</h1>
+      <p>Вставь токен из <code>.webapp</code></p>
+      <input id="tokenInput" type="password" placeholder="Token" autocomplete="off" />
+      <button id="authBtn" class="primary">Войти</button>
+      <p id="authErr" class="err"></p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <aside class="sidebar">
+      <div class="brand">✨ Hikkari</div>
+      <nav>
+        <button data-tab="dash" class="active">Обзор</button>
+        <button data-tab="modules">Модули</button>
+        <button data-tab="config">Конфиг</button>
+        <button data-tab="run">Команды</button>
+        <button data-tab="media">Медиа</button>
+      </nav>
+      <div class="side-foot" id="sideStatus">—</div>
+    </aside>
+    <main>
+      <section id="tab-dash" class="tab active">
+        <h2>Обзор</h2>
+        <div class="grid" id="dashCards"></div>
+      </section>
+      <section id="tab-modules" class="tab">
+        <h2>Модули</h2>
+        <div class="toolbar">
+          <input id="modFilter" placeholder="Поиск…" />
+          <label><input type="checkbox" id="coreOnly" /> только core</label>
+        </div>
+        <div id="modList" class="list"></div>
+      </section>
+      <section id="tab-config" class="tab">
+        <h2>Конфиг модуля</h2>
+        <select id="cfgMod"></select>
+        <div id="cfgOpts" class="list"></div>
+      </section>
+      <section id="tab-run" class="tab">
+        <h2>Выполнить команду</h2>
+        <p class="hint">Команда уйдёт в Избранное и обработается юзерботом.</p>
+        <div class="row">
+          <input id="cmdName" placeholder="ping" />
+          <input id="cmdArgs" placeholder="аргументы" />
+          <button id="cmdRun" class="primary">Run</button>
+        </div>
+        <pre id="cmdOut" class="log"></pre>
+      </section>
+      <section id="tab-media" class="tab">
+        <h2>Загрузка медиа</h2>
+        <input type="file" id="fileIn" />
+        <button id="uploadBtn" class="primary">Загрузить</button>
+        <pre id="upOut" class="log"></pre>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
