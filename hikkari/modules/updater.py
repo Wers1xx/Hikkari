@@ -323,7 +323,7 @@ class UpdaterMod(loader.Module):
                         '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
                             current[:12],
                             self._pending[:12],
-                            "🔎 diff",
+                            "<emoji document_id=5255867057685170743>⚜️</emoji> diff",
                         ),
                     ),
                     disable_web_page_preview=True,

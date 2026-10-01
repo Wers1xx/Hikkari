@@ -600,7 +600,7 @@ class HikkariWebMod(loader.Module):
         lines = []
         for uid in ids:
             live = self._client_by_id(uid) is not None
-            mark = "🟢" if live else "⚪"
+            mark = "<emoji document_id=5416081784641168838>🟢</emoji>" if live else "<emoji document_id=5411225014148014586>🔴</emoji>"
             current = " ← current" if uid == int(self.tg_id) else ""
             name = str(uid)
             client = self._client_by_id(uid)
@@ -779,7 +779,7 @@ class HikkariWebMod(loader.Module):
             message,
             self.strings.get(
                 "weburl_starting",
-                "✨ <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment.",
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment.",
             ),
         )
 
@@ -810,7 +810,7 @@ class HikkariWebMod(loader.Module):
                     break
                 await utils.answer(
                     status,
-                    f"✨ <b>Поднимаю публичную ссылку…</b> ({attempt}/3)\n"
+                    f"<emoji document_id=5283176512747507510>✨</emoji> <b>Поднимаю публичную ссылку…</b> ({attempt}/3)\n"
                     "<i>cloudflared, подожди</i>",
                     parse_mode="HTML",
                 )
@@ -834,11 +834,11 @@ class HikkariWebMod(loader.Module):
 
             href = utils.escape_html(public)
             body = (
-                "✨ <b>Hikkari WebUI</b>\n\n"
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
                 "Эту ссылку может открыть <b>любой</b> — "
                 "телефон → код → 2FA.\n"
                 "После входа аккаунт добавится, будет рестарт.\n\n"
-                + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
+                + f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n\n'
                 + "<i>Нажми текст · публичная · ~15 мин</i>"
             )
             await utils.answer(

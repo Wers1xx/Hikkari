@@ -66,7 +66,7 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "ping_emoji",
-                "✨",
+                "<emoji document_id=5283176512747507510>✨</emoji>",
                 lambda: self.strings["ping_emoji"],
                 validator=loader.validators.String(),
             ),

@@ -70,7 +70,7 @@ class InlineStuff(loader.Module):
 
         await message.delete()
 
-        m = await message.respond("✨", reply_to=utils.get_topic(message))
+        m = await message.respond("<emoji document_id=5283176512747507510>✨</emoji>", reply_to=utils.get_topic(message))
 
         await self.inline.gallery(
             message=m,
@@ -164,7 +164,7 @@ class InlineStuff(loader.Module):
 
         await utils.answer(
             message,
-            "✨ <b>Ок!</b> Создаю инлайн-бота через @BotFather…\n"
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>Ок!</b> Создаю инлайн-бота через @BotFather…\n"
             "Это займёт ~15–30 сек, не закрывай юзербот.",
         )
 
@@ -176,7 +176,7 @@ class InlineStuff(loader.Module):
                 im._token = im._db.get("hikkari.inline", "bot_token")
                 await utils.answer(
                     message,
-                    "✨ <b>Инлайн-бот создан!</b>\n"
+                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот создан!</b>\n"
                     "Перезапуск для подключения…",
                 )
                 await self._restart_userbot(message)
@@ -186,7 +186,7 @@ class InlineStuff(loader.Module):
             if ok and im._db.get("hikkari.inline", "bot_token"):
                 await utils.answer(
                     message,
-                    "✨ <b>Инлайн-бот готов!</b>\nПерезапуск…",
+                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот готов!</b>\nПерезапуск…",
                 )
                 await self._restart_userbot(message)
                 return
@@ -220,7 +220,7 @@ class InlineStuff(loader.Module):
         # Keep bot_token in DB/files for restore without BotFather
         await utils.answer(
             message,
-            "✨ <b>Инлайн отключён.</b>\n"
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн отключён.</b>\n"
             "Можно включить позже: <code>{}yesbot</code> или "
             "<code>{}ch_bot_token &lt;token&gt;</code>".format(
                 self.get_prefix(), self.get_prefix()
@@ -235,7 +235,7 @@ class InlineStuff(loader.Module):
                         (
                             "<tg-emoji emoji-id=5463379725441341739>✨</tg-emoji>"
                             if self._client.hikkari_me.premium is True
-                            else "✨"
+                            else "<emoji document_id=5283176512747507510>✨</emoji>"
                         ),
                         utils.get_platform_emoji() if self._client.hikkari_me.premium is True else "Hikkari",
                     ),

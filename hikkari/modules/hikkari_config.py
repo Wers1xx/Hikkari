@@ -76,7 +76,7 @@ class HikkariConfigMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "cfg_emoji",
-                "✨",
+                "<emoji document_id=5283176512747507510>✨</emoji>",
                 "Change emoji when opening config",
                 validator=loader.validators.String(),
             ),

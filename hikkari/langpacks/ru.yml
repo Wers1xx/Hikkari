@@ -223,20 +223,21 @@ hikkari_web:
   _cmd_doc_addacc: '[user/id/reply] - Добавить другой аккаунт через inline-вход'
   owner_only: "🚫 Только основной владелец аккаунта юзербота может это делать."
   no_accounts: "📭 Нет сохранённых аккаунтов."
-  acc_list: "✨ <b>Аккаунты Hikkari</b> ({count}):\n\n{lines}"
+  acc_list: "<emoji document_id=5283176512747507510>✨</emoji> <b>Аккаунты Hikkari</b> ({count}):\n\n{lines}"
   acc_line: "{mark} <b>{name}</b> — <code>{uid}</code>{current}{extra}"
   accdel_usage: "ℹ️ <code>accdel &lt;id|@user&gt;</code> — удалить юзербота с аккаунта.\nТекущий аккаунт: только с <code>-f</code>."
   acc_not_found: "🚫 Аккаунт не найден в списке сессий."
   accdel_current: "⚠️ Это текущий аккаунт. Чтобы снять с него юзербота: <code>accdel ID -f</code> (после этого останови процесс)."
-  accdel_confirm: "⚠️ Удалить юзербота с аккаунта <code>{uid}</code>?\nСессия закроется, файлы session/db будут удалены, аккаунт пропадёт из списка."
-  accdel_done: "✅ Аккаунт <code>{uid}</code> отключён: сессия закрыта, файлы удалены."
+  accdel_confirm: "<emoji document_id=5841541824803509441>🗑</emoji> Удалить юзербота с аккаунта {uid}?
+Сессия закроется, файлы session/db будут удалены, аккаунт пропадёт из списка."
+  accdel_done: "<emoji document_id=5841541824803509441>🗑</emoji> Аккаунт <code>{uid}</code> удалён: сессия закрыта, файлы удалены."
   accdel_partial: "⚠️ Аккаунт <code>{uid}</code> частично очищен:\n<code>{err}</code>"
-  accdel_current_done: "✅ Файлы текущего аккаунта удалены. Перезапусти/останови юзербота, чтобы завершить процесс."
+  accdel_current_done: "<emoji document_id=5841541824803509441>🗑</emoji> Файлы текущего аккаунта удалены. Перезапусти/останови юзербота."
   _cmd_doc_acclist: "Список аккаунтов, к которым подключён юзербот (только основной владелец)"
   _cmd_doc_accdel: "Удалить юзербота с аккаунта: закрыть сессию и стереть файлы"
   _cmd_doc_weburl: "Ссылка WebUI (туннель) для добавления другого аккаунта"
-  weburl_starting: "✨ <b>Запуск WebUI…</b>\nГенерирую ссылку туннеля, подожди."
-  weburl_ready: "✨ <b>Вход через WebUI</b>\n\nОткрой ссылку и войди (телефон → код → 2FA).\nПосле успеха аккаунт добавится и юзербот перезапустится.\n\n🔗 <code>{url}</code>\n\n<i>Ссылка одноразовая · ~15 мин</i>"
+  weburl_starting: "<emoji document_id=5283176512747507510>✨</emoji> <b>Запуск WebUI…</b>\nГенерирую ссылку туннеля, подожди."
+  weburl_ready: "<emoji document_id=5283176512747507510>✨</emoji> <b>Вход через WebUI</b>\n\nОткрой ссылку и войди (телефон → код → 2FA).\nПосле успеха аккаунт добавится и юзербот перезапустится.\n\n🔗 <code>{url}</code>\n\n<i>Ссылка одноразовая · ~15 мин</i>"
   weburl_timeout: "⏳ <b>Время WebUI вышло</b> — снова <code>weburl</code>."
   weburl_ok: "✅ <b>Аккаунт добавлен через WebUI</b> — перезапуск…"
   weburl_fail: "🚫 <b>Ошибка WebUI:</b> <code>{}</code>"
@@ -323,7 +324,7 @@ settings:
   vds_install: "<tg-emoji emoji-id=5471952986970267163>💎</tg-emoji> Процесс установки на VDS выполняется одной командой:\n<pre><code class=\"language-shell\">sudo apt update &amp;&amp; sudo apt upgrade -y &amp;&amp; sudo apt install git python3-pip &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n<i>Примечание: Если у вас отсутствуют права sudo, исключите соответствующую часть команды.</i>"
   wsl_install: "<b>Скачай WSL.</b> Для этого открой PowerShell с правами администратора и напиши <code>wsl --install -d Ubuntu-22.04</code> \n⚠️ <i>Для установки WSL необходима Windows 10 build 2004 или Windows 11 любой версии и ПК с поддержкой виртуализации. Для установки на более ранние версии ОС обратись к</i> <a href=\"https://learn.microsoft.com/ru-ru/windows/wsl/install-manual\">этой странице</a>\n\n⬜️ <b>Перезагрузи ПК и запусти приложение Ubuntu 22.04.x</b> \n\n⬜️ <b>Вставь в него команду (ПКМ):</b> <code>curl -Ss https://bootstrap.pypa.io/get-pip.py | python3</code> \n⚠️ <i>При появлении желтых предупреждений введи</i> <code>export PATH=\"/home/username/.local/bin:$PATH\"</code> <i>заменив /home/username/.local/bin на тот путь, о котором говорится в сообщении</i>\n\n⬜️ <b>Вставь команду (ПКМ):</b> \n<pre><code class=\"language-bash\">clear &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n🔗 <b>Где получить API_ID и API_HASH?</b>: <a href=\"https://youtu.be/DcqDA249Lhg?t=24\">Видео</a>"
   userland_install: "<b>Установи UserLAnd по</b> <a href=\"https://play.google.com/store/apps/details?id=tech.ula\">ссылке</a>\n\n<b>Открой его, выбери Ubuntu —&gt; Minimal —&gt; Terminal</b>\n\n<b>Жди установки дистрибутива, можешь налить чаю</b>\n\n<b>После успешной установки перед тобой откроется терминал, пиши туда:</b>\n<pre><code class=\"language-bash\">sudo apt update &amp;&amp; sudo apt upgrade -y &amp;&amp; sudo apt install python3 git python3-pip -y &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; sudo pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n\n<b>В конце установки появится ссылка, переходи по ней и вводи данные своего аккаунта для входа.\n\nВуаля! Вы установили Hikkari на UserLAnd.</b>"
-  hikkahost_install: "<b>🌘 Как установить Hikkari на HikkaHost?</b>\n\n1. Перейдите в @hikkahost_bot\n2. Выберите «Установить»\n3. Выберите «✨ Hikkari»\n\nИ продолжайте установку.\n\n<b>После этого вы получите ссылку, откройте ее и войдите в свой аккаунт.</b>"
+  hikkahost_install: "<b>🌘 Как установить Hikkari на HikkaHost?</b>\n\n1. Перейдите в @hikkahost_bot\n2. Выберите «Установить»\n3. Выберите «<emoji document_id=5283176512747507510>✨</emoji> Hikkari»\n\nИ продолжайте установку.\n\n<b>После этого вы получите ссылку, откройте ее и войдите в свой аккаунт.</b>"
   too_many_args: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Слишком много аргументов</b>"
   blacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Чат {} добавлен в черный список юзербота</b>"
   unblacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Чат {} удален из черного списка юзербота</b>"
@@ -498,19 +499,32 @@ updater:
   rollback_too_far: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Вы откатываетесь слишком далеко!</b>"
   rollback_confirm: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>Вы уверены, что хотите откатить {num} коммит(-а,-ов)?</b>"
   rollback_process: "<tg-emoji emoji-id=5873204392429096339>🕗</tg-emoji> <b>Откат {num} коммит(-a,-ов)...</b>"
-  autoupdate_notifier: "<tg-emoji emoji-id=5361979468887893611>🆕</tg-emoji> Новое обновление Hikkari!\n\n🔮 Новая версия Hikkari #{} доступна\n\n<i>Список изменений обновления</i>:\n<blockquote expandable>{}</blockquote>\n{}\n\n<b>Обновляю...</b>"
+  autoupdate_notifier: "<emoji document_id=5280488503170335617>⚜️</emoji> Новое обновление Hikkari!
+
+<emoji document_id=5280652935993266295>⚜️</emoji> Новая версия Hikkari #{} доступна
+
+Список изменений обновления:
+<blockquote expandable>{}</blockquote>
+{}
+
+<b>Обновляю...</b>"
   autoupdate: "🛡 Unit Alpha так же позволяет не обращать внимания на обновления и <b>делать это автоматически</b>!\n\n<tg-emoji emoji-id=5469741319330996757>💫</tg-emoji> Однако большие обновления, такие как смена глобальной версии (1.х.х -> 2.х.х) будут игнорироваться для автоматических обновлений и вам придется обновляться вручную"
   autoupdate_on: "🎆 Автоматические обновления <b>были включены!\nПриятного использования!</b>"
   autoupdate_off: "❌ Автоматические обновления <b>были выключены!</b>\nЧтобы их включить используйте команду <code>{prefix}autoupdate</code>"
   announcement: "<b>📢Объявление:</b>\n\n<blockquote>{}</blockquote>"
-  update_required: "<tg-emoji emoji-id=5361979468887893611>🆕</tg-emoji> <b>Новое обновление Hikkari!</b>\n\nВыпущена новая версия Hikkari.\n🔮 <b>Hikkari <s>{}</s> -> {}</b>\n\n{}"
+  update_required: "<emoji document_id=5280488503170335617>⚜️</emoji> <b>Новое обновление Hikkari!</b>
+
+Выпущена новая версия Hikkari.
+<emoji document_id=5280652935993266295>⚜️</emoji> <b>Hikkari <s>{}</s> -> {}</b>
+
+{}"
   update: "🔄 Обновить"
   ignore: "🚫 Игнорировать"
   more: "\n<i><b>🎥 И еще {}...</b></i>"
   latest_disabled: "Уведомление о последнем обновлении было выключено"
   _cfg_doc_disable_notifications: "Выключить уведомления об обновлениях"
   changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Последние обновления и фиксы:</b><blockquote expandable>{}</blockquote>'
-  changelog_empty: '✨ <b>Changelog пуст</b>'
+  changelog_empty: '<emoji document_id=5283176512747507510>✨</emoji> <b>Changelog пуст</b>'
   _cfg_doc_autoupdate: "<tg-emoji emoji-id=5469741319330996757>💫</tg-emoji> Автоматические обновления для вашей Hikkari"
   _cmd_doc_restart: "Перезагружает юзербот"
   _cmd_doc_source: "Показать ссылку на исходный код проекта"
@@ -848,8 +862,8 @@ $inline:
   inline_cmds: "ℹ️ У вас {} доступная(-ых) команда(-ы)"
   inline_cmds_msg: "<b>ℹ️ Доступные inline команды:</b>\n\n{}"
   run_command: "🏌️ Выполнить команду"
-  command_msg: "<b>✨ Команда «{}»</b>\n\n<i>{}</i>"
-  command: "✨ Команда «{}»"
+  command_msg: "<b><emoji document_id=5283176512747507510>✨</emoji> Команда «{}»</b>\n\n<i>{}</i>"
+  command: "<emoji document_id=5283176512747507510>✨</emoji> Команда «{}»"
   button403: "Вы не можете нажать на эту кнопку!"
   keep_id: "⚠️ Не удаляйте ID! {}"
   no_query_results: "<tg-emoji emoji-id=5440660757194744323>‼️</tg-emoji> <b>Не удалось создать форму</b>\n\nВозможные способы исправления ошибки:\n\n1. Перезагрузите Hikkari: <code>{prefix}restart</code>\n\n2. Включите inline-режим для бота: перейдите в @BotFather, отправьте /mybots, нажмите Bot Settings -> Inline Mode -> On\n\n3. Создайте нового бота: отправьте команду <code>{prefix}ch_hikkari_bot</code> <@имя_бота>"

@@ -28,19 +28,19 @@ class HikkariWebAppMod(loader.Module):
         "name": "HikkariWebApp",
         "link": '<a href="{url}">WebApp Hikkari</a>',
         "confirm": (
-            "✨ <b>Открыть WebApp Hikkari?</b>\n\n"
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>Открыть WebApp Hikkari?</b>\n\n"
             "Подтверди, чтобы получить ссылку.\n"
             "Полный доступ — только owner / co-owner."
         ),
         "btn_open": "✅ Открыть",
         "btn_cancel": "🚫 Отмена",
-        "cancelled": "🚫 Отменено",
+        "cancelled": "<emoji document_id=5872829476143894491>🚫</emoji> Отменено",
         "denied": "🚫 Нет доступа к управлению WebApp.",
         "stopped": "🛑 WebApp остановлен",
         "not_running": "WebApp не запущен",
         "error": "WebApp error: <code>{}</code>",
         "info": (
-            "✨ <b>WebApp Hikkari</b>\n"
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>WebApp Hikkari</b>\n"
             "• В <b>Избранном</b> и <b>ЛС с инлайн-ботом</b> — сразу ссылка\n"
             "• В чатах и ЛС с людьми — сначала подтверждение\n"
             "• Полный доступ: owner / co-owner\n"

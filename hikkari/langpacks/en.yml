@@ -263,20 +263,21 @@ hikkari_web:
   _cmd_doc_addacc: '[user/id/reply] - Add another account through inline login'
   owner_only: "🚫 Only the primary account owner can do this."
   no_accounts: "📭 No saved accounts."
-  acc_list: "✨ <b>Hikkari accounts</b> ({count}):\n\n{lines}"
+  acc_list: "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari accounts</b> ({count}):\n\n{lines}"
   acc_line: "{mark} <b>{name}</b> — <code>{uid}</code>{current}{extra}"
   accdel_usage: "ℹ️ <code>accdel &lt;id|@user&gt;</code> — remove userbot from account.\nCurrent account: only with <code>-f</code>."
   acc_not_found: "🚫 Account not found in session list."
   accdel_current: "⚠️ This is the current account. Force with <code>accdel ID -f</code> (then stop the process)."
-  accdel_confirm: "⚠️ Remove userbot from account <code>{uid}</code>?\nSession will close, session/db files deleted, account removed from list."
-  accdel_done: "✅ Account <code>{uid}</code> removed: session closed, files deleted."
+  accdel_confirm: "<emoji document_id=5841541824803509441>🗑</emoji> Remove userbot from account {uid}?
+Session will close, session/db files deleted, account removed from list."
+  accdel_done: "<emoji document_id=5841541824803509441>🗑</emoji> Account <code>{uid}</code> removed: session closed, files deleted."
   accdel_partial: "⚠️ Account <code>{uid}</code> partially cleaned:\n<code>{err}</code>"
-  accdel_current_done: "✅ Current account files deleted. Restart/stop the userbot to finish."
+  accdel_current_done: "<emoji document_id=5841541824803509441>🗑</emoji> Current account files deleted. Restart/stop the userbot to finish."
   _cmd_doc_acclist: "List accounts linked to this userbot (primary owner only)"
   _cmd_doc_accdel: "Remove userbot from an account: close session and delete files"
   _cmd_doc_weburl: "Generate WebUI tunnel link to add another account"
-  weburl_starting: "✨ <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment."
-  weburl_ready: "✨ <b>WebUI login</b>\n\nOpen the link and sign in (phone → code → 2FA).\nAfter success the account will be added and userbot restarts.\n\n🔗 <code>{url}</code>\n\n<i>Link is single-use · valid ~15 min</i>"
+  weburl_starting: "<emoji document_id=5283176512747507510>✨</emoji> <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment."
+  weburl_ready: "<emoji document_id=5283176512747507510>✨</emoji> <b>WebUI login</b>\n\nOpen the link and sign in (phone → code → 2FA).\nAfter success the account will be added and userbot restarts.\n\n🔗 <code>{url}</code>\n\n<i>Link is single-use · valid ~15 min</i>"
   weburl_timeout: "⏳ <b>WebUI timed out</b> — run <code>weburl</code> again."
   weburl_ok: "✅ <b>Account added via WebUI</b> — restarting…"
   weburl_fail: "🚫 <b>WebUI error:</b> <code>{}</code>"
@@ -369,7 +370,7 @@ settings:
   vds_install: "<tg-emoji emoji-id=5471952986970267163>💎</tg-emoji> The installation process on a VDS is done with a single command:\n<pre><code class=\"language-shell\">sudo apt update &amp;&amp; sudo apt upgrade -y &amp;&amp; sudo apt install git python3-pip &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n<i>Note: If you do not have sudo privileges, omit the corresponding part of the command.</i>"
   wsl_install: "<b>Download WSL.</b> To do this, open PowerShell as administrator and type <code>wsl --install -d Ubuntu-22.04</code> \n⚠️ <i>To install WSL, you need Windows 10 build 2004 or Windows 11 of any version and a PC with virtualization support. For installation on earlier versions of the OS, refer to</i> <a href=\"https://learn.microsoft.com/ru-ru/windows/wsl/install-manual\">this page</a>\n\n⬜️ <b>Restart your PC and launch the Ubuntu 22.04.x application</b> \n\n⬜️ <b>Paste the command into it (RMB):</b> <code>curl -Ss https://bootstrap.pypa.io/get-pip.py | python3</code> \n⚠️ <i>If yellow warnings appear, type</i> <code>export PATH=\"/home/username/.local/bin:$PATH\"</code> <i>replacing /home/username/.local/bin with the path mentioned in the message</i>\n\n⬜️ <b>Paste the command (RMB):</b> \n<pre><code class=\"language-bash\">clear &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n🔗 <b>Where to get API_ID and API_HASH?</b>: <a href=\"https://youtu.be/DcqDA249Lhg?t=24\">Video</a>"
   userland_install: "<b>Install UserLAnd from this</b> <a href=\"https://play.google.com/store/apps/details?id=tech.ula\">link</a>\n\n<b>Open it, select Ubuntu —&gt; Minimal —&gt; Terminal</b>\n\n<b>Wait for the distribution to install, you can pour some tea</b>\n\n<b>After successful installation, a terminal will open in front of you, type there:</b>\n<pre><code class=\"language-bash\">sudo apt update &amp;&amp; sudo apt upgrade -y &amp;&amp; sudo apt install python3 git python3-pip -y &amp;&amp; git clone https://github.com/Wers1xx/Hikkari &amp;&amp; cd Hikkari &amp;&amp; sudo pip install -r requirements.txt &amp;&amp; python3 -m hikkari</code></pre>\n\n<b>At the end of the installation, a link will appear, follow it and enter your account details to log in.\n\nVoilà! You have installed Hikkari on UserLAnd.</b>"
-  hikkahost_install: "<b>🌘 How to install Hikkari on HikkaHost?</b>\n\n1. Go to @hikkahost_bot\n2. Select \"Install\"\n3. Select \"✨ Hikkari\"\n\nAnd continue with the installation.\n\n<b>After that, you will receive a link, open it and log into your account.</b>"
+  hikkahost_install: "<b>🌘 How to install Hikkari on HikkaHost?</b>\n\n1. Go to @hikkahost_bot\n2. Select \"Install\"\n3. Select \"<emoji document_id=5283176512747507510>✨</emoji> Hikkari\"\n\nAnd continue with the installation.\n\n<b>After that, you will receive a link, open it and log into your account.</b>"
   too_many_args: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Too many args</b>"
   blacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Chat {} blacklisted from userbot</b>"
   unblacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Chat {} unblacklisted from userbot</b>"
@@ -546,7 +547,15 @@ updater:
   rollback_too_far: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>You're rolling back too far!</b>"
   rollback_confirm: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>Are you sure you want to rollback {num} commit(-s)?</b>"
   rollback_process: "<tg-emoji emoji-id=5873204392429096339>🕗</tg-emoji> <b>Rolling {num} commits back...</b>"
-  autoupdate_notifier: "<tg-emoji emoji-id=5361979468887893611>🆕</tg-emoji> New Hikkari update!\n\n🔮 New Hikkari version #{} is available\n\n<i>Update changelog</i>:\n<blockquote expandable>{}</blockquote>\n{}\n\n<b>Updating...</b>"
+  autoupdate_notifier: "<emoji document_id=5280488503170335617>⚜️</emoji> New Hikkari update!
+
+<emoji document_id=5280652935993266295>⚜️</emoji> New Hikkari version #{} available
+
+Changelog:
+<blockquote expandable>{}</blockquote>
+{}
+
+<b>Updating...</b>"
   autoupdate: "🛡 Unit Alpha also allows you to ignore updates and <b>do it automatically</b>!\n\n💫 However, major updates such as changing the global version (1.x.x -> 2.x.x) will be ignored for automatic updates and you will have to update manually"
   autoupdate_on: "🎆 Automatic updates <b>have been enabled!\nEnjoy using it!</b>"
   autoupdate_off: "❌ Automatic updates <b>have been disabled!</b>\nTo enable them, use the command <code>{prefix}autoupdate</code>"
@@ -557,14 +566,19 @@ updater:
   _cmd_doc_update: "Downloads userbot updates"
   _cmd_doc_rollback: "Rollbacks userbot updates"
   _cls_doc: "Updates itself, tracks latest Hikkari releases, and notifies you, if update is required"
-  update_required: "<tg-emoji emoji-id=5361979468887893611>🆕</tg-emoji> <b>Hikkari Update available!</b>\n\nNew Hikkari version released.\n🔮 <b>Hikkari <s>{}</s> -> {}</b>\n\n{}"
+  update_required: "<emoji document_id=5280488503170335617>⚜️</emoji> <b>New Hikkari update!</b>
+
+A new Hikkari version is out.
+<emoji document_id=5280652935993266295>⚜️</emoji> <b>Hikkari <s>{}</s> -> {}</b>
+
+{}"
   more: "\n<i><b>🎥 And {} more...</b></i>"
   _cfg_doc_disable_notifications: "Disable update notifications"
   latest_disabled: "Notifications about the latest update have been suppressed"
   update: "🔄 Update"
   ignore: "🚫 Ignore"
   changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Recent updates & fixes:</b><blockquote expandable>{}</blockquote>'
-  changelog_empty: '✨ <b>Changelog is empty</b>'
+  changelog_empty: '<emoji document_id=5283176512747507510>✨</emoji> <b>Changelog is empty</b>'
 
   _cmd_doc_autoupdate: Toggle automatic updates
   _cmd_doc_changelog: Show changelog of recent updates and fixes
@@ -878,8 +892,8 @@ $inline:
   inline_cmds: "ℹ️ You have {} available command(-s)"
   inline_cmds_msg: "<b>ℹ️ Available inline commands:</b>\n\n{}"
   run_command: "🏌️ Run command"
-  command_msg: "<b>✨ Command «{}»</b>\n\n<i>{}</i>"
-  command: "✨ Command «{}»"
+  command_msg: "<b><emoji document_id=5283176512747507510>✨</emoji> Command «{}»</b>\n\n<i>{}</i>"
+  command: "<emoji document_id=5283176512747507510>✨</emoji> Command «{}»"
   button403: "You are not allowed to press this button!"
   keep_id: "⚠️ Do not remove ID! {}"
   no_query_results: "<tg-emoji emoji-id=5440660757194744323>‼️</tg-emoji> <b>Failed to create form</b>\n\nPossible ways to fix the error:\n\n1. Restart Hikkari: <code>{prefix}restart</code>\n\n2. Enable inline mode for the bot: go to @BotFather, send /mybots, click Bot Settings -> Inline Mode -> On\n\n3. Create a new bot: send the command <code>{prefix}ch_hikkari_bot</code> <@botname>"
