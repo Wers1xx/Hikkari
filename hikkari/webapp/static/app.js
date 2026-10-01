@@ -289,3 +289,52 @@ if ($("#uploadBtn"))
     }
   });
 })();
+
+
+/* —— UI polish: ripple + click sparks —— */
+(function uiFx() {
+  function ripple(e, el) {
+    const r = document.createElement("span");
+    r.className = "ripple";
+    const rect = el.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    r.style.width = r.style.height = size + "px";
+    r.style.left = e.clientX - rect.left - size / 2 + "px";
+    r.style.top = e.clientY - rect.top - size / 2 + "px";
+    el.appendChild(r);
+    setTimeout(() => r.remove(), 650);
+  }
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ripple-btn, .btn, .nav-btn");
+    if (btn) ripple(e, btn);
+    // micro sparks
+    for (let i = 0; i < 5; i++) {
+      const s = document.createElement("span");
+      s.className = "click-spark";
+      const angle = (Math.PI * 2 * i) / 5 + Math.random();
+      const dist = 18 + Math.random() * 28;
+      s.style.left = e.clientX + "px";
+      s.style.top = e.clientY + "px";
+      s.style.setProperty("--dx", Math.cos(angle) * dist + "px");
+      s.style.setProperty("--dy", Math.sin(angle) * dist + "px");
+      document.body.appendChild(s);
+      setTimeout(() => s.remove(), 560);
+    }
+  }, { passive: true });
+
+  // ambient soft sparks in background
+  const layer = document.getElementById("sparks");
+  if (layer) {
+    for (let i = 0; i < 12; i++) {
+      const d = document.createElement("div");
+      d.style.cssText =
+        "position:absolute;width:2px;height:2px;border-radius:50%;background:rgba(255,255,255," +
+        (0.15 + Math.random() * 0.35) +
+        ");left:" + Math.random() * 100 + "%;top:" + Math.random() * 100 +
+        "%;box-shadow:0 0 8px rgba(255,255,255,0.4);animation:starPulse " +
+        (3 + Math.random() * 4) + "s ease infinite;animation-delay:" +
+        Math.random() * 3 + "s;";
+      layer.appendChild(d);
+    }
+  }
+})();
