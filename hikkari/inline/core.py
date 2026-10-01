@@ -21,6 +21,7 @@
 import asyncio
 import contextlib
 import contextlib
+import contextlib
 import logging
 import os
 import time
@@ -313,7 +314,11 @@ class InlineManager(
             try:
                 from .token_obtainment import _persist_bot_token
                 if self._token:
-                    _persist_bot_token(self._db, self._token, bot_me.username)
+                    _persist_bot_token(
+                        self._db, self._token, bot_me.username, tg_id=self._me
+                    )
+                    with contextlib.suppress(Exception):
+                        self._db.set("hikkari.inline", "owner_id", int(self._me))
             except Exception:
                 pass
         except (
