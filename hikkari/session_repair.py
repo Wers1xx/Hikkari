@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -178,3 +179,25 @@ def patch_sqlite_session_class() -> None:
     safe_process_entities._hikkari_patched = True
     SQLiteSession.process_entities = safe_process_entities
     logger.debug("Patched SQLiteSession.process_entities")
+
+
+
+def unlock_session(path: Path | str) -> None:
+    """Drop stale -journal/-wal/-shm so a single process can open the session."""
+    path = Path(path)
+    if path.suffix == ".session":
+        base = path
+    else:
+        base = Path(str(path) + ("" if str(path).endswith(".session") else ".session"))
+    for suffix in ("-journal", "-wal", "-shm"):
+        p = Path(str(base) + suffix)
+        if p.exists():
+            try:
+                p.unlink()
+                logger.info("Removed stale lock file %s", p.name)
+            except Exception:
+                logger.debug("Could not remove %s", p, exc_info=True)
+    # ensure schema after lock clear
+    if base.is_file():
+        with contextlib.suppress(Exception):
+            repair_session_file(base)

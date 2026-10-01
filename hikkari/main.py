@@ -972,32 +972,65 @@ class Hikkari:
         :returns: `True` if at least one client started successfully
         """
         for session in self.sessions.copy():
-            try:
-                client = CustomTelegramClient(
-                    session,
-                    self.api_token.ID,
-                    self.api_token.HASH,
-                    connection=self.conn,
-                    proxy=self.proxy,
-                    connection_retries=None,
-                    device_model=get_app_name(),
-                    system_version=generate_random_system_version(),
-                    app_version=".".join(map(str, __version__)) + " x64",
-                    lang_code="en",
-                    system_lang_code="en-US",
-                )
-                if session.server_address == "0.0.0.0":
-                    patcher.patch(client, session)
+            connected = False
+            last_err = None
+            for attempt in range(1, 6):
+                try:
+                    # Clear stale SQLite locks before open (other instance already dead)
+                    try:
+                        fname = getattr(session, "filename", None) or str(session)
+                        session_repair.unlock_session(fname)
+                    except Exception:
+                        pass
 
-                await client.connect()
-                client.phone = "None"
+                    client = CustomTelegramClient(
+                        session,
+                        self.api_token.ID,
+                        self.api_token.HASH,
+                        connection=self.conn,
+                        proxy=self.proxy,
+                        connection_retries=None,
+                        device_model=get_app_name(),
+                        system_version=generate_random_system_version(),
+                        app_version=".".join(map(str, __version__)) + " x64",
+                        lang_code="en",
+                        system_lang_code="en-US",
+                    )
+                    if session.server_address == "0.0.0.0":
+                        patcher.patch(client, session)
 
-                self.clients += [client]
-            except sqlite3.OperationalError:
+                    await client.connect()
+                    client.phone = "None"
+                    self.clients += [client]
+                    connected = True
+                    break
+                except sqlite3.OperationalError as e:
+                    last_err = e
+                    logging.warning(
+                        "Session lock on %s (try %s/5): %s",
+                        getattr(session, "filename", session),
+                        attempt,
+                        e,
+                    )
+                    await asyncio.sleep(0.6 * attempt)
+                    try:
+                        fname = getattr(session, "filename", None) or str(session)
+                        session_repair.unlock_session(fname)
+                        # Re-open SQLiteSession object after unlock
+                        from hikkaritl.sessions import SQLiteSession as _SQ
+                        stem = str(fname).rsplit(".session", maxsplit=1)[0]
+                        session = _SQ(stem)
+                    except Exception:
+                        logging.exception("session re-open after unlock failed")
+                except Exception:
+                    raise
+
+            if not connected:
                 logging.error(
-                    "Check that this is the only instance running. "
-                    "If that doesn't help, delete the file '%s'",
-                    session.filename,
+                    "Could not open session %s (locked?). "
+                    "Stop other Hikkari processes, then retry. Last error: %s",
+                    getattr(session, "filename", session),
+                    last_err,
                 )
                 continue
             except (TypeError, AuthKeyDuplicatedError):
