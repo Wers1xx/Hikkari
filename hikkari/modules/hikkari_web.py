@@ -804,16 +804,17 @@ class HikkariWebMod(loader.Module):
                 logger.exception("weburl tunnel")
 
             link = public or web.local_url
+            safe = utils.escape_html(link)
             await utils.answer(
                 status,
                 self.strings.get(
                     "weburl_ready",
-                    "✨ <b>WebUI login</b>\n\n"
-                    "Open the link and sign in (phone → code → 2FA).\n"
-                    "After success the account will be added and userbot restarts.\n\n"
-                    "🔗 <code>{url}</code>\n\n"
-                    "<i>Link is single-use · valid ~15 min</i>",
-                ).format(url=utils.escape_html(link)),
+                    "✨ <b>Hikkari WebUI</b>\n\n"
+                    "Открой ссылку и войди (телефон → код → 2FA).\n"
+                    "После входа аккаунт добавится, юзербот перезапустится.\n\n"
+                    '🔗 <a href="{url}">{url}</a>\n\n'
+                    "<i>Одноразовая ссылка · ~15 мин</i>",
+                ).format(url=safe),
             )
 
             async def _wait():

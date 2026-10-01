@@ -1,15 +1,18 @@
 # ©️ Wers1xx, 2025-2026
-# Hikkari WebUI login + optional public tunnel (random local port)
+# Hikkari WebUI login — local server + cloudflared only (no serveo/localhost.run)
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import re
 import secrets
 import socket
+import stat
 import subprocess
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -28,10 +31,9 @@ logger = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 
 
-def _free_port(prefer_min: int = 16000, prefer_max: int = 32000) -> int:
-    """Pick a free TCP port (random each run to avoid bind conflicts)."""
-    for _ in range(40):
-        port = random.randint(prefer_min, prefer_max)
+def _free_port(lo: int = 17000, hi: int = 29000) -> int:
+    for _ in range(50):
+        port = random.randint(lo, hi)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -44,9 +46,34 @@ def _free_port(prefer_min: int = 16000, prefer_max: int = 32000) -> int:
         return int(s.getsockname()[1])
 
 
-class WebAuth:
-    """Browser login for Hikkari (phone / code / 2FA)."""
+def _ensure_cloudflared() -> Optional[str]:
+    from shutil import which
 
+    found = which("cloudflared")
+    if found:
+        return found
+    try:
+        from .. import main as _main
+
+        bin_dir = Path(_main.BASE_PATH) / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        target = bin_dir / "cloudflared"
+        if target.is_file() and os.access(target, os.X_OK):
+            return str(target)
+        url = (
+            "https://github.com/cloudflare/cloudflared/releases/latest/"
+            "download/cloudflared-linux-amd64"
+        )
+        logger.info("Downloading cloudflared…")
+        urllib.request.urlretrieve(url, str(target))
+        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        return str(target)
+    except Exception:
+        logger.exception("cloudflared auto-install failed")
+        return None
+
+
+class WebAuth:
     def __init__(
         self,
         api_id: int,
@@ -63,9 +90,8 @@ class WebAuth:
         self.connection = connection
         self.device_model = device_model
         self.app_version = app_version
-
         self.port = _free_port()
-        self.token = secrets.token_urlsafe(16)
+        self.token = secrets.token_urlsafe(18)
         self.client = None
         self.phone: Optional[str] = None
         self.phone_code_hash: Optional[str] = None
@@ -76,7 +102,7 @@ class WebAuth:
         self._tunnel_proc: Optional[subprocess.Popen] = None
         self.public_url: Optional[str] = None
         self.local_url = f"http://127.0.0.1:{self.port}/?token={self.token}"
-        self.stage = "phone"  # phone | code | 2fa | done
+        self.stage = "phone"
 
     async def _ensure_client(self):
         if self.client is not None:
@@ -101,94 +127,75 @@ class WebAuth:
         await self.client.connect()
         return self.client
 
-
     def _html_page(self, body: str) -> str:
         return (
             "<!DOCTYPE html><html lang='ru'><head>"
             "<meta charset='utf-8'/>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-            "<meta name='theme-color' content='#000000'/>"
-            "<title>Hikkari — Login</title>"
+            "<title>Hikkari Login</title>"
             "<style>"
-            ":root{--bg:#050508;--card:rgba(14,14,20,.92);--line:rgba(255,255,255,.08);"
-            "--text:#f4f4f7;--muted:#8b8b9a;--accent:#fff}"
-            "*{box-sizing:border-box}"
-            "html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);"
-            "font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}"
-            ".bg{position:fixed;inset:0;background:"
-            "radial-gradient(ellipse 80% 50% at 50% -10%,rgba(60,60,80,.45),transparent 55%),"
-            "radial-gradient(ellipse at center,transparent 40%,#000 100%);z-index:0}"
-            ".wrap{position:relative;z-index:1;min-height:100vh;display:grid;"
-            "place-items:center;padding:24px}"
-            ".card{width:min(420px,100%);background:var(--card);"
-            "border:1px solid var(--line);border-radius:28px;padding:36px 28px;"
-            "text-align:center;backdrop-filter:blur(16px);"
-            "box-shadow:0 30px 90px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.03) inset}"
-            ".logo{width:96px;height:96px;border-radius:50%;object-fit:cover;"
-            "box-shadow:0 0 48px rgba(255,255,255,.28);margin:0 auto 14px;display:block}"
-            "h1{margin:6px 0 4px;font-size:1.55rem;font-weight:700;letter-spacing:-.02em}"
-            ".sub{color:var(--muted);font-size:14px;margin:0 0 20px;line-height:1.45}"
-            "label{display:block;text-align:left;font-size:11px;font-weight:600;"
-            "letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}"
-            "input{width:100%;padding:13px 14px;border-radius:14px;"
-            "border:1px solid var(--line);background:#0a0a0e;color:#fff;font-size:15px;"
-            "margin:0 0 12px;outline:none}"
-            "input:focus{border-color:rgba(255,255,255,.28);"
-            "box-shadow:0 0 0 3px rgba(255,255,255,.06)}"
+            "html,body{margin:0;min-height:100%;background:#000;color:#f2f2f5;"
+            "font-family:system-ui,sans-serif}"
+            ".wrap{min-height:100vh;display:grid;place-items:center;padding:24px;"
+            "background:radial-gradient(ellipse at 50% 0%,rgba(50,50,70,.45),#000 55%)}"
+            ".card{width:min(400px,100%);background:rgba(14,14,20,.92);"
+            "border:1px solid rgba(255,255,255,.08);border-radius:28px;"
+            "padding:36px 26px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.55)}"
+            ".logo{width:92px;height:92px;border-radius:50%;object-fit:cover;"
+            "box-shadow:0 0 40px rgba(255,255,255,.3);margin:0 auto 12px;display:block}"
+            "h1{margin:8px 0 4px;font-size:1.5rem}"
+            "p{color:#8a8a9a;font-size:14px;margin:0 0 16px}"
+            "input{width:100%;padding:13px 14px;border-radius:14px;box-sizing:border-box;"
+            "border:1px solid rgba(255,255,255,.1);background:#0a0a0e;color:#fff;"
+            "font-size:15px;margin:8px 0}"
             "button{width:100%;padding:13px;border:0;border-radius:14px;font-weight:700;"
-            "font-size:15px;cursor:pointer;color:#0a0a0c;"
-            "background:linear-gradient(180deg,#f7f7f9,#c9c9d2);"
-            "box-shadow:0 8px 28px rgba(255,255,255,.12)}"
-            "button:active{transform:scale(.98)}"
-            ".err{color:#fb7185;min-height:1.2em;font-size:13px;margin:10px 0 0}"
+            "font-size:15px;background:linear-gradient(180deg,#f5f5f7,#c8c8d0);"
+            "color:#111;cursor:pointer;margin-top:6px}"
+            ".err{color:#fb7185;font-size:13px;min-height:1.2em}"
             ".ok{color:#6ee7b7}"
-            ".foot{margin-top:18px;font-size:11px;color:#5a5a68;letter-spacing:.04em}"
-            "</style></head><body><div class='bg'></div><div class='wrap'>"
-            "<div class='card'>"
+            ".foot{margin-top:16px;font-size:11px;color:#555}"
+            "</style></head><body><div class='wrap'><div class='card'>"
             "<img class='logo' src='/static/logo-star.jpg' alt='Hikkari'/>"
-            f"{body}"
-            "<div class='foot'>Hikkari Userbot · WebUI</div>"
+            f"{body}<div class='foot'>Hikkari · WebUI</div>"
             "</div></div></body></html>"
         )
 
+    def _tok_ok(self, request: web.Request) -> bool:
+        tok = request.query.get("token") or ""
+        return bool(tok) and secrets.compare_digest(str(tok), self.token)
+
     async def index(self, request: web.Request) -> web.Response:
-        tok = request.query.get("token", "")
-        if not tok or not secrets.compare_digest(str(tok), self.token):
+        if not self._tok_ok(request):
             return web.Response(
-                text=self._html_page("<h1>403</h1><p>Invalid or missing token</p>"),
+                text=self._html_page("<h1>403</h1><p>Invalid link</p>"),
                 content_type="text/html",
                 status=403,
             )
         err = self.error or ""
         if self.stage == "done" and self.success:
-            body = (
-                '<h1 class="ok">Done</h1>'
-                "<p>Logged in successfully. You can close this tab.</p>"
-            )
+            body = '<h1 class="ok">Готово</h1><p>Вход выполнен. Закрой вкладку.</p>'
         elif self.stage == "2fa":
             body = (
-                "<h1>2FA</h1><p>Enter your two-factor password</p>"
+                "<h1>2FA</h1><p>Пароль двухфакторной защиты</p>"
                 f"<form method='post' action='/api/2fa?token={self.token}'>"
-                "<input name='password' type='password' "
-                "placeholder='2FA password' required autofocus/>"
-                "<button type='submit'>Sign in</button></form>"
+                "<input name='password' type='password' placeholder='2FA' required autofocus/>"
+                "<button type='submit'>Войти</button></form>"
                 f'<p class="err">{err}</p>'
             )
         elif self.stage == "code":
             body = (
-                f"<h1>Code</h1><p>Code sent to <b>{self.phone}</b></p>"
+                f"<h1>Код</h1><p>Отправлен на <b>{self.phone}</b></p>"
                 f"<form method='post' action='/api/code?token={self.token}'>"
-                "<input name='code' inputmode='numeric' "
-                "placeholder='12345' required autofocus/>"
-                "<button type='submit'>Confirm</button></form>"
+                "<input name='code' inputmode='numeric' placeholder='12345' required autofocus/>"
+                "<button type='submit'>Далее</button></form>"
                 f'<p class="err">{err}</p>'
             )
         else:
             body = (
-                "<h1>Hikkari</h1><p>Sign in via WebUI</p>"
+                "<h1>Hikkari</h1><p>Вход в аккаунт</p>"
                 f"<form method='post' action='/api/phone?token={self.token}'>"
                 "<input name='phone' placeholder='+79001234567' required autofocus/>"
-                "<button type='submit'>Get code</button></form>"
+                "<button type='submit'>Получить код</button></form>"
                 f'<p class="err">{err}</p>'
             )
         return web.Response(text=self._html_page(body), content_type="text/html")
@@ -199,10 +206,6 @@ class WebAuth:
         if not str(path).startswith(str(STATIC.resolve())) or not path.is_file():
             return web.Response(status=404)
         return web.FileResponse(path)
-
-    def _tok_ok(self, request: web.Request) -> bool:
-        tok = request.query.get("token") or ""
-        return bool(tok) and secrets.compare_digest(str(tok), self.token)
 
     async def api_phone(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
@@ -217,12 +220,12 @@ class WebAuth:
             self.phone_code_hash = result.phone_code_hash
             self.stage = "code"
         except PhoneNumberInvalidError:
-            self.error = "Invalid phone number"
+            self.error = "Неверный номер"
         except FloodWaitError as e:
-            self.error = f"FloodWait: wait {e.seconds}s"
+            self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("phone")
-            self.error = str(e)
+            self.error = str(e)[:200]
         raise web.HTTPFound(f"/?token={self.token}")
 
     async def api_code(self, request: web.Request) -> web.Response:
@@ -233,24 +236,22 @@ class WebAuth:
         self.error = None
         try:
             client = await self._ensure_client()
-            await client.sign_in(
-                self.phone, code, phone_code_hash=self.phone_code_hash
-            )
+            await client.sign_in(self.phone, code, phone_code_hash=self.phone_code_hash)
             self.stage = "done"
             self.success = True
             self.done.set()
         except SessionPasswordNeededError:
             self.stage = "2fa"
         except PhoneCodeInvalidError:
-            self.error = "Invalid code"
+            self.error = "Неверный код"
         except PhoneCodeExpiredError:
-            self.error = "Code expired — request again"
+            self.error = "Код истёк"
             self.stage = "phone"
         except FloodWaitError as e:
-            self.error = f"FloodWait: {e.seconds}s"
+            self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("code")
-            self.error = str(e)
+            self.error = str(e)[:200]
         raise web.HTTPFound(f"/?token={self.token}")
 
     async def api_2fa(self, request: web.Request) -> web.Response:
@@ -266,12 +267,12 @@ class WebAuth:
             self.success = True
             self.done.set()
         except PasswordHashInvalidError:
-            self.error = "Invalid 2FA password"
+            self.error = "Неверный 2FA"
         except FloodWaitError as e:
-            self.error = f"FloodWait: {e.seconds}s"
+            self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("2fa")
-            self.error = str(e)
+            self.error = str(e)[:200]
         raise web.HTTPFound(f"/?token={self.token}")
 
     def _build_app(self) -> web.Application:
@@ -284,12 +285,10 @@ class WebAuth:
         return app
 
     async def start_server(self):
-        app = self._build_app()
-        self._runner = web.AppRunner(app)
+        self._runner = web.AppRunner(self._build_app())
         await self._runner.setup()
-        site = web.TCPSite(self._runner, "0.0.0.0", self.port)
-        await site.start()
-        logger.info("WebUI auth on port %s", self.port)
+        await web.TCPSite(self._runner, "0.0.0.0", self.port).start()
+        logger.info("Hikkari WebUI on 0.0.0.0:%s", self.port)
 
     async def stop(self):
         if self._tunnel_proc and self._tunnel_proc.poll() is None:
@@ -302,121 +301,31 @@ class WebAuth:
             await self._runner.cleanup()
             self._runner = None
 
-
     async def start_tunnel(self) -> Optional[str]:
-        """Public URL for WebUI — like Hikka: prefer cloudflared, then SSH tunnels.
-
-        Never return admin.localhost.run (login wall).
-        """
-        # 1) Cloudflare quick tunnel (best free option, no account)
-        url = await self._tunnel_cloudflared()
-        if url:
-            self.public_url = self._with_token(url)
-            return self.public_url
-
-        # 2) SSH reverse tunnels (serveo / localhost.run) — filter admin pages
-        for host in ("serveo.net", "nokey@localhost.run"):
-            url = await self._tunnel_ssh(host)
-            if url:
-                self.public_url = self._with_token(url)
-                return self.public_url
-
-        return None
-
-    def _with_token(self, base: str) -> str:
-        base = base.rstrip("/")
-        sep = "&" if "?" in base else "?"
-        # if already has token leave as is
-        if "token=" in base:
-            return base
-        return f"{base}/?token={self.token}"
-
-    def _is_bad_tunnel_url(self, url: str) -> bool:
-        u = (url or "").lower()
-        bad = (
-            "admin.localhost.run",
-            "login.localhost.run",
-            "accounts.google",
-            "localhost.run/login",
-            "localhost.run/admin",
-        )
-        return any(b in u for b in bad)
-
-    async def _tunnel_cloudflared(self) -> Optional[str]:
-        cmds = [
-            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{self.port}"],
-            ["cloudflared", "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{self.port}"],
-        ]
-        for cmd in cmds:
-            try:
-                self._tunnel_proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
-            except FileNotFoundError:
-                logger.info("cloudflared not installed — trying SSH tunnels")
-                return None
-            except Exception:
-                logger.exception("cloudflared start failed")
-                continue
-
-            url = await self._wait_tunnel_url(
-                timeout=35,
-                extra_patterns=(
-                    r"https://[a-zA-Z0-9-]+\.trycloudflare\.com",
-                    r"https://[a-zA-Z0-9-]+\.cfargotunnel\.com",
-                ),
-            )
-            if url and not self._is_bad_tunnel_url(url):
-                logger.info("cloudflared tunnel: %s", url)
-                return url.rstrip("/")
-            try:
-                self._tunnel_proc.terminate()
-            except Exception:
-                pass
-            self._tunnel_proc = None
-        return None
-
-    async def _tunnel_ssh(self, host: str) -> Optional[str]:
-        cmd = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ServerAliveInterval=30",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "LogLevel=ERROR",
-            "-R",
-            f"80:127.0.0.1:{self.port}",
-            host,
-        ]
+        """Public link via cloudflared only — no serveo / localhost.run."""
+        binary = _ensure_cloudflared()
+        if not binary:
+            return None
         try:
             self._tunnel_proc = subprocess.Popen(
-                cmd,
+                [
+                    binary,
+                    "tunnel",
+                    "--no-autoupdate",
+                    "--url",
+                    f"http://127.0.0.1:{self.port}",
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-        except FileNotFoundError:
-            logger.warning("ssh not found")
-            return None
         except Exception:
-            logger.exception("ssh tunnel failed for %s", host)
+            logger.exception("cloudflared failed")
             return None
-
-        url = await self._wait_tunnel_url(timeout=25)
-        if url and not self._is_bad_tunnel_url(url):
-            return url.rstrip("/")
-        # localhost.run often prints a good URL then redirects browser to admin —
-        # prefer *.lhr.life if present
-        if url and self._is_bad_tunnel_url(url):
-            logger.warning("Rejected tunnel URL (admin/login wall): %s", url)
+        url = await self._wait_cf_url(40)
+        if url:
+            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            return self.public_url
         try:
             self._tunnel_proc.terminate()
         except Exception:
@@ -424,89 +333,58 @@ class WebAuth:
         self._tunnel_proc = None
         return None
 
-    async def _wait_tunnel_url(
-        self,
-        timeout: float = 25,
-        extra_patterns: tuple = (),
-    ) -> Optional[str]:
+    async def _wait_cf_url(self, timeout: float = 40) -> Optional[str]:
         if not self._tunnel_proc or not self._tunnel_proc.stdout:
             return None
-        patterns = [
-            re.compile(p)
-            for p in extra_patterns
-            + (
-                r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com",
-                r"https://[a-zA-Z0-9.-]+\.lhr\.life",
-                r"https://[a-zA-Z0-9.-]+\.serveo\.net",
-                r"https://[a-zA-Z0-9.-]+\.localhost\.run",
-                r"https?://[a-zA-Z0-9.-]+\.(localhost\.run|serveo\.net|lhr\.life)[^\s]*",
-            )
-        ]
+        pat = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
-        found_candidates = []
 
-        def read_line():
+        def readline():
             return self._tunnel_proc.stdout.readline()
 
         while loop.time() < deadline:
             if self._tunnel_proc.poll() is not None:
-                break
-            line = await loop.run_in_executor(None, read_line)
+                return None
+            line = await loop.run_in_executor(None, readline)
             if not line:
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.1)
                 continue
-            logger.debug("tunnel: %s", line.strip())
-            for pat in patterns:
-                m = pat.search(line)
-                if not m:
-                    continue
-                url = m.group(0).rstrip("./")
-                if self._is_bad_tunnel_url(url):
-                    continue
-                # Prefer non-admin URLs immediately
-                if "trycloudflare.com" in url or "lhr.life" in url or "serveo.net" in url:
-                    return url
-                found_candidates.append(url)
-        for url in found_candidates:
-            if not self._is_bad_tunnel_url(url):
-                return url
+            logger.debug("cf: %s", line.strip())
+            m = pat.search(line)
+            if m:
+                return m.group(0)
         return None
 
-    async def run_until_login(self, timeout: float = 600) -> Any:
-        """Start server (+tunnel), wait for login, return connected client or None."""
+    def best_url(self) -> str:
+        return self.public_url or self.local_url
+
+    async def run_until_login(self, timeout: float = 900) -> Any:
         await self.start_server()
         public = None
         try:
             public = await self.start_tunnel()
         except Exception:
-            logger.exception("tunnel error")
+            logger.exception("tunnel")
 
-        print("\n" + "=" * 48)
-        print("  Hikkari WebUI login")
-        print("=" * 48)
+        print("\n" + "=" * 50)
+        print("  Hikkari WebUI")
+        print("=" * 50)
         print(f"  Local:  {self.local_url}")
         if public:
             print(f"  Public: {public}")
-            print("  Open Public URL in browser on any device.")
         else:
-            print("  Tunnel not available.")
-            print("  Install cloudflared for public link:")
-            print("    https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/")
-            print("  Or open Local URL on this same device.")
-        print("  Waiting for login (phone -> code -> 2FA)...")
-        print("=" * 48 + "\n")
+            print("  Public: open Local URL on this device")
+        print("  Phone → code → 2FA in browser")
+        print("=" * 50 + "\n")
 
         try:
             await asyncio.wait_for(self.done.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            self.error = "timeout"
             await self.stop()
             return None
-
         if not self.success or self.client is None:
             await self.stop()
             return None
-
         await self.stop()
         return self.client
