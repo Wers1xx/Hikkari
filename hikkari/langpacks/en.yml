@@ -270,6 +270,7 @@ hikkari_web:
   accdel_current: "⚠️ This is the current account. Force with <code>accdel ID -f</code> (then stop the process)."
   accdel_confirm: "<emoji document_id=5841541824803509441>🗑</emoji> Remove userbot from account {uid}?
 Session will close, session/db files deleted, account removed from list."
+
   accdel_done: "<emoji document_id=5841541824803509441>🗑</emoji> Account <code>{uid}</code> removed: session closed, files deleted."
   accdel_partial: "⚠️ Account <code>{uid}</code> partially cleaned:\n<code>{err}</code>"
   accdel_current_done: "<emoji document_id=5841541824803509441>🗑</emoji> Current account files deleted. Restart/stop the userbot to finish."
@@ -556,6 +557,7 @@ Changelog:
 {}
 
 <b>Updating...</b>"
+
   autoupdate: "🛡 Unit Alpha also allows you to ignore updates and <b>do it automatically</b>!\n\n💫 However, major updates such as changing the global version (1.x.x -> 2.x.x) will be ignored for automatic updates and you will have to update manually"
   autoupdate_on: "🎆 Automatic updates <b>have been enabled!\nEnjoy using it!</b>"
   autoupdate_off: "❌ Automatic updates <b>have been disabled!</b>\nTo enable them, use the command <code>{prefix}autoupdate</code>"
@@ -572,6 +574,7 @@ A new Hikkari version is out.
 <emoji document_id=5280652935993266295>⚜️</emoji> <b>Hikkari <s>{}</s> -> {}</b>
 
 {}"
+
   more: "\n<i><b>🎥 And {} more...</b></i>"
   _cfg_doc_disable_notifications: "Disable update notifications"
   latest_disabled: "Notifications about the latest update have been suppressed"
