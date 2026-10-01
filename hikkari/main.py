@@ -1260,6 +1260,10 @@ class Hikkari:
 
     def main(self):
         """Main entrypoint"""
+        # Drop fast-start marker after process is up (one-shot per restart)
+        if os.environ.get("HIKKARI_FAST_START"):
+            # Keep during init; remove near end of boot via amain if needed
+            pass
         if sys.platform != "win32":
             try:
                 self.loop.add_signal_handler(

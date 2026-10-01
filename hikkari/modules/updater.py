@@ -23,6 +23,7 @@ import errno
 import json
 import logging
 import os
+import os
 import subprocess
 import sys
 import time
@@ -152,7 +153,10 @@ class UpdaterMod(loader.Module):
             now = time.monotonic()
             if now >= self._git_fetch_backoff_until:
                 # First poll always fetches; then every _GIT_FETCH_INTERVAL seconds
-                if (
+                if os.environ.get("HIKKARI_FAST_START") and self._last_git_fetch == 0.0:
+                    # Skip blocking fetch right after restart
+                    self._last_git_fetch = now
+                elif (
                     self._last_git_fetch == 0.0
                     or now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL
                 ):

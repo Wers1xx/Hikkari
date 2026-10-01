@@ -28,7 +28,11 @@ from collections.abc import Callable
 
 
 async def fw_protect():
-    await asyncio.sleep(random.randint(1000, 2000) / 1000)
+    # Shorter pause after restart / when fast-start is set
+    if os.environ.get("HIKKARI_FAST_START") or os.environ.get("HIKKARI_DO_NOT_RESTART"):
+        await asyncio.sleep(random.randint(80, 180) / 1000)
+    else:
+        await asyncio.sleep(random.randint(1000, 2000) / 1000)
 
 
 def get_startup_callback() -> Callable:
@@ -66,6 +70,8 @@ def restart():
 
     print("🔄 Restarting...")
 
+    # Fast-path flags for the next process
+    os.environ["HIKKARI_FAST_START"] = "1"
     if "HIKKARI_DO_NOT_RESTART" not in os.environ:
         os.environ["HIKKARI_DO_NOT_RESTART"] = "1"
     else:

@@ -805,26 +805,29 @@ class HikkariWebMod(loader.Module):
                 logger.exception("weburl tunnel")
 
             link = public or web.local_url
-            safe = utils.escape_html(link)
-            warn = ""
-            if not public:
-                warn = (
-                    "\n\n⚠️ <b>Нет Public-ссылки</b> — "
-                    "<code>127.0.0.1</code> с телефона не откроется. "
-                    "Подожди / проверь cloudflared."
-                )
-            else:
-                warn = "\n\n✅ Открывай <b>именно эту</b> ссылку (не localhost)."
-            await utils.answer(
-                status,
-                (
+            href = utils.escape_html(link)
+            if public:
+                body = (
                     "✨ <b>Hikkari WebUI</b>\n\n"
                     "Телефон → код → 2FA в браузере.\n"
                     "После входа аккаунт добавится, будет рестарт.\n\n"
-                    '🔗 <a href="{url}">{url}</a>'
-                    "{warn}\n\n"
-                    "<i>~15 мин · одноразовая</i>"
-                ).format(url=safe, warn=warn),
+                    + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
+                    + "<i>Нажми на текст выше · ~15 мин · одноразовая</i>"
+                )
+            else:
+                body = (
+                    "✨ <b>Hikkari WebUI</b>\n\n"
+                    "⚠️ Public-ссылка не готова — с телефона "
+                    "<code>127.0.0.1</code> не откроется.\n"
+                    "Подожди cloudflared или открой Local на этом устройстве.\n\n"
+                    + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
+                    + f"<code>{href}</code>"
+                )
+            await utils.answer(
+                status,
+                body,
+                parse_mode="HTML",
+                link_preview=False,
             )
 
             async def _wait():

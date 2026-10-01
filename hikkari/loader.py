@@ -687,29 +687,45 @@ class Modules:
 
         loaded = []
 
-        for mod in modules:
-            try:
-                mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
-                module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
-                user_friendly_origin = (
-                    "<core {}>" if origin == "<core>" else "<file {}>"
-                ).format(module_name)
+        # Core: sequential (order / deps). External files: parallel batches.
+        parallel = origin != "<core>" and len(modules) > 1
 
-                logger.debug("Loading %s from filesystem", module_name)
+        async def _load_one(mod):
+            mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
+            module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
+            user_friendly_origin = (
+                "<core {}>" if origin == "<core>" else "<file {}>"
+            ).format(module_name)
+            logger.debug("Loading %s from filesystem", module_name)
+            spec = importlib.machinery.ModuleSpec(
+                module_name,
+                StringLoader(
+                    Path(mod).read_text(encoding="utf-8"), user_friendly_origin
+                ),
+                origin=user_friendly_origin,
+            )
+            return await self.register_module(spec, module_name, origin)
 
-                spec = importlib.machinery.ModuleSpec(
-                    module_name,
-                    StringLoader(
-                        Path(mod).read_text(encoding="utf-8"), user_friendly_origin
-                    ),
-                    origin=user_friendly_origin,
-                )
+        if parallel:
+            sem = asyncio.Semaphore(6)
 
-                loaded += [await self.register_module(spec, module_name, origin)]
+            async def _guarded(mod):
+                async with sem:
+                    try:
+                        return await _load_one(mod)
+                    except Exception as e:
+                        logger.exception("Failed to load module %s due to %s:", mod, e)
+                        return None
 
-                logger.debug("Successfully loaded %s from filesystem", module_name)
-            except Exception as e:
-                logger.exception("Failed to load module %s due to %s:", mod, e)
+            results = await asyncio.gather(*(_guarded(m) for m in modules))
+            loaded = [r for r in results if r is not None]
+        else:
+            for mod in modules:
+                try:
+                    loaded += [await _load_one(mod)]
+                    logger.debug("Successfully loaded from filesystem")
+                except Exception as e:
+                    logger.exception("Failed to load module %s due to %s:", mod, e)
 
         return loaded
 
