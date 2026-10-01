@@ -18,6 +18,7 @@
 
 import asyncio
 import contextlib
+import contextlib
 import logging
 import os
 import random
@@ -35,53 +36,124 @@ if typing.TYPE_CHECKING:
     from ..inline.core import InlineManager
 
 logger = logging.getLogger(__name__)
-BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot")
+BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a
+def _token_backup_paths(tg_id: int | None = None) -> list:
+    """All places we may store the bot token (never lose it)."""
+    from pathlib import Path
+    from .. import main as _main
+    base = Path(_main.BASE_PATH)
+    paths = [
+        base / "inline_bot.token",
+        base / "data" / "inline_bot.token",
+    ]
+    if tg_id:
+        paths.insert(0, base / f"inline_bot-{tg_id}.token")
+        paths.append(base / "sessions" / f"inline_bot-{tg_id}.token")
+    # unique keep order
+    seen = set()
+    out = []
+    for p in paths:
+        s = str(p)
+        if s not in seen:
+            seen.add(s)
+            out.append(p)
+    return out
 
 
 def _token_backup_path() -> "Path":
-    from pathlib import Path
-    from .. import main as _main
-    return Path(_main.BASE_PATH) / "inline_bot.token"
+    return _token_backup_paths()[0]
 
 
-def _persist_bot_token(db, token: str, username: str | None = None) -> None:
-    """Save token to DB + durable backup file. Never lose credentials."""
-    if not token:
+def _persist_bot_token(db, token: str, username: str | None = None, tg_id: int | None = None) -> None:
+    """Save token to DB + multiple durable files. Never drop credentials on error."""
+    if not token or not isinstance(token, str):
         return
-    db.set("hikkari.inline", "bot_token", token)
-    if username:
-        db.set("hikkari.inline", "bot_username", str(username).lstrip("@"))
+    token = token.strip()
+    if ":" not in token or len(token) < 20:
+        logger.warning("Refuse to persist invalid-looking bot token")
+        return
     try:
-        path = _token_backup_path()
-        path.write_text(token.strip() + "\n", encoding="utf-8")
-        path.chmod(0o600)
+        db.set("hikkari.inline", "bot_token", token)
+        db.set("hikkari.inline", "skip_inline", False)
+        if username:
+            db.set("hikkari.inline", "bot_username", str(username).lstrip("@"))
+        try:
+            db.save()
+        except Exception:
+            logger.exception("db.save after token persist failed")
     except Exception:
-        logger.exception("Failed to write inline_bot.token backup")
-    try:
-        db.save()
-    except Exception:
-        pass
+        logger.exception("DB token persist failed")
+
+    if tg_id is None:
+        try:
+            tg_id = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
+        except Exception:
+            tg_id = None
+
+    for path in _token_backup_paths(tg_id):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(token + "\n", encoding="utf-8")
+            with contextlib.suppress(Exception):
+                path.chmod(0o600)
+        except Exception:
+            logger.debug("token backup write failed: %s", path, exc_info=True)
+
+    logger.info("Inline bot token persisted (DB + %s backup file(s))", len(_token_backup_paths(tg_id)))
 
 
-def _load_bot_token(db) -> str | None:
-    """Load token from DB, falling back to backup file."""
-    token = db.get("hikkari.inline", "bot_token", None)
-    if token:
-        return token
+def _load_bot_token(db, tg_id: int | None = None) -> str | None:
+    """Load token from DB and every backup location. Re-persist if restored from file."""
+    candidates = []
+    for key_mod, key_name in (
+        ("hikkari.inline", "bot_token"),
+        ("heroku.inline", "bot_token"),
+        ("hikka.inline", "bot_token"),
+    ):
+        with contextlib.suppress(Exception):
+            val = db.get(key_mod, key_name, None)
+            if val and isinstance(val, str) and ":" in val.strip():
+                candidates.append(val.strip())
+
+    if not tg_id:
+        with contextlib.suppress(Exception):
+            tg_id = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
+
+    for path in _token_backup_paths(tg_id):
+        try:
+            if path.is_file():
+                raw = path.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+                if raw and ":" in raw and len(raw) > 20:
+                    candidates.append(raw)
+        except Exception:
+            logger.debug("read backup failed: %s", path, exc_info=True)
+
+    # dedupe keep first
+    seen = set()
+    ordered = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            ordered.append(c)
+
+    if not ordered:
+        return None
+
+    token = ordered[0]
+    # Always re-sync into canonical storage so next restart finds it
     try:
-        path = _token_backup_path()
-        if path.is_file():
-            raw = path.read_text(encoding="utf-8").strip()
-            if raw and ":" in raw:
-                logger.warning("Restored inline bot token from backup file")
-                db.set("hikkari.inline", "bot_token", raw)
-                try:
-                    db.save()
-                except Exception:
-                    pass
-                return raw
+        current = db.get("hikkari.inline", "bot_token", None)
+        if current != token:
+            logger.warning("Restored inline bot token from backup/source")
+            _persist_bot_token(db, token, tg_id=tg_id)
+        else:
+            # still refresh files
+            _persist_bot_token(db, token, tg_id=tg_id)
     except Exception:
-        logger.exception("Failed to read inline_bot.token backup")
+        logger.exception("re-persist after load failed")
+    return token
+
+
     return None
 
 
@@ -288,6 +360,17 @@ class TokenObtainment(InlineUnit):
         create_new_if_needed: bool = True,
         revoke_token: bool = False,
     ) -> bool:
+        # Always try hard to recover token before giving up
+        if not self._token:
+            try:
+                tg = getattr(self._client, "tg_id", None)
+                recovered = _load_bot_token(self._db, tg_id=tg)
+                if recovered:
+                    self._token = recovered
+                    logger.info("Inline token recovered before assert")
+            except Exception:
+                logger.exception("token recovery in _assert_token")
+
         if self._token:
             return True
 
