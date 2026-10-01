@@ -845,13 +845,19 @@ class Hikkari:
                 from .web_auth import WebAuth
 
                 await client.disconnect()
+                _need_api = not (
+                    getattr(self, "api_token", None)
+                    and getattr(self.api_token, "ID", None)
+                    and getattr(self.api_token, "HASH", None)
+                )
                 web = WebAuth(
-                    self.api_token.ID,
-                    self.api_token.HASH,
+                    getattr(getattr(self, "api_token", None), "ID", None),
+                    getattr(getattr(self, "api_token", None), "HASH", None),
                     proxy=self.proxy,
                     connection=self.conn,
                     device_model=get_app_name(),
                     app_version=".".join(map(str, __version__)),
+                    need_api=_need_api,
                 )
                 client = await web.run_until_login(timeout=900)
                 if client is None:

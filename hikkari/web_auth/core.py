@@ -1,5 +1,5 @@
 # ©️ Wers1xx, 2025-2026
-# Hikkari WebUI login — local server + cloudflared only (no serveo/localhost.run)
+# Hikkari WebUI login — local server + cloudflared (public URL required on phone)
 
 from __future__ import annotations
 
@@ -74,22 +74,27 @@ def _ensure_cloudflared() -> Optional[str]:
 
 
 class WebAuth:
+    """Browser login: optional API → phone → code → 2FA."""
+
     def __init__(
         self,
-        api_id: int,
-        api_hash: str,
+        api_id: int | None = None,
+        api_hash: str | None = None,
         *,
         proxy: Any = None,
         connection: Any = None,
         device_model: str = "Hikkari",
         app_version: str = "1.0",
+        need_api: bool = False,
     ):
-        self.api_id = int(api_id)
-        self.api_hash = str(api_hash)
+        self.api_id = int(api_id) if api_id else None
+        self.api_hash = str(api_hash) if api_hash else None
+        self.need_api = need_api or not (self.api_id and self.api_hash)
         self.proxy = proxy
         self.connection = connection
         self.device_model = device_model
         self.app_version = app_version
+
         self.port = _free_port()
         self.token = secrets.token_urlsafe(18)
         self.client = None
@@ -102,11 +107,34 @@ class WebAuth:
         self._tunnel_proc: Optional[subprocess.Popen] = None
         self.public_url: Optional[str] = None
         self.local_url = f"http://127.0.0.1:{self.port}/?token={self.token}"
-        self.stage = "phone"
+        # api | phone | code | 2fa | done
+        self.stage = "api" if self.need_api else "phone"
+
+    def _base_from_request(self, request: web.Request) -> str:
+        """Keep user on the same host they opened (cloudflare or local)."""
+        host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host")
+        if not host:
+            host = f"127.0.0.1:{self.port}"
+        proto = request.headers.get("X-Forwarded-Proto")
+        if not proto:
+            if "trycloudflare.com" in host or "cfargotunnel.com" in host:
+                proto = "https"
+            else:
+                proto = "http"
+        return f"{proto}://{host}"
+
+    def _redirect(self, request: web.Request, path: str = "/") -> None:
+        base = self._base_from_request(request)
+        path = path if path.startswith("/") else f"/{path}"
+        sep = "&" if "?" in path else "?"
+        url = f"{base}{path}{sep}token={self.token}"
+        raise web.HTTPFound(url)
 
     async def _ensure_client(self):
         if self.client is not None:
             return self.client
+        if not self.api_id or not self.api_hash:
+            raise RuntimeError("API ID/HASH not set")
         from ..tl_cache import CustomTelegramClient
 
         kwargs = dict(
@@ -128,37 +156,81 @@ class WebAuth:
         return self.client
 
     def _html_page(self, body: str) -> str:
-        return (
-            "<!DOCTYPE html><html lang='ru'><head>"
-            "<meta charset='utf-8'/>"
-            "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-            "<title>Hikkari Login</title>"
-            "<style>"
-            "html,body{margin:0;min-height:100%;background:#000;color:#f2f2f5;"
-            "font-family:system-ui,sans-serif}"
-            ".wrap{min-height:100vh;display:grid;place-items:center;padding:24px;"
-            "background:radial-gradient(ellipse at 50% 0%,rgba(50,50,70,.45),#000 55%)}"
-            ".card{width:min(400px,100%);background:rgba(14,14,20,.92);"
-            "border:1px solid rgba(255,255,255,.08);border-radius:28px;"
-            "padding:36px 26px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.55)}"
-            ".logo{width:92px;height:92px;border-radius:50%;object-fit:cover;"
-            "box-shadow:0 0 40px rgba(255,255,255,.3);margin:0 auto 12px;display:block}"
-            "h1{margin:8px 0 4px;font-size:1.5rem}"
-            "p{color:#8a8a9a;font-size:14px;margin:0 0 16px}"
-            "input{width:100%;padding:13px 14px;border-radius:14px;box-sizing:border-box;"
-            "border:1px solid rgba(255,255,255,.1);background:#0a0a0e;color:#fff;"
-            "font-size:15px;margin:8px 0}"
-            "button{width:100%;padding:13px;border:0;border-radius:14px;font-weight:700;"
-            "font-size:15px;background:linear-gradient(180deg,#f5f5f7,#c8c8d0);"
-            "color:#111;cursor:pointer;margin-top:6px}"
-            ".err{color:#fb7185;font-size:13px;min-height:1.2em}"
-            ".ok{color:#6ee7b7}"
-            ".foot{margin-top:16px;font-size:11px;color:#555}"
-            "</style></head><body><div class='wrap'><div class='card'>"
-            "<img class='logo' src='/static/logo-star.jpg' alt='Hikkari'/>"
-            f"{body}<div class='foot'>Hikkari · WebUI</div>"
-            "</div></div></body></html>"
-        )
+        return f"""<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#000"/>
+<title>Hikkari Login</title>
+<style>
+:root {{ --bg:#000; --card:rgba(16,16,22,.94); --line:rgba(255,255,255,.09);
+  --text:#f4f4f7; --muted:#8a8a9a; --err:#fb7185; --ok:#6ee7b7; }}
+* {{ box-sizing:border-box; }}
+html,body {{ margin:0; min-height:100%; background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; }}
+.bg {{ position:fixed; inset:0; pointer-events:none;
+  background:radial-gradient(ellipse 80% 50% at 50% -5%,rgba(55,55,80,.5),transparent 55%); }}
+.wrap {{ position:relative; z-index:1; min-height:100vh; display:grid;
+  place-items:center; padding:24px; }}
+.card {{ width:min(400px,100%); background:var(--card); border:1px solid var(--line);
+  border-radius:28px; padding:36px 26px; text-align:center;
+  box-shadow:0 28px 90px rgba(0,0,0,.55);
+  animation:in .45s cubic-bezier(.22,1,.36,1); }}
+@keyframes in {{ from {{ opacity:0; transform:translateY(14px) scale(.98); }}
+  to {{ opacity:1; transform:none; }} }}
+.logo {{ width:92px; height:92px; border-radius:50%; object-fit:cover; display:block;
+  margin:0 auto 14px; box-shadow:0 0 42px rgba(255,255,255,.28);
+  animation:pulse 4s ease infinite; }}
+@keyframes pulse {{ 0%,100% {{ filter:drop-shadow(0 0 12px rgba(255,255,255,.2)); }}
+  50% {{ filter:drop-shadow(0 0 28px rgba(255,255,255,.4)); }} }}
+h1 {{ margin:6px 0 6px; font-size:1.45rem; font-weight:700; letter-spacing:-.02em; }}
+.sub {{ color:var(--muted); font-size:14px; margin:0 0 18px; line-height:1.45; }}
+label {{ display:block; text-align:left; font-size:11px; font-weight:600;
+  letter-spacing:.07em; text-transform:uppercase; color:var(--muted); margin:0 0 6px; }}
+input {{ width:100%; padding:13px 14px; border-radius:14px; border:1px solid var(--line);
+  background:#0a0a0e; color:#fff; font-size:15px; margin:0 0 12px; outline:none;
+  transition:border-color .2s, box-shadow .2s; }}
+input:focus {{ border-color:rgba(255,255,255,.28);
+  box-shadow:0 0 0 3px rgba(255,255,255,.06); }}
+button {{ width:100%; padding:13px; border:0; border-radius:14px; font-weight:700;
+  font-size:15px; cursor:pointer; color:#0a0a0c;
+  background:linear-gradient(180deg,#f7f7f9,#c9c9d2);
+  box-shadow:0 8px 28px rgba(255,255,255,.12);
+  transition:transform .15s, box-shadow .2s; }}
+button:active {{ transform:scale(.98); }}
+button:disabled {{ opacity:.6; }}
+.err {{ color:var(--err); font-size:13px; min-height:1.2em; margin:8px 0 0;
+  animation:in .3s ease; }}
+.ok {{ color:var(--ok); }}
+.steps {{ display:flex; gap:6px; justify-content:center; margin:0 0 18px; }}
+.steps span {{ width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,.15); }}
+.steps span.on {{ background:#fff; box-shadow:0 0 10px rgba(255,255,255,.45); }}
+.foot {{ margin-top:16px; font-size:11px; color:#555; }}
+.hint {{ font-size:12px; color:#6a6a78; margin:-6px 0 12px; text-align:left; }}
+</style>
+<script>
+document.addEventListener('submit',function(e){{
+  var b=e.target.querySelector('button[type=submit]');
+  if(b){{ b.disabled=true; b.textContent='…'; }}
+}});
+</script>
+</head><body>
+<div class="bg"></div>
+<div class="wrap"><div class="card">
+<img class="logo" src="/static/logo-star.jpg" alt="Hikkari"/>
+{body}
+<div class="foot">Hikkari · WebUI</div>
+</div></div>
+</body></html>"""
+
+    def _steps(self) -> str:
+        order = ["api", "phone", "code", "2fa"] if self.need_api else ["phone", "code", "2fa"]
+        # map done to last
+        cur = self.stage if self.stage != "done" else order[-1]
+        dots = []
+        for s in order:
+            dots.append(f'<span class="{"on" if s == cur else ""}"></span>')
+        return '<div class="steps">' + "".join(dots) + "</div>"
 
     def _tok_ok(self, request: web.Request) -> bool:
         tok = request.query.get("token") or ""
@@ -167,36 +239,60 @@ class WebAuth:
     async def index(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
             return web.Response(
-                text=self._html_page("<h1>403</h1><p>Invalid link</p>"),
+                text=self._html_page("<h1>403</h1><p class='sub'>Неверная ссылка</p>"),
                 content_type="text/html",
                 status=403,
             )
         err = self.error or ""
+        steps = self._steps()
         if self.stage == "done" and self.success:
-            body = '<h1 class="ok">Готово</h1><p>Вход выполнен. Закрой вкладку.</p>'
+            body = (
+                f"{steps}<h1 class='ok'>Готово</h1>"
+                "<p class='sub'>Вход выполнен. Можно закрыть вкладку — "
+                "юзербот продолжит сам.</p>"
+            )
+        elif self.stage == "api":
+            body = (
+                f"{steps}<h1>API</h1>"
+                "<p class='sub'>Данные с <b>my.telegram.org</b></p>"
+                f"<form method='post' action='/api/api?token={self.token}'>"
+                "<label>API ID</label>"
+                "<input name='api_id' inputmode='numeric' placeholder='12345678' required autofocus/>"
+                "<label>API Hash</label>"
+                "<input name='api_hash' placeholder='32 символа' required minlength='32' maxlength='32'/>"
+                "<p class='hint'>App → API development tools</p>"
+                "<button type='submit'>Далее</button></form>"
+                f"<p class='err'>{err}</p>"
+            )
         elif self.stage == "2fa":
             body = (
-                "<h1>2FA</h1><p>Пароль двухфакторной защиты</p>"
+                f"{steps}<h1>2FA</h1>"
+                "<p class='sub'>Пароль двухфакторной защиты</p>"
                 f"<form method='post' action='/api/2fa?token={self.token}'>"
-                "<input name='password' type='password' placeholder='2FA' required autofocus/>"
+                "<label>Пароль</label>"
+                "<input name='password' type='password' placeholder='••••••' required autofocus/>"
                 "<button type='submit'>Войти</button></form>"
-                f'<p class="err">{err}</p>'
+                f"<p class='err'>{err}</p>"
             )
         elif self.stage == "code":
             body = (
-                f"<h1>Код</h1><p>Отправлен на <b>{self.phone}</b></p>"
+                f"{steps}<h1>Код</h1>"
+                f"<p class='sub'>Отправлен на <b>{self.phone}</b></p>"
                 f"<form method='post' action='/api/code?token={self.token}'>"
+                "<label>Код из Telegram</label>"
                 "<input name='code' inputmode='numeric' placeholder='12345' required autofocus/>"
                 "<button type='submit'>Далее</button></form>"
-                f'<p class="err">{err}</p>'
+                f"<p class='err'>{err}</p>"
             )
         else:
             body = (
-                "<h1>Hikkari</h1><p>Вход в аккаунт</p>"
+                f"{steps}<h1>Hikkari</h1>"
+                "<p class='sub'>Номер телефона аккаунта</p>"
                 f"<form method='post' action='/api/phone?token={self.token}'>"
+                "<label>Телефон</label>"
                 "<input name='phone' placeholder='+79001234567' required autofocus/>"
                 "<button type='submit'>Получить код</button></form>"
-                f'<p class="err">{err}</p>'
+                f"<p class='err'>{err}</p>"
             )
         return web.Response(text=self._html_page(body), content_type="text/html")
 
@@ -206,6 +302,30 @@ class WebAuth:
         if not str(path).startswith(str(STATIC.resolve())) or not path.is_file():
             return web.Response(status=404)
         return web.FileResponse(path)
+
+    async def api_api(self, request: web.Request) -> web.Response:
+        if not self._tok_ok(request):
+            return web.Response(status=403, text="forbidden")
+        data = await request.post()
+        self.error = None
+        api_id = str(data.get("api_id", "")).strip()
+        api_hash = str(data.get("api_hash", "")).strip()
+        if not api_id.isdigit():
+            self.error = "API ID — только цифры"
+            return self._redirect(request)
+        if len(api_hash) != 32 or any(c not in "0123456789abcdefABCDEF" for c in api_hash):
+            self.error = "API Hash — 32 hex-символа"
+            return self._redirect(request)
+        self.api_id = int(api_id)
+        self.api_hash = api_hash
+        try:
+            from .. import main as _main
+            _main.save_config_key("api_id", self.api_id)
+            _main.save_config_key("api_hash", self.api_hash)
+        except Exception:
+            logger.exception("save api config")
+        self.stage = "phone"
+        self._redirect(request)
 
     async def api_phone(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
@@ -225,8 +345,8 @@ class WebAuth:
             self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("phone")
-            self.error = str(e)[:200]
-        raise web.HTTPFound(f"/?token={self.token}")
+            self.error = str(e)[:180]
+        self._redirect(request)
 
     async def api_code(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
@@ -245,14 +365,14 @@ class WebAuth:
         except PhoneCodeInvalidError:
             self.error = "Неверный код"
         except PhoneCodeExpiredError:
-            self.error = "Код истёк"
+            self.error = "Код истёк — запроси снова"
             self.stage = "phone"
         except FloodWaitError as e:
             self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("code")
-            self.error = str(e)[:200]
-        raise web.HTTPFound(f"/?token={self.token}")
+            self.error = str(e)[:180]
+        self._redirect(request)
 
     async def api_2fa(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
@@ -272,20 +392,21 @@ class WebAuth:
             self.error = f"FloodWait: {e.seconds}с"
         except Exception as e:
             logger.exception("2fa")
-            self.error = str(e)[:200]
-        raise web.HTTPFound(f"/?token={self.token}")
+            self.error = str(e)[:180]
+        self._redirect(request)
 
     def _build_app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/", self.index)
         app.router.add_get("/static/{path:.*}", self.static)
+        app.router.add_post("/api/api", self.api_api)
         app.router.add_post("/api/phone", self.api_phone)
         app.router.add_post("/api/code", self.api_code)
         app.router.add_post("/api/2fa", self.api_2fa)
         return app
 
     async def start_server(self):
-        self._runner = web.AppRunner(self._build_app())
+        self._runner = web.AppRunner(self._build_app(), access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, "0.0.0.0", self.port).start()
         logger.info("Hikkari WebUI on 0.0.0.0:%s", self.port)
@@ -302,7 +423,6 @@ class WebAuth:
             self._runner = None
 
     async def start_tunnel(self) -> Optional[str]:
-        """Public link via cloudflared only — no serveo / localhost.run."""
         binary = _ensure_cloudflared()
         if not binary:
             return None
@@ -322,7 +442,7 @@ class WebAuth:
         except Exception:
             logger.exception("cloudflared failed")
             return None
-        url = await self._wait_cf_url(40)
+        url = await self._wait_cf_url(45)
         if url:
             self.public_url = f"{url.rstrip('/')}/?token={self.token}"
             return self.public_url
@@ -333,7 +453,7 @@ class WebAuth:
         self._tunnel_proc = None
         return None
 
-    async def _wait_cf_url(self, timeout: float = 40) -> Optional[str]:
+    async def _wait_cf_url(self, timeout: float = 45) -> Optional[str]:
         if not self._tunnel_proc or not self._tunnel_proc.stdout:
             return None
         pat = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
@@ -370,12 +490,16 @@ class WebAuth:
         print("\n" + "=" * 50)
         print("  Hikkari WebUI")
         print("=" * 50)
-        print(f"  Local:  {self.local_url}")
         if public:
-            print(f"  Public: {public}")
+            print(f"  >>> OPEN THIS: {public}")
+            print("  (с телефона открывай ТОЛЬКО Public, не 127.0.0.1)")
         else:
-            print("  Public: open Local URL on this device")
-        print("  Phone → code → 2FA in browser")
+            print(f"  Local only: {self.local_url}")
+            print("  127.0.0.1 с телефона НЕ работает — нужен cloudflared")
+        if self.need_api:
+            print("  Steps: API ID/HASH → phone → code → 2FA")
+        else:
+            print("  Steps: phone → code → 2FA")
         print("=" * 50 + "\n")
 
         try:
@@ -386,5 +510,6 @@ class WebAuth:
         if not self.success or self.client is None:
             await self.stop()
             return None
+        # keep tunnel until client handed over — stop after
         await self.stop()
         return self.client

@@ -795,6 +795,7 @@ class HikkariWebMod(loader.Module):
                 connection=getattr(main.hikkari, "conn", None),
                 device_model="Hikkari",
                 app_version=".".join(map(str, __version__)),
+                need_api=False,
             )
             await web.start_server()
             public = None
@@ -805,16 +806,25 @@ class HikkariWebMod(loader.Module):
 
             link = public or web.local_url
             safe = utils.escape_html(link)
+            warn = ""
+            if not public:
+                warn = (
+                    "\n\n⚠️ <b>Нет Public-ссылки</b> — "
+                    "<code>127.0.0.1</code> с телефона не откроется. "
+                    "Подожди / проверь cloudflared."
+                )
+            else:
+                warn = "\n\n✅ Открывай <b>именно эту</b> ссылку (не localhost)."
             await utils.answer(
                 status,
-                self.strings.get(
-                    "weburl_ready",
+                (
                     "✨ <b>Hikkari WebUI</b>\n\n"
-                    "Открой ссылку и войди (телефон → код → 2FA).\n"
-                    "После входа аккаунт добавится, юзербот перезапустится.\n\n"
-                    '🔗 <a href="{url}">{url}</a>\n\n'
-                    "<i>Одноразовая ссылка · ~15 мин</i>",
-                ).format(url=safe),
+                    "Телефон → код → 2FA в браузере.\n"
+                    "После входа аккаунт добавится, будет рестарт.\n\n"
+                    '🔗 <a href="{url}">{url}</a>'
+                    "{warn}\n\n"
+                    "<i>~15 мин · одноразовая</i>"
+                ).format(url=safe, warn=warn),
             )
 
             async def _wait():
