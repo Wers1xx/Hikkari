@@ -47,82 +47,100 @@ def _free_port(lo: int = 17000, hi: int = 29000) -> int:
         return int(s.getsockname()[1])
 
 
-def _cloudflared_asset_name() -> str:
-    """Pick correct cloudflared binary for this machine (UserLand is often arm64)."""
-    import platform
 
+def _arch_tag() -> str:
+    import platform
     machine = platform.machine().lower()
-    system = platform.system().lower()
-    if system == "linux":
-        if machine in ("aarch64", "arm64"):
-            return "cloudflared-linux-arm64"
-        if machine in ("armv7l", "armv7", "arm"):
-            return "cloudflared-linux-arm"
-        return "cloudflared-linux-amd64"
-    if system == "darwin":
-        if machine in ("arm64", "aarch64"):
-            return "cloudflared-darwin-arm64.tgz"
-        return "cloudflared-darwin-amd64.tgz"
-    return "cloudflared-linux-amd64"
+    if machine in ("aarch64", "arm64"):
+        return "arm64"
+    if machine in ("armv7l", "armv7", "arm"):
+        return "arm"
+    return "amd64"
+
+
+def _bin_dir() -> Path:
+    from .. import main as _main
+    d = Path(_main.BASE_PATH) / "bin"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _ensure_ngrok() -> Optional[str]:
+    """Install ngrok binary (no account needed for basic quick tunnels on older builds;
+    modern ngrok may need token — we still try free agent)."""
+    from shutil import which
+
+    found = which("ngrok")
+    if found:
+        return found
+    try:
+        target = _bin_dir() / "ngrok"
+        if target.is_file() and os.access(target, os.X_OK) and target.stat().st_size > 500_000:
+            return str(target)
+        arch = _arch_tag()
+        # Official ngrok zip for linux
+        url = f"https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-{arch}.zip"
+        logger.info("Downloading ngrok (%s)…", arch)
+        import zipfile
+        import io
+        data = urllib.request.urlopen(url, timeout=120).read()
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                if name.endswith("ngrok") or name == "ngrok":
+                    target.write_bytes(zf.read(name))
+                    break
+            else:
+                # first file
+                target.write_bytes(zf.read(zf.namelist()[0]))
+        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        return str(target)
+    except Exception:
+        logger.exception("ngrok download failed")
+        return None
+
+
+def _ngrok_authtoken() -> Optional[str]:
+    """Optional token from env or config."""
+    tok = os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN")
+    if tok:
+        return tok.strip()
+    try:
+        from .. import main as _main
+        tok = _main.get_config_key("ngrok_token") or _main.get_config_key("ngrok_authtoken")
+        if tok:
+            return str(tok).strip()
+    except Exception:
+        pass
+    return None
 
 
 def _ensure_cloudflared() -> Optional[str]:
     from shutil import which
-
     found = which("cloudflared")
     if found:
         return found
     try:
-        from .. import main as _main
-
-        bin_dir = Path(_main.BASE_PATH) / "bin"
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        target = bin_dir / "cloudflared"
-        # Re-download if wrong arch (empty/corrupt)
-        need_dl = True
+        target = _bin_dir() / "cloudflared"
         if target.is_file() and os.access(target, os.X_OK) and target.stat().st_size > 1_000_000:
-            need_dl = False
-        if need_dl:
-            asset = _cloudflared_asset_name()
-            url = (
-                "https://github.com/cloudflare/cloudflared/releases/latest/download/"
-                + asset
-            )
-            logger.info("Downloading cloudflared (%s)…", asset)
-            if asset.endswith(".tgz"):
-                import tarfile
-                import io
-
-                data = urllib.request.urlopen(url, timeout=120).read()
-                with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-                    for member in tar.getmembers():
-                        if member.name.endswith("cloudflared") or member.name == "cloudflared":
-                            f = tar.extractfile(member)
-                            if f:
-                                target.write_bytes(f.read())
-                            break
-            else:
-                urllib.request.urlretrieve(url, str(target))
-            target.chmod(
-                target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
-            )
-        # smoke test
-        try:
-            subprocess.run(
-                [str(target), "--version"],
-                capture_output=True,
-                timeout=8,
-                check=False,
-            )
-        except Exception:
-            logger.warning("cloudflared binary may be wrong arch — removing")
-            with contextlib.suppress(Exception):
-                target.unlink()
-            return None
+            return str(target)
+        arch = _arch_tag()
+        asset = {
+            "arm64": "cloudflared-linux-arm64",
+            "arm": "cloudflared-linux-arm",
+            "amd64": "cloudflared-linux-amd64",
+        }.get(arch, "cloudflared-linux-amd64")
+        url = (
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/"
+            + asset
+        )
+        logger.info("Downloading cloudflared (%s)…", asset)
+        urllib.request.urlretrieve(url, str(target))
+        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         return str(target)
     except Exception:
-        logger.exception("cloudflared auto-install failed")
+        logger.exception("cloudflared download failed")
         return None
+
 
 
 class WebAuth:
@@ -474,20 +492,143 @@ document.addEventListener('submit',function(e){{
             await self._runner.cleanup()
             self._runner = None
 
+
     async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Always try to get a public URL so any user can open WebUI."""
-        binary = _ensure_cloudflared()
+        """Public URL: ngrok first, then cloudflared."""
+        url = await self._tunnel_ngrok(retries=retries)
+        if url:
+            return url
+        logger.warning("ngrok failed — trying cloudflared")
+        url = await self._tunnel_cloudflared(retries=max(1, retries - 1))
+        return url
+
+    async def _tunnel_ngrok(self, retries: int = 3) -> Optional[str]:
+        binary = _ensure_ngrok()
         if not binary:
-            logger.error("cloudflared not available — public WebUI impossible")
             return None
 
-        for attempt in range(1, retries + 1):
+        token = _ngrok_authtoken()
+        if token:
             try:
-                if self._tunnel_proc and self._tunnel_proc.poll() is None:
-                    with contextlib.suppress(Exception):
-                        self._tunnel_proc.terminate()
-                    self._tunnel_proc = None
+                subprocess.run(
+                    [binary, "config", "add-authtoken", token],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+            except Exception:
+                logger.debug("ngrok authtoken set failed", exc_info=True)
 
+        for attempt in range(1, retries + 1):
+            with contextlib.suppress(Exception):
+                if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                    self._tunnel_proc.terminate()
+            self._tunnel_proc = None
+
+            # Kill leftover ngrok if any
+            with contextlib.suppress(Exception):
+                subprocess.run(["pkill", "-f", "ngrok http"], capture_output=True)
+
+            try:
+                self._tunnel_proc = subprocess.Popen(
+                    [
+                        binary,
+                        "http",
+                        str(self.port),
+                        "--log=stdout",
+                        "--log-format=logfmt",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            except Exception:
+                logger.exception("ngrok start failed (try %s)", attempt)
+                await asyncio.sleep(1)
+                continue
+
+            # Prefer local ngrok API for the public URL
+            url = await self._wait_ngrok_api(timeout=25)
+            if not url:
+                url = await self._wait_ngrok_log(timeout=20)
+            if url:
+                self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+                logger.info("ngrok public WebUI: %s", self.public_url)
+                return self.public_url
+
+            logger.warning("ngrok no URL (try %s/%s)", attempt, retries)
+            with contextlib.suppress(Exception):
+                if self._tunnel_proc:
+                    self._tunnel_proc.terminate()
+            self._tunnel_proc = None
+            await asyncio.sleep(1.5)
+        return None
+
+    async def _wait_ngrok_api(self, timeout: float = 25) -> Optional[str]:
+        """Poll http://127.0.0.1:4040/api/tunnels for public_url."""
+        import json
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            try:
+                def fetch():
+                    req = urllib.request.Request(
+                        "http://127.0.0.1:4040/api/tunnels",
+                        headers={"User-Agent": "hikkari"},
+                    )
+                    with urllib.request.urlopen(req, timeout=2) as resp:
+                        return json.loads(resp.read().decode())
+
+                data = await loop.run_in_executor(None, fetch)
+                for tun in data.get("tunnels") or []:
+                    pub = tun.get("public_url") or ""
+                    if pub.startswith("https://"):
+                        return pub.rstrip("/")
+                    if pub.startswith("http://") and "ngrok" in pub:
+                        # prefer https if only http
+                        https = pub.replace("http://", "https://", 1)
+                        return https.rstrip("/")
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+        return None
+
+    async def _wait_ngrok_log(self, timeout: float = 20) -> Optional[str]:
+        if not self._tunnel_proc or not self._tunnel_proc.stdout:
+            return None
+        pat = re.compile(
+            r"https://[a-z0-9-]+\.ngrok(?:-free)?\.(?:app|io|dev)[^\s]*",
+            re.I,
+        )
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+
+        def readline():
+            return self._tunnel_proc.stdout.readline()
+
+        while loop.time() < deadline:
+            if self._tunnel_proc.poll() is not None:
+                return None
+            line = await loop.run_in_executor(None, readline)
+            if not line:
+                await asyncio.sleep(0.1)
+                continue
+            logger.debug("ngrok: %s", line.strip())
+            m = pat.search(line)
+            if m:
+                return m.group(0).rstrip("/")
+        return None
+
+    async def _tunnel_cloudflared(self, retries: int = 2) -> Optional[str]:
+        binary = _ensure_cloudflared()
+        if not binary:
+            return None
+        for attempt in range(1, retries + 1):
+            with contextlib.suppress(Exception):
+                if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                    self._tunnel_proc.terminate()
+            self._tunnel_proc = None
+            try:
                 self._tunnel_proc = subprocess.Popen(
                     [
                         binary,
@@ -501,23 +642,17 @@ document.addEventListener('submit',function(e){{
                     text=True,
                 )
             except Exception:
-                logger.exception("cloudflared start failed (try %s)", attempt)
-                await asyncio.sleep(1)
+                logger.exception("cloudflared start failed")
                 continue
-
-            url = await self._wait_cf_url(55)
+            url = await self._wait_cf_url(50)
             if url:
                 self.public_url = f"{url.rstrip('/')}/?token={self.token}"
-                logger.info("Public WebUI ready: %s", self.public_url)
                 return self.public_url
-
-            logger.warning("cloudflared did not return URL (try %s/%s)", attempt, retries)
             with contextlib.suppress(Exception):
                 if self._tunnel_proc:
                     self._tunnel_proc.terminate()
             self._tunnel_proc = None
-            await asyncio.sleep(1.2)
-
+            await asyncio.sleep(1)
         return None
 
     async def _wait_cf_url(self, timeout: float = 45) -> Optional[str]:

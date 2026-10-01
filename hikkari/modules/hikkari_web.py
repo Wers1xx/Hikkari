@@ -821,9 +821,13 @@ class HikkariWebMod(loader.Module):
                 await utils.answer(
                     status,
                     "🚫 <b>Не удалось создать публичную ссылку</b>\n\n"
-                    "Без неё другие пользователи не откроют WebUI "
-                    "(localhost недоступен с телефона).\n\n"
-                    "Проверь интернет и повтори <code>weburl</code>.",
+                    "Нужен <b>ngrok</b>.\n"
+                    "1) Зарегистрируйся на https://ngrok.com\n"
+                    "2) Скопируй Authtoken\n"
+                    "3) В терминале:\n"
+                    "<code>export NGROK_AUTHTOKEN=твой_токен</code>\n"
+                    "или добавь в config.json ключ <code>ngrok_token</code>\n"
+                    "4) Снова <code>weburl</code>",
                     parse_mode="HTML",
                 )
                 return
