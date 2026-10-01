@@ -18,7 +18,6 @@
 
 import asyncio
 import contextlib
-import contextlib
 import logging
 import os
 import random
@@ -36,7 +35,8 @@ if typing.TYPE_CHECKING:
     from ..inline.core import InlineManager
 
 logger = logging.getLogger(__name__)
-BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a
+BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot")
+
 def _token_backup_paths(tg_id: int | None = None) -> list:
     """All places we may store the bot token (never lose it)."""
     from pathlib import Path
@@ -152,10 +152,6 @@ def _load_bot_token(db, tg_id: int | None = None) -> str | None:
     except Exception:
         logger.exception("re-persist after load failed")
     return token
-
-
-    return None
-
 
 
 class TokenObtainment(InlineUnit):

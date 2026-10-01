@@ -170,7 +170,7 @@ class InlineStuff(loader.Module):
 
         try:
             im = self.inline
-            im._token = None
+            prev_token = im._token or im._db.get("hikkari.inline", "bot_token", None)
             ok = await im._create_bot()
             if ok and im._db.get("hikkari.inline", "bot_token"):
                 im._token = im._db.get("hikkari.inline", "bot_token")
@@ -217,7 +217,7 @@ class InlineStuff(loader.Module):
         self._db.set("hikkari.inline", "skip_inline", True)
         self._db.set("hikkari.inline", "allow_auto_create", False)
         self._db.set("hikkari.inline", "setup_prompted", True)
-        self._db.set("hikkari.inline", "bot_token", None)
+        # Keep bot_token in DB/files for restore without BotFather
         await utils.answer(
             message,
             "✨ <b>Инлайн отключён.</b>\n"

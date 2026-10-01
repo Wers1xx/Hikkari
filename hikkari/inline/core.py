@@ -20,6 +20,7 @@
 
 import asyncio
 import contextlib
+import contextlib
 import logging
 import os
 import time
@@ -169,10 +170,16 @@ class InlineManager(
         self._markup_ttl = 60 * 60 * 24
         self.init_complete = False
 
-        # Prefer DB, fall back to durable backup file
         try:
             from .token_obtainment import _load_bot_token
-            self._token = _load_bot_token(db) or False
+            try:
+                tg = int(getattr(client, "tg_id", 0) or 0) or None
+            except Exception:
+                tg = None
+            self._token = _load_bot_token(db, tg_id=tg) or False
+            if self._token:
+                with contextlib.suppress(Exception):
+                    db.set("hikkari.inline", "owner_id", int(getattr(client, "tg_id", 0) or 0))
         except Exception:
             self._token = db.get("hikkari.inline", "bot_token", False)
 
@@ -262,6 +269,13 @@ class InlineManager(
         """
         self._me = self._client.tg_id
         self._name = get_display_name(self._client.hikkari_me)
+
+        if not self._token:
+            try:
+                from .token_obtainment import _load_bot_token
+                self._token = _load_bot_token(self._db, tg_id=self._me) or False
+            except Exception:
+                pass
 
         if not ignore_token_checks:
             is_token_asserted = await self._assert_token()
