@@ -20,6 +20,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import base64
 import binascii
 import collections
@@ -974,9 +975,11 @@ class Hikkari:
         for session in self.sessions.copy():
             connected = False
             last_err = None
+            skip_session = False
+            fatal = False
+
             for attempt in range(1, 6):
                 try:
-                    # Clear stale SQLite locks before open (other instance already dead)
                     try:
                         fname = getattr(session, "filename", None) or str(session)
                         session_repair.unlock_session(fname)
@@ -996,7 +999,7 @@ class Hikkari:
                         lang_code="en",
                         system_lang_code="en-US",
                     )
-                    if session.server_address == "0.0.0.0":
+                    if getattr(session, "server_address", None) == "0.0.0.0":
                         patcher.patch(client, session)
 
                     await client.connect()
@@ -1016,15 +1019,45 @@ class Hikkari:
                     try:
                         fname = getattr(session, "filename", None) or str(session)
                         session_repair.unlock_session(fname)
-                        # Re-open SQLiteSession object after unlock
                         from hikkaritl.sessions import SQLiteSession as _SQ
                         stem = str(fname).rsplit(".session", maxsplit=1)[0]
                         session = _SQ(stem)
                     except Exception:
                         logging.exception("session re-open after unlock failed")
-                except Exception:
-                    raise
+                except (TypeError, AuthKeyDuplicatedError):
+                    with contextlib.suppress(Exception):
+                        Path(session.filename).unlink(missing_ok=True)
+                    with contextlib.suppress(Exception):
+                        self.sessions.remove(session)
+                    skip_session = True
+                    break
+                except (ValueError, ApiIdInvalidError):
+                    run_config()
+                    fatal = True
+                    break
+                except PhoneNumberInvalidError:
+                    logging.error(
+                        "Phone number is incorrect. Use international format (+XX...) "
+                        "and don't put spaces in it."
+                    )
+                    with contextlib.suppress(Exception):
+                        self.sessions.remove(session)
+                    skip_session = True
+                    break
+                except (AuthKeyUnregisteredError, InteractiveAuthRequired):
+                    logging.error(
+                        "Session %s was terminated and re-auth is required",
+                        getattr(session, "filename", session),
+                    )
+                    with contextlib.suppress(Exception):
+                        self.sessions.remove(session)
+                    skip_session = True
+                    break
 
+            if fatal:
+                return False
+            if skip_session:
+                continue
             if not connected:
                 logging.error(
                     "Could not open session %s (locked?). "
@@ -1032,28 +1065,8 @@ class Hikkari:
                     getattr(session, "filename", session),
                     last_err,
                 )
-                continue
-            except (TypeError, AuthKeyDuplicatedError):
-                Path(session.filename).unlink(missing_ok=True)
-                self.sessions.remove(session)
-            except (ValueError, ApiIdInvalidError):
-                # Bad API hash/ID
-                run_config()
-                return False
-            except PhoneNumberInvalidError:
-                logging.error(
-                    "Phone number is incorrect. Use international format (+XX...) "
-                    "and don't put spaces in it."
-                )
-                self.sessions.remove(session)
-            except (AuthKeyUnregisteredError, InteractiveAuthRequired):
-                logging.error(
-                    "Session %s was terminated and re-auth is required",
-                    session.filename,
-                )
-                self.sessions.remove(session)
 
-        return bool(self.sessions)
+        return bool(self.clients) or bool(self.sessions)
 
     async def amain_wrapper(self, client: CustomTelegramClient, a_i: list):
         """Wrapper around amain"""
