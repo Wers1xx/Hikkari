@@ -1,15 +1,19 @@
 services:
-  worker:
-    container_name: heroku_ub
-    build:
-      context: .
-    volumes:
-      - worker:/data
-    stop_signal: SIGINT
+  hikkari:
+    build: .
+    container_name: hikkari
     restart: unless-stopped
+    environment:
+      - DOCKER=true
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Persist sessions, configs, modules, inline token backups
+      - hikkari_data:/data/Hikkari
     stdin_open: true
     tty: true
-    init: true
+    # Uncomment to expose WebApp/WebUI ports if needed:
+    # ports:
+    #   - "16000-32000:16000-32000"
 
 volumes:
-  worker:
+  hikkari_data:

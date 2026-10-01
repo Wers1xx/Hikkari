@@ -101,37 +101,53 @@ class WebAuth:
         await self.client.connect()
         return self.client
 
+
     def _html_page(self, body: str) -> str:
         return (
             "<!DOCTYPE html><html lang='ru'><head>"
             "<meta charset='utf-8'/>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-            "<title>Hikkari Login</title>"
+            "<meta name='theme-color' content='#000000'/>"
+            "<title>Hikkari — Login</title>"
             "<style>"
-            "html,body{margin:0;height:100%;background:#000;color:#f2f2f5;"
-            "font-family:system-ui,sans-serif}"
-            ".wrap{min-height:100%;display:grid;place-items:center;padding:24px;"
-            "background:radial-gradient(ellipse at 50% 0%,#1a1a22 0%,#000 55%)}"
-            ".card{width:min(400px,100%);background:rgba(16,16,22,.85);"
-            "border:1px solid rgba(255,255,255,.08);border-radius:24px;"
-            "padding:32px 24px;text-align:center;"
-            "box-shadow:0 24px 80px rgba(0,0,0,.5)}"
-            ".logo{width:88px;height:88px;border-radius:50%;object-fit:cover;"
-            "box-shadow:0 0 40px rgba(255,255,255,.25);margin-bottom:12px}"
-            "h1{margin:8px 0 4px;font-size:1.5rem}"
-            "p{color:#8a8a9a;font-size:14px;margin:0 0 18px}"
-            "input{width:100%;padding:12px 14px;border-radius:12px;"
-            "border:1px solid rgba(255,255,255,.1);background:#0a0a0e;color:#fff;"
-            "font-size:15px;margin:8px 0;box-sizing:border-box}"
-            "button{width:100%;padding:12px;border:0;border-radius:12px;"
-            "font-weight:600;font-size:15px;"
-            "background:linear-gradient(180deg,#f5f5f7,#c8c8d0);color:#111;"
-            "cursor:pointer;margin-top:8px}"
-            ".err{color:#fb7185;min-height:1.2em;font-size:13px}"
+            ":root{--bg:#050508;--card:rgba(14,14,20,.92);--line:rgba(255,255,255,.08);"
+            "--text:#f4f4f7;--muted:#8b8b9a;--accent:#fff}"
+            "*{box-sizing:border-box}"
+            "html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);"
+            "font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}"
+            ".bg{position:fixed;inset:0;background:"
+            "radial-gradient(ellipse 80% 50% at 50% -10%,rgba(60,60,80,.45),transparent 55%),"
+            "radial-gradient(ellipse at center,transparent 40%,#000 100%);z-index:0}"
+            ".wrap{position:relative;z-index:1;min-height:100vh;display:grid;"
+            "place-items:center;padding:24px}"
+            ".card{width:min(420px,100%);background:var(--card);"
+            "border:1px solid var(--line);border-radius:28px;padding:36px 28px;"
+            "text-align:center;backdrop-filter:blur(16px);"
+            "box-shadow:0 30px 90px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.03) inset}"
+            ".logo{width:96px;height:96px;border-radius:50%;object-fit:cover;"
+            "box-shadow:0 0 48px rgba(255,255,255,.28);margin:0 auto 14px;display:block}"
+            "h1{margin:6px 0 4px;font-size:1.55rem;font-weight:700;letter-spacing:-.02em}"
+            ".sub{color:var(--muted);font-size:14px;margin:0 0 20px;line-height:1.45}"
+            "label{display:block;text-align:left;font-size:11px;font-weight:600;"
+            "letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}"
+            "input{width:100%;padding:13px 14px;border-radius:14px;"
+            "border:1px solid var(--line);background:#0a0a0e;color:#fff;font-size:15px;"
+            "margin:0 0 12px;outline:none}"
+            "input:focus{border-color:rgba(255,255,255,.28);"
+            "box-shadow:0 0 0 3px rgba(255,255,255,.06)}"
+            "button{width:100%;padding:13px;border:0;border-radius:14px;font-weight:700;"
+            "font-size:15px;cursor:pointer;color:#0a0a0c;"
+            "background:linear-gradient(180deg,#f7f7f9,#c9c9d2);"
+            "box-shadow:0 8px 28px rgba(255,255,255,.12)}"
+            "button:active{transform:scale(.98)}"
+            ".err{color:#fb7185;min-height:1.2em;font-size:13px;margin:10px 0 0}"
             ".ok{color:#6ee7b7}"
-            "</style></head><body><div class='wrap'><div class='card'>"
+            ".foot{margin-top:18px;font-size:11px;color:#5a5a68;letter-spacing:.04em}"
+            "</style></head><body><div class='bg'></div><div class='wrap'>"
+            "<div class='card'>"
             "<img class='logo' src='/static/logo-star.jpg' alt='Hikkari'/>"
             f"{body}"
+            "<div class='foot'>Hikkari Userbot · WebUI</div>"
             "</div></div></body></html>"
         )
 
@@ -286,35 +302,50 @@ class WebAuth:
             await self._runner.cleanup()
             self._runner = None
 
+
     async def start_tunnel(self) -> Optional[str]:
-        """Expose local port via SSH reverse tunnel; parse public URL."""
+        """Public URL for WebUI — like Hikka: prefer cloudflared, then SSH tunnels.
+
+        Never return admin.localhost.run (login wall).
+        """
+        # 1) Cloudflare quick tunnel (best free option, no account)
+        url = await self._tunnel_cloudflared()
+        if url:
+            self.public_url = self._with_token(url)
+            return self.public_url
+
+        # 2) SSH reverse tunnels (serveo / localhost.run) — filter admin pages
+        for host in ("serveo.net", "nokey@localhost.run"):
+            url = await self._tunnel_ssh(host)
+            if url:
+                self.public_url = self._with_token(url)
+                return self.public_url
+
+        return None
+
+    def _with_token(self, base: str) -> str:
+        base = base.rstrip("/")
+        sep = "&" if "?" in base else "?"
+        # if already has token leave as is
+        if "token=" in base:
+            return base
+        return f"{base}/?token={self.token}"
+
+    def _is_bad_tunnel_url(self, url: str) -> bool:
+        u = (url or "").lower()
+        bad = (
+            "admin.localhost.run",
+            "login.localhost.run",
+            "accounts.google",
+            "localhost.run/login",
+            "localhost.run/admin",
+        )
+        return any(b in u for b in bad)
+
+    async def _tunnel_cloudflared(self) -> Optional[str]:
         cmds = [
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ServerAliveInterval=30",
-                "-o",
-                "ExitOnForwardFailure=yes",
-                "-R",
-                f"80:127.0.0.1:{self.port}",
-                "nokey@localhost.run",
-            ],
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ServerAliveInterval=30",
-                "-R",
-                f"80:127.0.0.1:{self.port}",
-                "serveo.net",
-            ],
+            ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{self.port}"],
+            ["cloudflared", "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{self.port}"],
         ]
         for cmd in cmds:
             try:
@@ -325,16 +356,22 @@ class WebAuth:
                     text=True,
                 )
             except FileNotFoundError:
-                logger.warning("ssh not found — tunnel skipped")
+                logger.info("cloudflared not installed — trying SSH tunnels")
                 return None
             except Exception:
-                logger.exception("tunnel start failed")
+                logger.exception("cloudflared start failed")
                 continue
 
-            url = await self._wait_tunnel_url(timeout=25)
-            if url:
-                self.public_url = url.rstrip("/") + f"/?token={self.token}"
-                return self.public_url
+            url = await self._wait_tunnel_url(
+                timeout=35,
+                extra_patterns=(
+                    r"https://[a-zA-Z0-9-]+\.trycloudflare\.com",
+                    r"https://[a-zA-Z0-9-]+\.cfargotunnel\.com",
+                ),
+            )
+            if url and not self._is_bad_tunnel_url(url):
+                logger.info("cloudflared tunnel: %s", url)
+                return url.rstrip("/")
             try:
                 self._tunnel_proc.terminate()
             except Exception:
@@ -342,29 +379,98 @@ class WebAuth:
             self._tunnel_proc = None
         return None
 
-    async def _wait_tunnel_url(self, timeout: float = 25) -> Optional[str]:
+    async def _tunnel_ssh(self, host: str) -> Optional[str]:
+        cmd = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "LogLevel=ERROR",
+            "-R",
+            f"80:127.0.0.1:{self.port}",
+            host,
+        ]
+        try:
+            self._tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except FileNotFoundError:
+            logger.warning("ssh not found")
+            return None
+        except Exception:
+            logger.exception("ssh tunnel failed for %s", host)
+            return None
+
+        url = await self._wait_tunnel_url(timeout=25)
+        if url and not self._is_bad_tunnel_url(url):
+            return url.rstrip("/")
+        # localhost.run often prints a good URL then redirects browser to admin —
+        # prefer *.lhr.life if present
+        if url and self._is_bad_tunnel_url(url):
+            logger.warning("Rejected tunnel URL (admin/login wall): %s", url)
+        try:
+            self._tunnel_proc.terminate()
+        except Exception:
+            pass
+        self._tunnel_proc = None
+        return None
+
+    async def _wait_tunnel_url(
+        self,
+        timeout: float = 25,
+        extra_patterns: tuple = (),
+    ) -> Optional[str]:
         if not self._tunnel_proc or not self._tunnel_proc.stdout:
             return None
-        pattern = re.compile(
-            r"https?://[a-zA-Z0-9.-]+\.(localhost\.run|serveo\.net|lhr\.life)[^\s]*"
-        )
+        patterns = [
+            re.compile(p)
+            for p in extra_patterns
+            + (
+                r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com",
+                r"https://[a-zA-Z0-9.-]+\.lhr\.life",
+                r"https://[a-zA-Z0-9.-]+\.serveo\.net",
+                r"https://[a-zA-Z0-9.-]+\.localhost\.run",
+                r"https?://[a-zA-Z0-9.-]+\.(localhost\.run|serveo\.net|lhr\.life)[^\s]*",
+            )
+        ]
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
+        found_candidates = []
 
         def read_line():
             return self._tunnel_proc.stdout.readline()
 
         while loop.time() < deadline:
             if self._tunnel_proc.poll() is not None:
-                return None
+                break
             line = await loop.run_in_executor(None, read_line)
             if not line:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.15)
                 continue
             logger.debug("tunnel: %s", line.strip())
-            m = pattern.search(line)
-            if m:
-                return m.group(0).rstrip("./")
+            for pat in patterns:
+                m = pat.search(line)
+                if not m:
+                    continue
+                url = m.group(0).rstrip("./")
+                if self._is_bad_tunnel_url(url):
+                    continue
+                # Prefer non-admin URLs immediately
+                if "trycloudflare.com" in url or "lhr.life" in url or "serveo.net" in url:
+                    return url
+                found_candidates.append(url)
+        for url in found_candidates:
+            if not self._is_bad_tunnel_url(url):
+                return url
         return None
 
     async def run_until_login(self, timeout: float = 600) -> Any:
@@ -376,13 +482,20 @@ class WebAuth:
         except Exception:
             logger.exception("tunnel error")
 
-        print("\nHikkari WebUI login")
+        print("\n" + "=" * 48)
+        print("  Hikkari WebUI login")
+        print("=" * 48)
         print(f"  Local:  {self.local_url}")
         if public:
             print(f"  Public: {public}")
+            print("  Open Public URL in browser on any device.")
         else:
-            print("  (tunnel unavailable — open Local URL on this device)")
-        print("  Waiting for browser login...\n")
+            print("  Tunnel not available.")
+            print("  Install cloudflared for public link:")
+            print("    https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/")
+            print("  Or open Local URL on this same device.")
+        print("  Waiting for login (phone -> code -> 2FA)...")
+        print("=" * 48 + "\n")
 
         try:
             await asyncio.wait_for(self.done.wait(), timeout=timeout)

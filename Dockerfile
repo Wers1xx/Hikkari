@@ -1,4 +1,4 @@
-FROM python:3.14
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -12,31 +12,26 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     ffmpeg \
     gcc \
     git \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libcairo2 \
     libmagic1 \
-    libswscale-dev \
-    openssh-server \
-    xfonts-75dpi \
-    xfonts-base \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install --no-install-recommends -y nodejs \
+    openssh-client \
+    && curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared \
+    && chmod +x /usr/local/bin/cloudflared \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 WORKDIR /data
-RUN mkdir /data/private
 
-RUN git clone https://github.com/coddrago/Heroku /data/Heroku
+# Clone Hikkari (or use build context)
+ARG HIKKARI_REPO=https://github.com/Wers1xx/Hikkari.git
+ARG HIKKARI_REF=master
+RUN git clone --depth 1 --branch "${HIKKARI_REF}" "${HIKKARI_REPO}" /data/Hikkari
 
-WORKDIR /data/Heroku
+WORKDIR /data/Hikkari
 
-ARG HEROKU_REF=master
-RUN git fetch origin "${HEROKU_REF}" && git checkout "${HEROKU_REF}" && git pull origin "${HEROKU_REF}"
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir "hikkaritl>=1.1.2" || true
 
-RUN pip install --no-cache-dir --no-warn-script-location --disable-pip-version-check --upgrade -r requirements.txt
+VOLUME ["/data/Hikkari/sessions", "/data/Hikkari"]
 
-CMD ["python", "-m", "heroku", "--root"]
+CMD ["python3", "-m", "hikkari", "--no-tty"]
