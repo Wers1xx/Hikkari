@@ -7,6 +7,7 @@
 import asyncio
 import contextlib
 import logging
+import random
 import secrets
 import socket
 
@@ -94,6 +95,28 @@ class HikkariWebAppMod(loader.Module):
     async def on_unload(self):
         await self._stop_server()
 
+
+    def _pick_port(self) -> int:
+        """Random free port each start to avoid bind conflicts."""
+        cfg = int(self.config["port"] or 0)
+        # 0 or negative => always random; else try configured then fall back
+        candidates = []
+        if cfg > 0:
+            candidates.append(cfg)
+        for _ in range(30):
+            candidates.append(random.randint(16000, 32000))
+        for port in candidates:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind(("0.0.0.0", port))
+                    return port
+            except OSError:
+                continue
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("0.0.0.0", 0))
+            return int(s.getsockname()[1])
+
     def _public_host(self) -> str:
         host = self.config["host"]
         if host in {"0.0.0.0", "::"}:
@@ -109,7 +132,8 @@ class HikkariWebAppMod(loader.Module):
 
     def _url(self, *, admin: bool = True) -> str:
         tok = self._web_token if admin else self._web_view_token
-        return f"http://{self._public_host()}:{int(self.config['port'])}/?token={tok}"
+        port = getattr(self, "_bound_port", None) or int(self.config["port"])
+        return f"http://{self._public_host()}:{port}/?token={tok}"
 
     def _is_admin_user(self, user_id: int) -> bool:
         try:
@@ -183,10 +207,12 @@ class HikkariWebAppMod(loader.Module):
     async def _ensure_server(self):
         if self._runner is not None:
             return
+        port = self._pick_port()
+        self._bound_port = port
         self._runner = await start_webapp(
             self,
             str(self.config["host"]),
-            int(self.config["port"]),
+            port,
         )
         logger.info("WebApp up at %s", self._url(admin=True))
 

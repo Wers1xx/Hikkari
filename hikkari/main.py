@@ -444,7 +444,7 @@ def parse_arguments() -> dict:
         "--no-web",
         dest="no_web",
         action="store_true",
-        help=argparse.SUPPRESS,
+        help="Disable WebUI login (use terminal phone/QR only)",
     )
     parser.add_argument(
         "--wipe",
@@ -809,6 +809,35 @@ class Hikkari:
         """Responsible for first start"""
         if self.arguments.no_auth:
             return False
+
+        # WebUI login (weburl) unless --no-web
+        if not getattr(self.arguments, "no_web", False):
+            try:
+                from .web_auth import WebAuth
+
+                web = WebAuth(
+                    self.api_token.ID,
+                    self.api_token.HASH,
+                    proxy=self.proxy,
+                    connection=self.conn,
+                    device_model=get_app_name(),
+                    app_version=".".join(map(str, __version__)),
+                )
+                client = await web.run_until_login(timeout=900)
+                if client is not None:
+                    me = await client.get_me()
+                    client._tg_id = me.id
+                    client.tg_id = me.id
+                    client.hikka_me = me
+                    client.hikkari_me = me
+                    print_banner("success.txt")
+                    print("Logged in via WebUI successfully!")
+                    await self.save_client_session(client)
+                    self.clients += [client]
+                    return True
+                print("WebUI login cancelled or timed out — falling back to terminal.")
+            except Exception:
+                logging.exception("WebUI login failed — falling back to terminal")
 
         client = CustomTelegramClient(
             MemorySession(),
