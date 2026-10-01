@@ -233,7 +233,7 @@ class _CallbackMixin:
             if isinstance(call.data, (bytes, bytearray))
             else call.data
         )
-        self.id = call.id
+        self.id = getattr(call, "id", None) or f"cb-{getattr(call, 'sender_id', 0)}"
         self.from_user = _User(call.sender_id)
         self.sender_id = call.sender_id
         self.chat_id = call.chat_id

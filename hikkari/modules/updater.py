@@ -157,13 +157,20 @@ class UpdaterMod(loader.Module):
                     or now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL
                 ):
                     logger.debug("Fetching changelog from %s", origin.url)
-                    subprocess.run(
-                        ["git", "fetch", "--quiet", "origin"],
-                        cwd=repo.working_dir,
-                        timeout=60,
-                        capture_output=True,
-                        check=False,
-                    )
+                    try:
+                        subprocess.run(
+                            ["git", "fetch", "--quiet", "origin"],
+                            cwd=repo.working_dir,
+                            timeout=15,
+                            capture_output=True,
+                            check=False,
+                        )
+                    except subprocess.TimeoutExpired:
+                        logger.warning(
+                            "git fetch timed out — using local commits for changelog"
+                        )
+                    except Exception as e:
+                        logger.debug("git fetch skipped: %s", e)
                     self._last_git_fetch = now
             else:
                 logger.debug(

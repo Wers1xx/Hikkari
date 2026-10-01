@@ -55,9 +55,10 @@ class Events(InlineUnit):
                     self_ref = self
 
                     class _PmCall:
+                        id = f"pm-{uid}"
                         data = b""
-                        chat_id = None
-                        message_id = None
+                        chat_id = uid
+                        message_id = getattr(message, "id", None)
                         inline_message_id = None
                         sender_id = uid
                         query = None

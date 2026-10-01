@@ -810,35 +810,6 @@ class Hikkari:
         if self.arguments.no_auth:
             return False
 
-        # WebUI login (weburl) unless --no-web
-        if not getattr(self.arguments, "no_web", False):
-            try:
-                from .web_auth import WebAuth
-
-                web = WebAuth(
-                    self.api_token.ID,
-                    self.api_token.HASH,
-                    proxy=self.proxy,
-                    connection=self.conn,
-                    device_model=get_app_name(),
-                    app_version=".".join(map(str, __version__)),
-                )
-                client = await web.run_until_login(timeout=900)
-                if client is not None:
-                    me = await client.get_me()
-                    client._tg_id = me.id
-                    client.tg_id = me.id
-                    client.hikka_me = me
-                    client.hikkari_me = me
-                    print_banner("success.txt")
-                    print("Logged in via WebUI successfully!")
-                    await self.save_client_session(client)
-                    self.clients += [client]
-                    return True
-                print("WebUI login cancelled or timed out — falling back to terminal.")
-            except Exception:
-                logging.exception("WebUI login failed — falling back to terminal")
-
         client = CustomTelegramClient(
             MemorySession(),
             self.api_token.ID,
@@ -854,24 +825,57 @@ class Hikkari:
         )
         await client.connect()
 
-        print(
-            ("\033[0;96m{}\033[0m" if self.arguments.tty else "{}").format(
-                "You can use QR-code to login from another device (your friend's"
-                " phone, for example)."
-            )
-        )
+        def _c(msg: str) -> str:
+            return ("\033[0;96m{}\033[0m" if self.arguments.tty else "{}").format(msg)
+
+        print(_c("Login methods:"))
+        print(_c("  1) Phone number (terminal)"))
+        print(_c("  2) QR code"))
+        if not getattr(self.arguments, "no_web", False):
+            print(_c("  3) WebUI (browser / tunnel link)"))
 
         user_choice = input(
-            "\033[0;96mUse QR code? [y/N]: \033[0m"
-            if self.arguments.tty
-            else "Use QR code? [y/N]: "
-        ).lower()
+            _c("Choose [1/2/3] (default 1): ")
+        ).strip().lower()
 
-        match user_choice:
-            case "y":
-                pass
-            case _:
-                return await self._phone_login(client)
+        if user_choice in {"3", "w", "web", "webui", "weburl"} and not getattr(
+            self.arguments, "no_web", False
+        ):
+            try:
+                from .web_auth import WebAuth
+
+                await client.disconnect()
+                web = WebAuth(
+                    self.api_token.ID,
+                    self.api_token.HASH,
+                    proxy=self.proxy,
+                    connection=self.conn,
+                    device_model=get_app_name(),
+                    app_version=".".join(map(str, __version__)),
+                )
+                client = await web.run_until_login(timeout=900)
+                if client is None:
+                    print(_c("WebUI login failed or timed out."))
+                    return False
+                me = await client.get_me()
+                client._tg_id = me.id
+                client.tg_id = me.id
+                client.hikka_me = me
+                client.hikkari_me = me
+                print_banner("success.txt")
+                print(_c("Logged in via WebUI!"))
+                await self.save_client_session(client)
+                self.clients += [client]
+                return True
+            except Exception:
+                logging.exception("WebUI login error")
+                return False
+
+        if user_choice in {"2", "y", "qr"}:
+            pass  # continue to QR below
+        else:
+            return await self._phone_login(client)
+
 
         print("\033[0;96mLoading QR code...\033[0m")
         qr_login = await client.qr_login()

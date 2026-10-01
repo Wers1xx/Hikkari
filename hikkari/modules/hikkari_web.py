@@ -767,3 +767,110 @@ class HikkariWebMod(loader.Module):
 
         await call.edit(self.strings["accdel_done"].format(uid=target_id))
 
+
+    @loader.command()
+    async def weburl(self, message: Message):
+        """Open WebUI tunnel link to add another account (owner only)"""
+        if not self._owner_only(message):
+            await utils.answer(message, self.strings["owner_only"])
+            return
+
+        status = await utils.answer(
+            message,
+            self.strings.get(
+                "weburl_starting",
+                "✨ <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment.",
+            ),
+        )
+
+        try:
+            from ..web_auth import WebAuth
+            from .._internal import restart
+            from ..version import __version__
+
+            web = WebAuth(
+                main.hikkari.api_token.ID,
+                main.hikkari.api_token.HASH,
+                proxy=getattr(main.hikkari, "proxy", None),
+                connection=getattr(main.hikkari, "conn", None),
+                device_model="Hikkari",
+                app_version=".".join(map(str, __version__)),
+            )
+            await web.start_server()
+            public = None
+            try:
+                public = await web.start_tunnel()
+            except Exception:
+                logger.exception("weburl tunnel")
+
+            link = public or web.local_url
+            await utils.answer(
+                status,
+                self.strings.get(
+                    "weburl_ready",
+                    "✨ <b>WebUI login</b>\n\n"
+                    "Open the link and sign in (phone → code → 2FA).\n"
+                    "After success the account will be added and userbot restarts.\n\n"
+                    "🔗 <code>{url}</code>\n\n"
+                    "<i>Link is single-use · valid ~15 min</i>",
+                ).format(url=utils.escape_html(link)),
+            )
+
+            async def _wait():
+                try:
+                    await asyncio.wait_for(web.done.wait(), timeout=900)
+                except asyncio.TimeoutError:
+                    await web.stop()
+                    with contextlib.suppress(Exception):
+                        await utils.answer(
+                            status,
+                            self.strings.get(
+                                "weburl_timeout",
+                                "⏳ <b>WebUI timed out</b> — run <code>weburl</code> again.",
+                            ),
+                        )
+                    return
+                if not web.success or web.client is None:
+                    await web.stop()
+                    return
+                client = web.client
+                await web.stop()
+                try:
+                    me = await client.get_me()
+                    client._tg_id = me.id
+                    client.tg_id = me.id
+                    client.hikka_me = me
+                    client.hikkari_me = me
+                    await main.hikkari.save_client_session(client, delay_restart=False)
+                    with contextlib.suppress(Exception):
+                        await utils.answer(
+                            status,
+                            self.strings.get(
+                                "weburl_ok",
+                                "✅ <b>Account added via WebUI</b> — restarting…",
+                            ),
+                        )
+                    await asyncio.sleep(1)
+                    restart()
+                except Exception:
+                    logger.exception("weburl save failed")
+                    with contextlib.suppress(Exception):
+                        await utils.answer(
+                            status,
+                            self.strings.get(
+                                "weburl_fail",
+                                "🚫 <b>Failed to save session after WebUI login</b>",
+                            ),
+                        )
+
+            asyncio.ensure_future(_wait())
+        except Exception as e:
+            logger.exception("weburl")
+            await utils.answer(
+                status,
+                self.strings.get(
+                    "weburl_fail",
+                    "🚫 <b>WebUI error:</b> <code>{}</code>",
+                ).format(utils.escape_html(str(e))),
+            )
+
