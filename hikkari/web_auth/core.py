@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -46,6 +47,25 @@ def _free_port(lo: int = 17000, hi: int = 29000) -> int:
         return int(s.getsockname()[1])
 
 
+def _cloudflared_asset_name() -> str:
+    """Pick correct cloudflared binary for this machine (UserLand is often arm64)."""
+    import platform
+
+    machine = platform.machine().lower()
+    system = platform.system().lower()
+    if system == "linux":
+        if machine in ("aarch64", "arm64"):
+            return "cloudflared-linux-arm64"
+        if machine in ("armv7l", "armv7", "arm"):
+            return "cloudflared-linux-arm"
+        return "cloudflared-linux-amd64"
+    if system == "darwin":
+        if machine in ("arm64", "aarch64"):
+            return "cloudflared-darwin-arm64.tgz"
+        return "cloudflared-darwin-amd64.tgz"
+    return "cloudflared-linux-amd64"
+
+
 def _ensure_cloudflared() -> Optional[str]:
     from shutil import which
 
@@ -58,15 +78,47 @@ def _ensure_cloudflared() -> Optional[str]:
         bin_dir = Path(_main.BASE_PATH) / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         target = bin_dir / "cloudflared"
-        if target.is_file() and os.access(target, os.X_OK):
-            return str(target)
-        url = (
-            "https://github.com/cloudflare/cloudflared/releases/latest/"
-            "download/cloudflared-linux-amd64"
-        )
-        logger.info("Downloading cloudflared…")
-        urllib.request.urlretrieve(url, str(target))
-        target.chmod(target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        # Re-download if wrong arch (empty/corrupt)
+        need_dl = True
+        if target.is_file() and os.access(target, os.X_OK) and target.stat().st_size > 1_000_000:
+            need_dl = False
+        if need_dl:
+            asset = _cloudflared_asset_name()
+            url = (
+                "https://github.com/cloudflare/cloudflared/releases/latest/download/"
+                + asset
+            )
+            logger.info("Downloading cloudflared (%s)…", asset)
+            if asset.endswith(".tgz"):
+                import tarfile
+                import io
+
+                data = urllib.request.urlopen(url, timeout=120).read()
+                with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+                    for member in tar.getmembers():
+                        if member.name.endswith("cloudflared") or member.name == "cloudflared":
+                            f = tar.extractfile(member)
+                            if f:
+                                target.write_bytes(f.read())
+                            break
+            else:
+                urllib.request.urlretrieve(url, str(target))
+            target.chmod(
+                target.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
+            )
+        # smoke test
+        try:
+            subprocess.run(
+                [str(target), "--version"],
+                capture_output=True,
+                timeout=8,
+                check=False,
+            )
+        except Exception:
+            logger.warning("cloudflared binary may be wrong arch — removing")
+            with contextlib.suppress(Exception):
+                target.unlink()
+            return None
         return str(target)
     except Exception:
         logger.exception("cloudflared auto-install failed")
@@ -422,35 +474,50 @@ document.addEventListener('submit',function(e){{
             await self._runner.cleanup()
             self._runner = None
 
-    async def start_tunnel(self) -> Optional[str]:
+    async def start_tunnel(self, retries: int = 3) -> Optional[str]:
+        """Always try to get a public URL so any user can open WebUI."""
         binary = _ensure_cloudflared()
         if not binary:
+            logger.error("cloudflared not available — public WebUI impossible")
             return None
-        try:
-            self._tunnel_proc = subprocess.Popen(
-                [
-                    binary,
-                    "tunnel",
-                    "--no-autoupdate",
-                    "--url",
-                    f"http://127.0.0.1:{self.port}",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-        except Exception:
-            logger.exception("cloudflared failed")
-            return None
-        url = await self._wait_cf_url(45)
-        if url:
-            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
-            return self.public_url
-        try:
-            self._tunnel_proc.terminate()
-        except Exception:
-            pass
-        self._tunnel_proc = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                    with contextlib.suppress(Exception):
+                        self._tunnel_proc.terminate()
+                    self._tunnel_proc = None
+
+                self._tunnel_proc = subprocess.Popen(
+                    [
+                        binary,
+                        "tunnel",
+                        "--no-autoupdate",
+                        "--url",
+                        f"http://127.0.0.1:{self.port}",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            except Exception:
+                logger.exception("cloudflared start failed (try %s)", attempt)
+                await asyncio.sleep(1)
+                continue
+
+            url = await self._wait_cf_url(55)
+            if url:
+                self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+                logger.info("Public WebUI ready: %s", self.public_url)
+                return self.public_url
+
+            logger.warning("cloudflared did not return URL (try %s/%s)", attempt, retries)
+            with contextlib.suppress(Exception):
+                if self._tunnel_proc:
+                    self._tunnel_proc.terminate()
+            self._tunnel_proc = None
+            await asyncio.sleep(1.2)
+
         return None
 
     async def _wait_cf_url(self, timeout: float = 45) -> Optional[str]:

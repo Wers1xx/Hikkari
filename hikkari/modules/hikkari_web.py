@@ -798,31 +798,45 @@ class HikkariWebMod(loader.Module):
                 need_api=False,
             )
             await web.start_server()
-            public = None
-            try:
-                public = await web.start_tunnel()
-            except Exception:
-                logger.exception("weburl tunnel")
 
-            link = public or web.local_url
-            href = utils.escape_html(link)
-            if public:
-                body = (
-                    "✨ <b>Hikkari WebUI</b>\n\n"
-                    "Телефон → код → 2FA в браузере.\n"
-                    "После входа аккаунт добавится, будет рестарт.\n\n"
-                    + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
-                    + "<i>Нажми на текст выше · ~15 мин · одноразовая</i>"
+            # Public URL is mandatory so ANY user can open the login page
+            public = None
+            for attempt in range(1, 4):
+                try:
+                    public = await web.start_tunnel(retries=2)
+                except Exception:
+                    logger.exception("weburl tunnel attempt %s", attempt)
+                if public:
+                    break
+                await utils.answer(
+                    status,
+                    f"✨ <b>Поднимаю публичную ссылку…</b> ({attempt}/3)\n"
+                    "<i>cloudflared, подожди</i>",
+                    parse_mode="HTML",
                 )
-            else:
-                body = (
-                    "✨ <b>Hikkari WebUI</b>\n\n"
-                    "⚠️ Public-ссылка не готова — с телефона "
-                    "<code>127.0.0.1</code> не откроется.\n"
-                    "Подожди cloudflared или открой Local на этом устройстве.\n\n"
-                    + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
-                    + f"<code>{href}</code>"
+                await asyncio.sleep(2)
+
+            if not public:
+                await web.stop()
+                await utils.answer(
+                    status,
+                    "🚫 <b>Не удалось создать публичную ссылку</b>\n\n"
+                    "Без неё другие пользователи не откроют WebUI "
+                    "(localhost недоступен с телефона).\n\n"
+                    "Проверь интернет и повтори <code>weburl</code>.",
+                    parse_mode="HTML",
                 )
+                return
+
+            href = utils.escape_html(public)
+            body = (
+                "✨ <b>Hikkari WebUI</b>\n\n"
+                "Эту ссылку может открыть <b>любой</b> — "
+                "телефон → код → 2FA.\n"
+                "После входа аккаунт добавится, будет рестарт.\n\n"
+                + f'<a href="{href}">✨ WebUI Hikkari</a>\n\n'
+                + "<i>Нажми текст · публичная · ~15 мин</i>"
+            )
             await utils.answer(
                 status,
                 body,
