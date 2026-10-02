@@ -553,74 +553,58 @@ document.addEventListener('submit',function(e){{
 
 
 
-    async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Public URL that works from phones — NO bare IP fallback.
-
-        Tries free tunnels only (cloudflared → localtunnel → bore).
-        IP:port is skipped: firewall almost always blocks it.
-        Set public_host manually only if you opened the port yourself.
-        """
-        # Explicit host only when user configured it
+    def _is_local_hosting(self) -> bool:
+        """UserLand / home NAT → need ngrok. VPS with public IP → IP:port."""
+        # Explicit override via env
+        force = (os.environ.get("HIKKARI_WEBURL_MODE") or "").strip().lower()
+        if force in ("local", "tunnel", "ngrok"):
+            return True
+        if force in ("vps", "server", "ip"):
+            return False
+        # UserLand / Android containers
+        if os.environ.get("USERLAND") or os.path.exists("/data/user/0/tech.ula"):
+            return True
+        # Manual host configured → treat as VPS-style IP link
         if (self.public_host or "").strip():
-            url = self._url_from_ip(strict_public=False)
+            return False
+        ip = _detect_public_ip()
+        if ip and not _is_private_ip(ip):
+            return False  # real public IP = server
+        return True  # no public IP = local/NAT
+
+    async def start_tunnel(self, retries: int = 3) -> Optional[str]:
+        """VPS → http://IP:PORT/?token=
+        Local (UserLand) → ngrok with authtoken (required).
+        """
+        mode = (self.weburl_mode or "auto").strip().lower()
+        if mode == "ip":
+            local = False
+        elif mode in ("tunnel", "ngrok", "local"):
+            local = True
+        else:
+            local = self._is_local_hosting()
+
+        if not local:
+            url = self._url_from_ip(strict_public=not bool((self.public_host or "").strip()))
             if url:
-                logger.info("Using configured public host: %s", url)
+                logger.info("WebUI VPS link: %s", url)
                 return url
+            self._tunnel_errors = ["vps: no public IP (set weburl_public_host)"]
+            return None
 
-        errors = []
-
-        # 1) Pinggy free SSH tunnel (no account, works on most VPS)
-        try:
-            url = await self._tunnel_pinggy()
-            if url:
-                return url
-            errors.append("pinggy: no URL")
-        except Exception as e:
-            errors.append(f"pinggy: {e}")
-            logger.exception("pinggy")
-
-        # 2) cloudflared
-        try:
-            url = await self._tunnel_cloudflared(retries=max(2, retries))
-            if url:
-                return url
-            errors.append("cloudflared: no URL")
-        except Exception as e:
-            errors.append(f"cloudflared: {e}")
-            logger.exception("cloudflared")
-
-        # 3) ngrok if token in env/config
-        try:
-            url = await self._tunnel_ngrok()
-            if url:
-                return url
-            if _ngrok_authtoken(getattr(self, "ngrok_token", None)):
-                errors.append("ngrok: token set but no URL")
-            else:
-                errors.append("ngrok: no token")
-        except Exception as e:
-            errors.append(f"ngrok: {e}")
-
-        # 4) localtunnel
-        try:
-            url = await self._tunnel_localtunnel()
-            if url:
-                return url
-            errors.append("localtunnel: no URL")
-        except Exception as e:
-            errors.append(f"localtunnel: {e}")
-
-        # 5) bore
-        try:
-            url = await self._tunnel_bore()
-            if url:
-                return url
-            errors.append("bore: no URL")
-        except Exception as e:
-            errors.append(f"bore: {e}")
-
-        logger.error("All public tunnels failed: %s", "; ".join(errors))
-        self._tunnel_errors = errors
+        # Local: ngrok only
+        url = await self._tunnel_ngrok(retries=max(2, retries))
+        if url:
+            return url
+        token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
+        if not token:
+            self._tunnel_errors = [
+                "local: нужен ngrok_token",
+                "cfg HikkariAccounts → ngrok_token",
+                "или export NGROK_AUTHTOKEN=...",
+            ]
+        else:
+            self._tunnel_errors = ["ngrok: token set but tunnel failed"]
         return None
 
     def _url_from_ip(self, strict_public: bool = False) -> Optional[str]:

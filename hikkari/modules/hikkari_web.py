@@ -66,12 +66,29 @@ class HikkariWebMod(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
+                "weburl_mode",
+                "auto",
+                lambda: self.strings.get(
+                    "cfg_weburl_mode",
+                    "auto = VPS→IP, UserLand→ngrok | ip = always IP | ngrok = always ngrok",
+                ),
+                validator=loader.validators.Choice(["auto", "ip", "ngrok"]),
+            ),
+            loader.ConfigValue(
+                "ngrok_token",
+                "",
+                lambda: self.strings.get(
+                    "cfg_ngrok_token",
+                    "ngrok Authtoken (UserLand / local). Get at https://dashboard.ngrok.com",
+                ),
+                validator=loader.validators.Hidden(loader.validators.String()),
+            ),
+            loader.ConfigValue(
                 "weburl_public_host",
                 "",
                 lambda: self.strings.get(
                     "cfg_weburl_public_host",
-                    "Optional public IP/domain (empty = auto). "
-                    "On VPS usually not needed. On local, leave empty — free tunnel is used.",
+                    "VPS IP or domain (empty = auto-detect public IP)",
                 ),
                 validator=loader.validators.String(),
             ),
@@ -80,23 +97,13 @@ class HikkariWebMod(loader.Module):
                 0,
                 lambda: self.strings.get(
                     "cfg_weburl_public_port",
-                    "Port in the public link (0 = same as WebUI). Open it in VPS firewall.",
+                    "VPS port in link (0 = WebUI port). Must be open in firewall.",
                 ),
                 validator=loader.validators.Integer(minimum=0, maximum=65535),
             ),
-            loader.ConfigValue(
-                "ngrok_token",
-                "",
-                lambda: self.strings.get(
-                    "cfg_ngrok_token",
-                    "Optional ngrok Authtoken — only if free tunnels fail.",
-                ),
-                validator=loader.validators.Hidden(loader.validators.String()),
-            ),
         )
 
-
-    @loader.command()
+@loader.command()
     async def addacc(self, message: Message):
         if "JAMHOST" in os.environ:
             await utils.answer(message, self.strings["host_denied"])
@@ -841,7 +848,7 @@ class HikkariWebMod(loader.Module):
                 app_version=".".join(map(str, __version__)),
                 need_api=False,
             )
-            web.weburl_mode = "auto"
+            web.weburl_mode = str(self.config.get("weburl_mode") or "auto")
             web.public_host = str(self.config.get("weburl_public_host") or "") or None
             try:
                 web.public_port = int(self.config.get("weburl_public_port") or 0)
@@ -851,6 +858,8 @@ class HikkariWebMod(loader.Module):
             web.ngrok_token = tok or None
             if tok:
                 os.environ["NGROK_AUTHTOKEN"] = tok
+                with contextlib.suppress(Exception):
+                    main.save_config_key("ngrok_token", tok)
 
             await web.start_server()
 
@@ -860,25 +869,12 @@ class HikkariWebMod(loader.Module):
                     public = await web.start_tunnel(retries=2)
                 except Exception:
                     logger.exception("weburl tunnel attempt %s", attempt)
-                # Drop bare IP links — they almost never work through firewall
-                if (
-                    public
-                    and public.startswith("http://")
-                    and "trycloudflare.com" not in public
-                    and "loca.lt" not in public
-                    and "ngrok" not in public
-                    and "bore.pub" not in public
-                    and not (web.public_host or "").strip()
-                ):
-                    logger.warning("Ignoring blocked IP link: %s", public)
-                    public = None
                 if public:
                     break
                 await utils.answer(
                     status,
                     f"<emoji document_id=5283176512747507510>✨</emoji> "
-                    f"<b>Туннель…</b> ({attempt}/3)\n"
-                    "<i>cloudflared / localtunnel</i>",
+                    f"<b>WebUI link…</b> ({attempt}/3)",
                     parse_mode="HTML",
                 )
                 await asyncio.sleep(2)
