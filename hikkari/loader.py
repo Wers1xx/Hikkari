@@ -688,7 +688,7 @@ class Modules:
         loaded = []
 
         # Core: sequential (order / deps). External files: parallel batches.
-        parallel = origin != "<core>" and len(modules) > 1
+        parallel = len(modules) > 1
 
         async def _load_one(mod):
             mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
@@ -707,7 +707,7 @@ class Modules:
             return await self.register_module(spec, module_name, origin)
 
         if parallel:
-            sem = asyncio.Semaphore(6)
+            sem = asyncio.Semaphore(16)
 
             async def _guarded(mod):
                 async with sem:

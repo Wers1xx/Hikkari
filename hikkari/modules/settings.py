@@ -128,6 +128,31 @@ class CoreMod(loader.Module):
         )
 
     @loader.command()
+
+    @loader.command(
+        ru_doc="Команда разработчиков Hikkari",
+        en_doc="Hikkari developers table",
+    )
+    async def devs(self, message: Message):
+        """Таблица разработчиков / моделлеров / багхантеров"""
+        text = (
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari Team</b>\n\n"
+            "<blockquote>"
+            "<b>Разработчики</b>\n"
+            "• @Wers1xx — founder / core\n"
+            "</blockquote>\n"
+            "<blockquote>"
+            "<b>Моделлеры</b>\n"
+            "• —\n"
+            "</blockquote>\n"
+            "<blockquote>"
+            "<b>Искатели багов</b>\n"
+            "• —\n"
+            "</blockquote>\n\n"
+            "<i>Based on Hikka / Heroku · AGPLv3</i>"
+        )
+        await utils.answer(message, text)
+
     async def blacklist(self, message: Message):
         chatid = await self.blacklistcommon(message)
         chatid_str = str(chatid)

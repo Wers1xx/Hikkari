@@ -656,9 +656,8 @@ class UpdaterMod(loader.Module):
         self.config["autoupdate"] = False
         await utils.answer(
             message,
-            "🚫 <b>Автообновление отключено</b>
-"
-            "Обновляй вручную: <code>.update</code>",
+            "\U0001f6ab <b>Autoupdate is disabled</b>\n"
+            "Use <code>.update</code> manually.",
         )
 
     async def inline_update(
