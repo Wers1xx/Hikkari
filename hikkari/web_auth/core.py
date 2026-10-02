@@ -553,24 +553,28 @@ document.addEventListener('submit',function(e){{
 
 
     async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Public link without user keys:
-        - VPS/server with public IP → http://IP:PORT/
-        - Local / NAT (UserLand) → free cloudflared (trycloudflare.com)
+        """Shareable public link (no user API keys).
+
+        Priority:
+        1) Free cloudflared → https://*.trycloudflare.com (works through firewall)
+        2) Manual weburl_public_host → http://host:port (user opened the port)
+        3) Auto public IP only as last resort (often blocked by firewall)
         """
-        # 1) Manual host from config if set
+        # 1) Cloudflare quick tunnel — works for UserLand and VPS without open ports
+        cf = await self._tunnel_cloudflared(retries=max(retries, 3))
+        if cf:
+            return cf
+
+        logger.warning("cloudflared unavailable — falling back to IP link")
+
+        # 2) Explicit host from config
         if (self.public_host or "").strip():
             url = self._url_from_ip(strict_public=False)
             if url:
                 return url
 
-        # 2) Real public IP of this machine (VPS)
-        ip_url = self._url_from_ip(strict_public=True)
-        if ip_url:
-            return ip_url
-
-        # 3) Local host → free Cloudflare quick tunnel (no account / no token)
-        logger.info("No public IP — using free cloudflared tunnel")
-        return await self._tunnel_cloudflared(retries=max(retries, 3))
+        # 3) Detected public IP (may not be reachable if firewall closed)
+        return self._url_from_ip(strict_public=True)
 
     def _url_from_ip(self, strict_public: bool = False) -> Optional[str]:
         """http://HOST:PORT/?token= for VPS. No ngrok key needed."""
@@ -729,7 +733,7 @@ document.addEventListener('submit',function(e){{
             except Exception:
                 logger.exception("cloudflared start failed")
                 continue
-            url = await self._wait_cf_url(50)
+            url = await self._wait_cf_url(70)
             if url:
                 self.public_url = f"{url.rstrip('/')}/?token={self.token}"
                 return self.public_url

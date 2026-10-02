@@ -873,14 +873,27 @@ class HikkariWebMod(loader.Module):
                 return
 
             href = utils.escape_html(public)
-            body = (
-                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
-                "Эту ссылку может открыть <b>любой</b> — "
-                "телефон → код → 2FA.\n"
-                "После входа аккаунт добавится, будет рестарт.\n\n"
-                + f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n\n'
-                + "<i>Нажми текст · публичная · ~15 мин</i>"
-            )
+            is_cf = "trycloudflare.com" in public
+            is_ip = public.startswith("http://") and not is_cf
+
+            if is_ip:
+                body = (
+                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
+                    "⚠️ Ссылка по IP — порт должен быть открыт в firewall.\n"
+                    "Если не открывается, повтори <code>weburl</code> "
+                    "(должен подняться cloudflared).\n\n"
+                    + f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n\n'
+                    + f"<code>{href}</code>"
+                )
+            else:
+                body = (
+                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
+                    "Эту ссылку может открыть <b>любой</b> — "
+                    "телефон → код → 2FA.\n"
+                    "После входа аккаунт добавится, будет рестарт.\n\n"
+                    + f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n\n'
+                    + "<i>Нажми текст · публичная · ~15 мин</i>"
+                )
             await utils.answer(
                 status,
                 body,
