@@ -801,9 +801,10 @@ class HikkariWebMod(loader.Module):
         await call.edit(self.strings["accdel_done"].format(uid=target_id))
 
 
+
     @loader.command()
     async def weburl(self, message: Message):
-        """Open WebUI tunnel link to add another account (owner only)"""
+        """Public WebUI link to add another account (owner only)"""
         if not self._owner_only(message):
             await utils.answer(message, self.strings["owner_only"])
             return
@@ -812,7 +813,8 @@ class HikkariWebMod(loader.Module):
             message,
             self.strings.get(
                 "weburl_starting",
-                "<emoji document_id=5283176512747507510>✨</emoji> <b>Starting WebUI…</b>\nGenerating tunnel link, wait a moment.",
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Starting WebUI…</b>\n"
+                "Поднимаю публичный туннель, подожди…",
             ),
         )
 
@@ -836,50 +838,87 @@ class HikkariWebMod(loader.Module):
                 web.public_port = int(self.config.get("weburl_public_port") or 0)
             except Exception:
                 web.public_port = 0
+
             await web.start_server()
 
-            # Public URL is mandatory so ANY user can open the login page
             public = None
             for attempt in range(1, 4):
                 try:
                     public = await web.start_tunnel(retries=2)
                 except Exception:
                     logger.exception("weburl tunnel attempt %s", attempt)
+                # Drop bare IP links — they almost never work through firewall
+                if (
+                    public
+                    and public.startswith("http://")
+                    and "trycloudflare.com" not in public
+                    and "loca.lt" not in public
+                    and "ngrok" not in public
+                    and "bore.pub" not in public
+                    and not (web.public_host or "").strip()
+                ):
+                    logger.warning("Ignoring blocked IP link: %s", public)
+                    public = None
                 if public:
                     break
                 await utils.answer(
                     status,
-                    f"<emoji document_id=5283176512747507510>✨</emoji> <b>Поднимаю публичную ссылку…</b> ({attempt}/3)\n"
-                    "<i>cloudflared, подожди</i>",
+                    f"<emoji document_id=5283176512747507510>✨</emoji> "
+                    f"<b>Туннель…</b> ({attempt}/3)\n"
+                    "<i>cloudflared / localtunnel</i>",
                     parse_mode="HTML",
                 )
                 await asyncio.sleep(2)
 
-            # Reject unreachable IP:port as "success"
-            if public and public.startswith("http://") and "trycloudflare.com" not in public and "loca.lt" not in public and "ngrok" not in public and "bore.pub" not in public:
-                if not (web.public_host or "").strip():
-                    logger.warning("Ignoring auto IP link (firewall): %s", public)
-                    public = None
-
             if not public:
                 errs = getattr(web, "_tunnel_errors", None) or []
-                detail = ("
-<code>" + utils.escape_html(" | ".join(errs[:6])) + "</code>") if errs else ""
+                detail = ""
+                if errs:
+                    detail = "\n<code>" + utils.escape_html(" | ".join(errs[:6])) + "</code>"
                 await web.stop()
                 await utils.answer(
                     status,
-                    "🚫 <b>Публичный туннель не поднялся</b>
-
-"
-                    "IP:порт не используем — firewall его режет.
-"
-                    "Нужен cloudflared/localtunnel.
-"
-                    "Проверь интернет и повтори <code>weburl</code>."
+                    "🚫 <b>Публичный туннель не поднялся</b>\n\n"
+                    "Ссылки вида <code>http://IP:порт</code> не используем — "
+                    "firewall их режет.\n"
+                    "Нужен интернет для cloudflared.\n"
+                    "Повтори <code>weburl</code>."
                     + detail,
                     parse_mode="HTML",
                 )
                 return
+
+            href = utils.escape_html(public)
+            body = (
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
+                "Открой ссылку (телефон → код → 2FA).\n"
+                "Может открыть <b>любой</b>, у кого есть ссылка.\n"
+                "После входа — рестарт.\n\n"
+                f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n\n'
+                f"<code>{href}</code>\n\n"
+                "<i>~15 мин · пока крутится команда</i>"
+            )
+            await utils.answer(
+                status,
+                body,
+                parse_mode="HTML",
+                link_preview=False,
+            )
+
+            async def _wait():
+                try:
+                    await asyncio.wait_for(web.done.wait(), timeout=900)
+                except asyncio.TimeoutError:
+                    await web.stop()
+                    with contextlib.suppress(Exception):
+                        await utils.answer(
+                            status,
+                            self.strings.get(
+                                "weburl_timeout",
+                                "⏳ <b>WebUI timed out</b> — run <code>weburl</code> again.",
+                            ),
+                        )
+                    return
                 if not web.success or web.client is None:
                     await web.stop()
                     return
@@ -923,4 +962,3 @@ class HikkariWebMod(loader.Module):
                     "🚫 <b>WebUI error:</b> <code>{}</code>",
                 ).format(utils.escape_html(str(e))),
             )
-
