@@ -553,30 +553,24 @@ document.addEventListener('submit',function(e){{
 
 
     async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Public URL by mode: ip (VPS) / tunnel (ngrok) / auto."""
-        mode = (self.weburl_mode or "auto").strip().lower()
-        if mode not in ("auto", "tunnel", "ip"):
-            mode = "auto"
-
-        if mode == "ip":
-            return self._url_from_ip()
-
-        if mode == "tunnel":
-            url = await self._tunnel_ngrok(retries=retries)
+        """Public link without user keys:
+        - VPS/server with public IP → http://IP:PORT/
+        - Local / NAT (UserLand) → free cloudflared (trycloudflare.com)
+        """
+        # 1) Manual host from config if set
+        if (self.public_host or "").strip():
+            url = self._url_from_ip(strict_public=False)
             if url:
                 return url
-            logger.warning("ngrok failed — trying cloudflared")
-            return await self._tunnel_cloudflared(retries=max(1, retries - 1))
 
-        # auto: prefer IP on VPS, tunnel on local/NAT
+        # 2) Real public IP of this machine (VPS)
         ip_url = self._url_from_ip(strict_public=True)
         if ip_url:
             return ip_url
-        url = await self._tunnel_ngrok(retries=retries)
-        if url:
-            return url
-        logger.warning("ngrok failed — trying cloudflared")
-        return await self._tunnel_cloudflared(retries=max(1, retries - 1))
+
+        # 3) Local host → free Cloudflare quick tunnel (no account / no token)
+        logger.info("No public IP — using free cloudflared tunnel")
+        return await self._tunnel_cloudflared(retries=max(retries, 3))
 
     def _url_from_ip(self, strict_public: bool = False) -> Optional[str]:
         """http://HOST:PORT/?token= for VPS. No ngrok key needed."""

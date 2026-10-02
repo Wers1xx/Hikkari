@@ -54,53 +54,38 @@ class HikkariWebMod(loader.Module):
 
     strings = {
         "name": "HikkariAccounts",
-        "cfg_weburl_mode": (
-            "WebUI public link mode: auto | tunnel | ip. "
-            "auto = VPS uses server IP, UserLand/NAT uses ngrok. "
-            "tunnel = always ngrok (need token). "
-            "ip = always http://IP:port (for VDS/VPS, no key)."
-        ),
-        "cfg_ngrok_token": (
-            "ngrok Authtoken for local hosting (UserLand). "
-            "Not needed on VPS when weburl_mode=ip/auto with public IP."
-        ),
         "cfg_weburl_public_host": (
-            "Optional VPS public IP or domain for WebUI "
-            "(empty = auto-detect). Used in ip/auto mode."
+            "Optional public IP/domain (empty = auto). "
+            "VPS: usually auto. Local: leave empty — free tunnel."
         ),
         "cfg_weburl_public_port": (
-            "Public port for IP-mode link (0 = same as local WebUI port). "
-            "Open this port in firewall on VPS."
+            "Port in public link (0 = WebUI port). Open on VPS firewall if using IP."
         ),
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "weburl_mode",
-                "auto",
-                lambda: self.strings["cfg_weburl_mode"],
-                validator=loader.validators.Choice(["auto", "tunnel", "ip"]),
-            ),
-            loader.ConfigValue(
-                "ngrok_token",
-                os.environ.get("NGROK_AUTHTOKEN", "") or "",
-                lambda: self.strings["cfg_ngrok_token"],
-                validator=loader.validators.Hidden(loader.validators.String()),
-            ),
-            loader.ConfigValue(
                 "weburl_public_host",
                 "",
-                lambda: self.strings["cfg_weburl_public_host"],
+                lambda: self.strings.get(
+                    "cfg_weburl_public_host",
+                    "Optional public IP/domain (empty = auto). "
+                    "On VPS usually not needed. On local, leave empty — free tunnel is used.",
+                ),
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
                 "weburl_public_port",
                 0,
-                lambda: self.strings["cfg_weburl_public_port"],
+                lambda: self.strings.get(
+                    "cfg_weburl_public_port",
+                    "Port in the public link (0 = same as WebUI). Open it in VPS firewall.",
+                ),
                 validator=loader.validators.Integer(minimum=0, maximum=65535),
             ),
         )
+
 
     @loader.command()
     async def addacc(self, message: Message):
@@ -845,18 +830,12 @@ class HikkariWebMod(loader.Module):
                 app_version=".".join(map(str, __version__)),
                 need_api=False,
             )
-            web.weburl_mode = str(self.config["weburl_mode"] or "auto")
-            web.ngrok_token = str(self.config["ngrok_token"] or "") or None
-            web.public_host = str(self.config["weburl_public_host"] or "") or None
+            web.weburl_mode = "auto"
+            web.public_host = str(self.config.get("weburl_public_host") or "") or None
             try:
-                web.public_port = int(self.config["weburl_public_port"] or 0)
+                web.public_port = int(self.config.get("weburl_public_port") or 0)
             except Exception:
                 web.public_port = 0
-            # Sync token to env/config for other code paths
-            if web.ngrok_token:
-                os.environ["NGROK_AUTHTOKEN"] = web.ngrok_token
-                with contextlib.suppress(Exception):
-                    main.save_config_key("ngrok_token", web.ngrok_token)
             await web.start_server()
 
             # Public URL is mandatory so ANY user can open the login page
