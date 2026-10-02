@@ -552,32 +552,65 @@ document.addEventListener('submit',function(e){{
             self._runner = None
 
 
+
     async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Shareable public link (no user API keys).
+        """Public URL that works from phones — NO bare IP fallback.
 
-        Priority:
-        1) Free cloudflared → https://*.trycloudflare.com (works through firewall)
-        2) Manual weburl_public_host → http://host:port (user opened the port)
-        3) Auto public IP only as last resort (often blocked by firewall)
+        Tries free tunnels only (cloudflared → localtunnel → bore).
+        IP:port is skipped: firewall almost always blocks it.
+        Set public_host manually only if you opened the port yourself.
         """
-        # 1) Cloudflare quick tunnel — works for UserLand and VPS without open ports
-        cf = await self._tunnel_cloudflared(retries=max(retries, 3))
-        if cf:
-            return cf
-
-        logger.warning("cloudflared unavailable — falling back to IP link")
-
-        # 2) Explicit host from config
+        # Explicit host only when user configured it
         if (self.public_host or "").strip():
             url = self._url_from_ip(strict_public=False)
             if url:
+                logger.info("Using configured public host: %s", url)
                 return url
 
-        # 3) Detected public IP (may not be reachable if firewall closed)
-        return self._url_from_ip(strict_public=True)
+        errors = []
+
+        # 1) cloudflared (no account)
+        try:
+            url = await self._tunnel_cloudflared(retries=max(2, retries))
+            if url:
+                return url
+            errors.append("cloudflared: no URL")
+        except Exception as e:
+            errors.append(f"cloudflared: {e}")
+            logger.exception("cloudflared")
+
+        # 2) localtunnel via npx (no account)
+        try:
+            url = await self._tunnel_localtunnel()
+            if url:
+                return url
+            errors.append("localtunnel: no URL")
+        except Exception as e:
+            errors.append(f"localtunnel: {e}")
+            logger.exception("localtunnel")
+
+        # 3) ngrok only if token already configured (optional)
+        try:
+            url = await self._tunnel_ngrok()
+            if url:
+                return url
+        except Exception as e:
+            errors.append(f"ngrok: {e}")
+
+        # 4) bore.pub if binary exists
+        try:
+            url = await self._tunnel_bore()
+            if url:
+                return url
+            errors.append("bore: no URL")
+        except Exception as e:
+            errors.append(f"bore: {e}")
+
+        logger.error("All public tunnels failed: %s", "; ".join(errors))
+        self._tunnel_errors = errors
+        return None
 
     def _url_from_ip(self, strict_public: bool = False) -> Optional[str]:
-        """http://HOST:PORT/?token= for VPS. No ngrok key needed."""
         host = (self.public_host or "").strip()
         if not host:
             host = _detect_public_ip() or ""
@@ -586,27 +619,14 @@ document.addEventListener('submit',function(e){{
         if strict_public and _is_private_ip(host):
             return None
         port = int(self.public_port) if self.public_port else self.port
-        # Always bind was 0.0.0.0 — reachable on VPS
         self.public_url = f"http://{host}:{port}/?token={self.token}"
-        logger.info("WebUI public IP URL: %s", self.public_url)
         return self.public_url
 
-    async def _tunnel_ngrok(self, retries: int = 3) -> Optional[str]:
-        binary = _ensure_ngrok()
+    async def _tunnel_cloudflared(self, retries: int = 3) -> Optional[str]:
+        binary = _ensure_cloudflared()
         if not binary:
+            logger.error("cloudflared binary missing")
             return None
-
-        token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
-        if token:
-            try:
-                subprocess.run(
-                    [binary, "config", "add-authtoken", token],
-                    capture_output=True,
-                    timeout=15,
-                    check=False,
-                )
-            except Exception:
-                logger.debug("ngrok authtoken set failed", exc_info=True)
 
         for attempt in range(1, retries + 1):
             with contextlib.suppress(Exception):
@@ -614,38 +634,52 @@ document.addEventListener('submit',function(e){{
                     self._tunnel_proc.terminate()
             self._tunnel_proc = None
 
-            # Kill leftover ngrok if any
-            with contextlib.suppress(Exception):
-                subprocess.run(["pkill", "-f", "ngrok http"], capture_output=True)
+            cmd = [
+                binary,
+                "tunnel",
+                "--no-autoupdate",
+                "--url",
+                f"http://127.0.0.1:{self.port}",
+            ]
+            # line-buffer if stdbuf exists
+            from shutil import which
+            if which("stdbuf"):
+                cmd = ["stdbuf", "-oL", "-eL"] + cmd
 
             try:
                 self._tunnel_proc = subprocess.Popen(
-                    [
-                        binary,
-                        "http",
-                        str(self.port),
-                        "--log=stdout",
-                        "--log-format=logfmt",
-                    ],
+                    cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    bufsize=1,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
                 )
             except Exception:
-                logger.exception("ngrok start failed (try %s)", attempt)
-                await asyncio.sleep(1)
+                logger.exception("cloudflared Popen failed")
                 continue
 
-            # Prefer local ngrok API for the public URL
-            url = await self._wait_ngrok_api(timeout=25)
-            if not url:
-                url = await self._wait_ngrok_log(timeout=20)
+            url = await self._wait_url_from_proc(
+                timeout=75,
+                patterns=(
+                    r"https://[a-z0-9-]+\.trycloudflare\.com",
+                    r"https://[a-z0-9-]+\.cfargotunnel\.com",
+                ),
+            )
             if url:
                 self.public_url = f"{url.rstrip('/')}/?token={self.token}"
-                logger.info("ngrok public WebUI: %s", self.public_url)
+                logger.info("cloudflared OK: %s", self.public_url)
                 return self.public_url
 
-            logger.warning("ngrok no URL (try %s/%s)", attempt, retries)
+            # drain leftover for logs
+            out = ""
+            try:
+                if self._tunnel_proc and self._tunnel_proc.stdout:
+                    # non-blocking leftover not easy; terminate and log returncode
+                    out = f"rc={self._tunnel_proc.poll()}"
+            except Exception:
+                pass
+            logger.warning("cloudflared try %s/%s failed %s", attempt, retries, out)
             with contextlib.suppress(Exception):
                 if self._tunnel_proc:
                     self._tunnel_proc.terminate()
@@ -653,8 +687,173 @@ document.addEventListener('submit',function(e){{
             await asyncio.sleep(1.5)
         return None
 
+    async def _tunnel_localtunnel(self) -> Optional[str]:
+        from shutil import which
+        npx = which("npx")
+        if not npx:
+            return None
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        try:
+            self._tunnel_proc = subprocess.Popen(
+                [npx, "--yes", "localtunnel", "--port", str(self.port)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception:
+            logger.exception("localtunnel start")
+            return None
+        url = await self._wait_url_from_proc(
+            timeout=60,
+            patterns=(
+                r"https://[a-z0-9-]+\.loca\.lt",
+                r"https://[a-z0-9-]+\.localtunnel\.me",
+                r"your url is:\s*(https://\S+)",
+            ),
+        )
+        if url:
+            # group might be full match
+            if not url.startswith("http"):
+                m = re.search(r"https://\S+", url)
+                url = m.group(0) if m else url
+            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            logger.info("localtunnel OK: %s", self.public_url)
+            return self.public_url
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        return None
+
+    async def _tunnel_bore(self) -> Optional[str]:
+        from shutil import which
+        bore = which("bore")
+        if not bore:
+            return None
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        try:
+            self._tunnel_proc = subprocess.Popen(
+                [bore, "local", str(self.port), "--to", "bore.pub"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception:
+            return None
+        url = await self._wait_url_from_proc(
+            timeout=30,
+            patterns=(r"bore\.pub:(\d+)", r"https?://bore\.pub:\d+"),
+        )
+        if url:
+            if url.isdigit():
+                url = f"http://bore.pub:{url}"
+            elif not url.startswith("http"):
+                m = re.search(r"bore\.pub:(\d+)", url)
+                if m:
+                    url = f"http://bore.pub:{m.group(1)}"
+            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            return self.public_url
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        return None
+
+    async def _wait_url_from_proc(
+        self,
+        timeout: float,
+        patterns: tuple,
+    ) -> Optional[str]:
+        if not self._tunnel_proc or not self._tunnel_proc.stdout:
+            return None
+        compiled = [re.compile(p, re.I) for p in patterns]
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        buf = []
+
+        def readline():
+            return self._tunnel_proc.stdout.readline()
+
+        while loop.time() < deadline:
+            if self._tunnel_proc.poll() is not None:
+                # process died — read remaining
+                break
+            line = await loop.run_in_executor(None, readline)
+            if not line:
+                await asyncio.sleep(0.15)
+                continue
+            line = line.strip()
+            buf.append(line)
+            logger.info("tunnel: %s", line)
+            for pat in compiled:
+                m = pat.search(line)
+                if not m:
+                    continue
+                # prefer full https group
+                if m.lastindex:
+                    g = m.group(1)
+                    if g.startswith("http"):
+                        return g.rstrip("/.,")
+                    if g.isdigit():
+                        return g
+                full = m.group(0)
+                if full.startswith("http"):
+                    return full.rstrip("/.,")
+                if "bore.pub:" in full:
+                    return full
+        if buf:
+            logger.warning("tunnel output (no URL): %s", " | ".join(buf[-15:]))
+        return None
+
+    async def _tunnel_ngrok(self, retries: int = 2) -> Optional[str]:
+        """Optional if user has NGROK_AUTHTOKEN — not required."""
+        token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
+        if not token:
+            return None
+        binary = _ensure_ngrok()
+        if not binary:
+            return None
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [binary, "config", "add-authtoken", token],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+        try:
+            self._tunnel_proc = subprocess.Popen(
+                [binary, "http", str(self.port), "--log=stdout", "--log-format=logfmt"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except Exception:
+            return None
+        url = await self._wait_ngrok_api(timeout=25)
+        if not url:
+            url = await self._wait_url_from_proc(
+                timeout=20,
+                patterns=(r"https://[a-z0-9-]+\.ngrok(?:-free)?\.(?:app|io|dev)",),
+            )
+        if url:
+            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            return self.public_url
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        return None
+
     async def _wait_ngrok_api(self, timeout: float = 25) -> Optional[str]:
-        """Poll http://127.0.0.1:4040/api/tunnels for public_url."""
         import json
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
@@ -673,98 +872,9 @@ document.addEventListener('submit',function(e){{
                     pub = tun.get("public_url") or ""
                     if pub.startswith("https://"):
                         return pub.rstrip("/")
-                    if pub.startswith("http://") and "ngrok" in pub:
-                        # prefer https if only http
-                        https = pub.replace("http://", "https://", 1)
-                        return https.rstrip("/")
             except Exception:
                 pass
             await asyncio.sleep(0.4)
-        return None
-
-    async def _wait_ngrok_log(self, timeout: float = 20) -> Optional[str]:
-        if not self._tunnel_proc or not self._tunnel_proc.stdout:
-            return None
-        pat = re.compile(
-            r"https://[a-z0-9-]+\.ngrok(?:-free)?\.(?:app|io|dev)[^\s]*",
-            re.I,
-        )
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + timeout
-
-        def readline():
-            return self._tunnel_proc.stdout.readline()
-
-        while loop.time() < deadline:
-            if self._tunnel_proc.poll() is not None:
-                return None
-            line = await loop.run_in_executor(None, readline)
-            if not line:
-                await asyncio.sleep(0.1)
-                continue
-            logger.debug("ngrok: %s", line.strip())
-            m = pat.search(line)
-            if m:
-                return m.group(0).rstrip("/")
-        return None
-
-    async def _tunnel_cloudflared(self, retries: int = 2) -> Optional[str]:
-        binary = _ensure_cloudflared()
-        if not binary:
-            return None
-        for attempt in range(1, retries + 1):
-            with contextlib.suppress(Exception):
-                if self._tunnel_proc and self._tunnel_proc.poll() is None:
-                    self._tunnel_proc.terminate()
-            self._tunnel_proc = None
-            try:
-                self._tunnel_proc = subprocess.Popen(
-                    [
-                        binary,
-                        "tunnel",
-                        "--no-autoupdate",
-                        "--url",
-                        f"http://127.0.0.1:{self.port}",
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
-            except Exception:
-                logger.exception("cloudflared start failed")
-                continue
-            url = await self._wait_cf_url(70)
-            if url:
-                self.public_url = f"{url.rstrip('/')}/?token={self.token}"
-                return self.public_url
-            with contextlib.suppress(Exception):
-                if self._tunnel_proc:
-                    self._tunnel_proc.terminate()
-            self._tunnel_proc = None
-            await asyncio.sleep(1)
-        return None
-
-    async def _wait_cf_url(self, timeout: float = 45) -> Optional[str]:
-        if not self._tunnel_proc or not self._tunnel_proc.stdout:
-            return None
-        pat = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
-        loop = asyncio.get_event_loop()
-        deadline = loop.time() + timeout
-
-        def readline():
-            return self._tunnel_proc.stdout.readline()
-
-        while loop.time() < deadline:
-            if self._tunnel_proc.poll() is not None:
-                return None
-            line = await loop.run_in_executor(None, readline)
-            if not line:
-                await asyncio.sleep(0.1)
-                continue
-            logger.debug("cf: %s", line.strip())
-            m = pat.search(line)
-            if m:
-                return m.group(0)
         return None
 
     def best_url(self) -> str:
