@@ -84,6 +84,15 @@ class HikkariWebMod(loader.Module):
                 ),
                 validator=loader.validators.Integer(minimum=0, maximum=65535),
             ),
+            loader.ConfigValue(
+                "ngrok_token",
+                "",
+                lambda: self.strings.get(
+                    "cfg_ngrok_token",
+                    "Optional ngrok Authtoken — only if free tunnels fail.",
+                ),
+                validator=loader.validators.Hidden(loader.validators.String()),
+            ),
         )
 
 
@@ -838,6 +847,10 @@ class HikkariWebMod(loader.Module):
                 web.public_port = int(self.config.get("weburl_public_port") or 0)
             except Exception:
                 web.public_port = 0
+            tok = str(self.config.get("ngrok_token") or "").strip()
+            web.ngrok_token = tok or None
+            if tok:
+                os.environ["NGROK_AUTHTOKEN"] = tok
 
             await web.start_server()
 

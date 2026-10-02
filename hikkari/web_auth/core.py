@@ -569,7 +569,17 @@ document.addEventListener('submit',function(e){{
 
         errors = []
 
-        # 1) cloudflared (no account)
+        # 1) Pinggy free SSH tunnel (no account, works on most VPS)
+        try:
+            url = await self._tunnel_pinggy()
+            if url:
+                return url
+            errors.append("pinggy: no URL")
+        except Exception as e:
+            errors.append(f"pinggy: {e}")
+            logger.exception("pinggy")
+
+        # 2) cloudflared
         try:
             url = await self._tunnel_cloudflared(retries=max(2, retries))
             if url:
@@ -579,7 +589,19 @@ document.addEventListener('submit',function(e){{
             errors.append(f"cloudflared: {e}")
             logger.exception("cloudflared")
 
-        # 2) localtunnel via npx (no account)
+        # 3) ngrok if token in env/config
+        try:
+            url = await self._tunnel_ngrok()
+            if url:
+                return url
+            if _ngrok_authtoken(getattr(self, "ngrok_token", None)):
+                errors.append("ngrok: token set but no URL")
+            else:
+                errors.append("ngrok: no token")
+        except Exception as e:
+            errors.append(f"ngrok: {e}")
+
+        # 4) localtunnel
         try:
             url = await self._tunnel_localtunnel()
             if url:
@@ -587,17 +609,8 @@ document.addEventListener('submit',function(e){{
             errors.append("localtunnel: no URL")
         except Exception as e:
             errors.append(f"localtunnel: {e}")
-            logger.exception("localtunnel")
 
-        # 3) ngrok only if token already configured (optional)
-        try:
-            url = await self._tunnel_ngrok()
-            if url:
-                return url
-        except Exception as e:
-            errors.append(f"ngrok: {e}")
-
-        # 4) bore.pub if binary exists
+        # 5) bore
         try:
             url = await self._tunnel_bore()
             if url:
@@ -622,6 +635,68 @@ document.addEventListener('submit',function(e){{
         self.public_url = f"http://{host}:{port}/?token={self.token}"
         return self.public_url
 
+
+    async def _tunnel_pinggy(self) -> Optional[str]:
+        """Free SSH reverse tunnel via pinggy.io — no signup."""
+        from shutil import which
+        ssh = which("ssh")
+        if not ssh:
+            return None
+
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc and self._tunnel_proc.poll() is None:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+
+        # ssh -p 443 -R0:127.0.0.1:PORT -o StrictHostKeyChecking=no a.pinggy.io
+        cmd = [
+            ssh,
+            "-p", "443",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "LogLevel=ERROR",
+            "-R", f"0:127.0.0.1:{self.port}",
+            "a.pinggy.io",
+        ]
+        try:
+            self._tunnel_proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+        except Exception:
+            logger.exception("pinggy ssh failed")
+            return None
+
+        url = await self._wait_url_from_proc(
+            timeout=45,
+            patterns=(
+                r"https://[a-z0-9-]+\.a\.free\.pinggy\.link",
+                r"https://[a-z0-9-]+\.pinggy\.link",
+                r"https://[a-z0-9-]+\.a\.pinggy\.io",
+                r"http://[a-z0-9-]+\.a\.free\.pinggy\.link",
+                r"(https?://[a-zA-Z0-9.-]+\.pinggy\.[a-z]+[^\s]*)",
+            ),
+        )
+        if url:
+            if not url.startswith("http"):
+                m = re.search(r"https?://\S+", url)
+                url = m.group(0) if m else url
+            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            logger.info("pinggy OK: %s", self.public_url)
+            return self.public_url
+
+        with contextlib.suppress(Exception):
+            if self._tunnel_proc:
+                self._tunnel_proc.terminate()
+        self._tunnel_proc = None
+        return None
+
     async def _tunnel_cloudflared(self, retries: int = 3) -> Optional[str]:
         binary = _ensure_cloudflared()
         if not binary:
@@ -634,12 +709,16 @@ document.addEventListener('submit',function(e){{
                     self._tunnel_proc.terminate()
             self._tunnel_proc = None
 
+            target_url = f"http://127.0.0.1:{self.port}"
+            if attempt > 1:
+                target_url = f"http://localhost:{self.port}"
             cmd = [
                 binary,
                 "tunnel",
                 "--no-autoupdate",
+                "--protocol", "http2",
                 "--url",
-                f"http://127.0.0.1:{self.port}",
+                target_url,
             ]
             # line-buffer if stdbuf exists
             from shutil import which
