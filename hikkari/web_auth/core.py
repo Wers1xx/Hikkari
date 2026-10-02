@@ -99,8 +99,10 @@ def _ensure_ngrok() -> Optional[str]:
         return None
 
 
-def _ngrok_authtoken() -> Optional[str]:
-    """Optional token from env or config."""
+def _ngrok_authtoken(override: str | None = None) -> Optional[str]:
+    """Token priority: override → env → config.json."""
+    if override and str(override).strip():
+        return str(override).strip()
     tok = os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN")
     if tok:
         return tok.strip()
@@ -109,6 +111,59 @@ def _ngrok_authtoken() -> Optional[str]:
         tok = _main.get_config_key("ngrok_token") or _main.get_config_key("ngrok_authtoken")
         if tok:
             return str(tok).strip()
+    except Exception:
+        pass
+    return None
+
+
+def _is_private_ip(ip: str) -> bool:
+    ip = (ip or "").strip()
+    if not ip or ip.startswith("127.") or ip == "::1":
+        return True
+    if ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("169.254."):
+        return True
+    if ip.startswith("172."):
+        try:
+            second = int(ip.split(".")[1])
+            if 16 <= second <= 31:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _detect_public_ip() -> Optional[str]:
+    """Best-effort public IPv4 for VPS links."""
+    import socket
+    # 1) hostname -I style: first non-private from interfaces
+    try:
+        out = subprocess.check_output(["hostname", "-I"], text=True, timeout=3)
+        for part in out.split():
+            if not _is_private_ip(part) and ":" not in part:
+                return part.strip()
+    except Exception:
+        pass
+    # 2) external services
+    for url in (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://icanhazip.com",
+    ):
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                ip = resp.read().decode().strip()
+                if ip and not _is_private_ip(ip) and ":" not in ip:
+                    return ip
+        except Exception:
+            continue
+    # 3) UDP trick (may still be private behind NAT)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not _is_private_ip(ip):
+            return ip
     except Exception:
         pass
     return None
@@ -177,6 +232,10 @@ class WebAuth:
         self._tunnel_proc: Optional[subprocess.Popen] = None
         self.public_url: Optional[str] = None
         self.local_url = f"http://127.0.0.1:{self.port}/?token={self.token}"
+        self.ngrok_token: Optional[str] = None
+        self.weburl_mode: str = "auto"  # auto | tunnel | ip
+        self.public_host: Optional[str] = None  # manual IP/domain
+        self.public_port: int = 0  # 0 = same as local port
         # api | phone | code | 2fa | done
         self.stage = "api" if self.need_api else "phone"
 
@@ -494,20 +553,52 @@ document.addEventListener('submit',function(e){{
 
 
     async def start_tunnel(self, retries: int = 3) -> Optional[str]:
-        """Public URL: ngrok first, then cloudflared."""
+        """Public URL by mode: ip (VPS) / tunnel (ngrok) / auto."""
+        mode = (self.weburl_mode or "auto").strip().lower()
+        if mode not in ("auto", "tunnel", "ip"):
+            mode = "auto"
+
+        if mode == "ip":
+            return self._url_from_ip()
+
+        if mode == "tunnel":
+            url = await self._tunnel_ngrok(retries=retries)
+            if url:
+                return url
+            logger.warning("ngrok failed — trying cloudflared")
+            return await self._tunnel_cloudflared(retries=max(1, retries - 1))
+
+        # auto: prefer IP on VPS, tunnel on local/NAT
+        ip_url = self._url_from_ip(strict_public=True)
+        if ip_url:
+            return ip_url
         url = await self._tunnel_ngrok(retries=retries)
         if url:
             return url
         logger.warning("ngrok failed — trying cloudflared")
-        url = await self._tunnel_cloudflared(retries=max(1, retries - 1))
-        return url
+        return await self._tunnel_cloudflared(retries=max(1, retries - 1))
+
+    def _url_from_ip(self, strict_public: bool = False) -> Optional[str]:
+        """http://HOST:PORT/?token= for VPS. No ngrok key needed."""
+        host = (self.public_host or "").strip()
+        if not host:
+            host = _detect_public_ip() or ""
+        if not host:
+            return None
+        if strict_public and _is_private_ip(host):
+            return None
+        port = int(self.public_port) if self.public_port else self.port
+        # Always bind was 0.0.0.0 — reachable on VPS
+        self.public_url = f"http://{host}:{port}/?token={self.token}"
+        logger.info("WebUI public IP URL: %s", self.public_url)
+        return self.public_url
 
     async def _tunnel_ngrok(self, retries: int = 3) -> Optional[str]:
         binary = _ensure_ngrok()
         if not binary:
             return None
 
-        token = _ngrok_authtoken()
+        token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
         if token:
             try:
                 subprocess.run(

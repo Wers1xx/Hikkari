@@ -50,9 +50,57 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class HikkariWebMod(loader.Module):
-    """Inline account management"""
+    """Inline account management + WebUI login links"""
 
-    strings = {"name": "HikkariAccounts"}
+    strings = {
+        "name": "HikkariAccounts",
+        "cfg_weburl_mode": (
+            "WebUI public link mode: auto | tunnel | ip. "
+            "auto = VPS uses server IP, UserLand/NAT uses ngrok. "
+            "tunnel = always ngrok (need token). "
+            "ip = always http://IP:port (for VDS/VPS, no key)."
+        ),
+        "cfg_ngrok_token": (
+            "ngrok Authtoken for local hosting (UserLand). "
+            "Not needed on VPS when weburl_mode=ip/auto with public IP."
+        ),
+        "cfg_weburl_public_host": (
+            "Optional VPS public IP or domain for WebUI "
+            "(empty = auto-detect). Used in ip/auto mode."
+        ),
+        "cfg_weburl_public_port": (
+            "Public port for IP-mode link (0 = same as local WebUI port). "
+            "Open this port in firewall on VPS."
+        ),
+    }
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "weburl_mode",
+                "auto",
+                lambda: self.strings["cfg_weburl_mode"],
+                validator=loader.validators.Choice(["auto", "tunnel", "ip"]),
+            ),
+            loader.ConfigValue(
+                "ngrok_token",
+                os.environ.get("NGROK_AUTHTOKEN", "") or "",
+                lambda: self.strings["cfg_ngrok_token"],
+                validator=loader.validators.Hidden(loader.validators.String()),
+            ),
+            loader.ConfigValue(
+                "weburl_public_host",
+                "",
+                lambda: self.strings["cfg_weburl_public_host"],
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "weburl_public_port",
+                0,
+                lambda: self.strings["cfg_weburl_public_port"],
+                validator=loader.validators.Integer(minimum=0, maximum=65535),
+            ),
+        )
 
     @loader.command()
     async def addacc(self, message: Message):
@@ -797,6 +845,18 @@ class HikkariWebMod(loader.Module):
                 app_version=".".join(map(str, __version__)),
                 need_api=False,
             )
+            web.weburl_mode = str(self.config["weburl_mode"] or "auto")
+            web.ngrok_token = str(self.config["ngrok_token"] or "") or None
+            web.public_host = str(self.config["weburl_public_host"] or "") or None
+            try:
+                web.public_port = int(self.config["weburl_public_port"] or 0)
+            except Exception:
+                web.public_port = 0
+            # Sync token to env/config for other code paths
+            if web.ngrok_token:
+                os.environ["NGROK_AUTHTOKEN"] = web.ngrok_token
+                with contextlib.suppress(Exception):
+                    main.save_config_key("ngrok_token", web.ngrok_token)
             await web.start_server()
 
             # Public URL is mandatory so ANY user can open the login page
@@ -821,13 +881,14 @@ class HikkariWebMod(loader.Module):
                 await utils.answer(
                     status,
                     "🚫 <b>Не удалось создать публичную ссылку</b>\n\n"
-                    "Нужен <b>ngrok</b>.\n"
-                    "1) Зарегистрируйся на https://ngrok.com\n"
-                    "2) Скопируй Authtoken\n"
-                    "3) В терминале:\n"
-                    "<code>export NGROK_AUTHTOKEN=твой_токен</code>\n"
-                    "или добавь в config.json ключ <code>ngrok_token</code>\n"
-                    "4) Снова <code>weburl</code>",
+                    "<b>UserLand / локально:</b>\n"
+                    "• <code>.cfg HikkariAccounts</code> → <code>ngrok_token</code>\n"
+                    "• mode = <code>tunnel</code> или <code>auto</code>\n\n"
+                    "<b>VPS:</b>\n"
+                    "• mode = <code>ip</code>\n"
+                    "• при необходимости <code>weburl_public_host</code> = IP сервера\n"
+                    "• открой порт в firewall\n\n"
+                    "Потом снова <code>weburl</code>",
                     parse_mode="HTML",
                 )
                 return
