@@ -271,64 +271,25 @@ class UpdaterMod(loader.Module):
             return
 
         if self._pending not in {current, self._notified}:
-            if not self.config["autoupdate"]:
-                manual_update = True
-            else:
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        r = await session.get(
-                            url=f"https://api.github.com/repos/Wers1xx/Hikkari/contents/hikkari/version.py?ref={version.branch}",
-                            headers={"Accept": "application/vnd.github.v3.raw"},
-                        )
-                        text = await r.text()
-
-                    new_version = ""
-                    for line in text.splitlines():
-                        if line.strip().startswith("__version__"):
-                            new_version = ast.literal_eval(line.split("=")[1])
-
-                    if version.__version__[0] == new_version[0]:
-                        manual_update = False
-                    else:
-                        logger.info("Got a major update, updating manually")
-                        manual_update = True
-                except Exception:
-                    manual_update = True
-
-            if manual_update:
-                m = await self.inline.bot.send_message(self.tg_id, self.strings["update_required"].format(
-                        current[:6],
-                        '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            self._pending[:6],
-                        ),
-                        changelog,
-                    ),
-                    reply_markup=self._markup(),
-                    disable_web_page_preview=True,
-                )
-
-                self._notified = self._pending
-                self.set("ignore_permanent", False)
-
-                await self._delete_all_upd_messages()
-
-                self.set("upd_msg", m.message_id)
-
-            else:
-                m = await self.inline.bot.send_message(self.tg_id, self.strings["autoupdate_notifier"].format(
+            # Autoupdate removed: only notify, never auto-pull
+            m = await self.inline.bot.send_message(
+                self.tg_id,
+                self.strings["update_required"].format(
+                    current[:6],
+                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                        current[:12],
+                        self._pending[:12],
                         self._pending[:6],
-                        changelog,
-                        '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            "<emoji document_id=5255867057685170743>⚜️</emoji> diff",
-                        ),
                     ),
-                    disable_web_page_preview=True,
-                )
-                await self.invoke("update", "-f", peer=self.inline.bot_username)
+                    changelog,
+                ),
+                reply_markup=self._markup(),
+                disable_web_page_preview=True,
+            )
+            self._notified = self._pending
+            self.set("ignore_permanent", False)
+            await self._delete_all_upd_messages()
+            self.set("upd_msg", m.message_id)
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
@@ -691,14 +652,14 @@ class UpdaterMod(loader.Module):
 
     @loader.command()
     async def autoupdate(self, message: Message):
-        """| switch autoupdate state"""
-        self.config["autoupdate"] = not self.config["autoupdate"]
-        if self.config["autoupdate"]:
-            await utils.answer(message, self.strings["autoupdate_on"])
-        else:
-            await utils.answer(
-                message, self.strings["autoupdate_off"].format(prefix=self.get_prefix())
-            )
+        """Autoupdate is disabled — use .update manually"""
+        self.config["autoupdate"] = False
+        await utils.answer(
+            message,
+            "🚫 <b>Автообновление отключено</b>
+"
+            "Обновляй вручную: <code>.update</code>",
+        )
 
     async def inline_update(
         self,
@@ -783,29 +744,9 @@ class UpdaterMod(loader.Module):
 
             self.set("do_not_create", True)
 
-        if not self.config["autoupdate"] and not self.get("autoupdate_answered", False):
-            await self.inline.bot.send_message(self.tg_id, self.strings["autoupdate"],
-                reply_markup=self.inline.generate_markup(
-                    [
-                        [
-                            {
-                                "text": "✅ Turn on",
-                                "callback": self._set_autoupdate_state,
-                                "args": (True,),
-                                "style": "success",
-                            }
-                        ],
-                        [
-                            {
-                                "text": "🚫 Turn off",
-                                "callback": self._set_autoupdate_state,
-                                "args": (False,),
-                                "style": "danger",
-                            }
-                        ],
-                    ]
-                ),
-            )
+        # Autoupdate disabled by design — no startup prompt
+        self.config["autoupdate"] = False
+        self.set("autoupdate_answered", True)
 
     async def _add_folder(self):
         folders = await self._client(GetDialogFiltersRequest())
