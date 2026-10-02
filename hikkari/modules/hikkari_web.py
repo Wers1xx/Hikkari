@@ -103,7 +103,7 @@ class HikkariWebMod(loader.Module):
             ),
         )
 
-@loader.command()
+    @loader.command()
     async def addacc(self, message: Message):
         if "JAMHOST" in os.environ:
             await utils.answer(message, self.strings["host_denied"])
