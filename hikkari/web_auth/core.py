@@ -231,11 +231,13 @@ class WebAuth:
         self._runner: Optional[web.AppRunner] = None
         self._tunnel_proc: Optional[subprocess.Popen] = None
         self.public_url: Optional[str] = None
-        self.local_url = f"http://127.0.0.1:{self.port}/?token={self.token}"
+        self.local_url = f"http://127.0.0.1:{self.port}/"
         self.ngrok_token: Optional[str] = None
-        self.weburl_mode: str = "auto"  # auto | tunnel | ip
+        self.weburl_mode: str = "auto"  # auto | ngrok | ip
         self.public_host: Optional[str] = None  # manual IP/domain
         self.public_port: int = 0  # 0 = same as local port
+        # VPS IP links: no ?token= in URL. Ngrok public tunnels: token on.
+        self.require_token: bool = False
         # api | phone | code | 2fa | done
         self.stage = "api" if self.need_api else "phone"
 
@@ -256,7 +258,7 @@ class WebAuth:
         base = self._base_from_request(request)
         path = path if path.startswith("/") else f"/{path}"
         sep = "&" if "?" in path else "?"
-        url = f"{base}{path}{sep}token={self.token}"
+        url = f"{base}{path}" + (self._tok_q() if self.require_token and "token=" not in path else "")
         raise web.HTTPFound(url)
 
     async def _ensure_client(self):
@@ -362,8 +364,16 @@ document.addEventListener('submit',function(e){{
         return '<div class="steps">' + "".join(dots) + "</div>"
 
     def _tok_ok(self, request: web.Request) -> bool:
+        if not self.require_token:
+            return True
         tok = request.query.get("token") or ""
         return bool(tok) and secrets.compare_digest(str(tok), self.token)
+
+    def _tok_q(self) -> str:
+        """Query suffix for forms/redirects."""
+        if not self.require_token:
+            return ""
+        return f"?token={self.token}"
 
     async def index(self, request: web.Request) -> web.Response:
         if not self._tok_ok(request):
@@ -384,7 +394,7 @@ document.addEventListener('submit',function(e){{
             body = (
                 f"{steps}<h1>API</h1>"
                 "<p class='sub'>Данные с <b>my.telegram.org</b></p>"
-                f"<form method='post' action='/api/api?token={self.token}'>"
+                f"<form method='post' action='/api/api{self._tok_q()}'>"
                 "<label>API ID</label>"
                 "<input name='api_id' inputmode='numeric' placeholder='12345678' required autofocus/>"
                 "<label>API Hash</label>"
@@ -397,7 +407,7 @@ document.addEventListener('submit',function(e){{
             body = (
                 f"{steps}<h1>2FA</h1>"
                 "<p class='sub'>Пароль двухфакторной защиты</p>"
-                f"<form method='post' action='/api/2fa?token={self.token}'>"
+                f"<form method='post' action='/api/2fa{self._tok_q()}'>"
                 "<label>Пароль</label>"
                 "<input name='password' type='password' placeholder='••••••' required autofocus/>"
                 "<button type='submit'>Войти</button></form>"
@@ -407,7 +417,7 @@ document.addEventListener('submit',function(e){{
             body = (
                 f"{steps}<h1>Код</h1>"
                 f"<p class='sub'>Отправлен на <b>{self.phone}</b></p>"
-                f"<form method='post' action='/api/code?token={self.token}'>"
+                f"<form method='post' action='/api/code{self._tok_q()}'>"
                 "<label>Код из Telegram</label>"
                 "<input name='code' inputmode='numeric' placeholder='12345' required autofocus/>"
                 "<button type='submit'>Далее</button></form>"
@@ -417,7 +427,7 @@ document.addEventListener('submit',function(e){{
             body = (
                 f"{steps}<h1>Hikkari</h1>"
                 "<p class='sub'>Номер телефона аккаунта</p>"
-                f"<form method='post' action='/api/phone?token={self.token}'>"
+                f"<form method='post' action='/api/phone{self._tok_q()}'>"
                 "<label>Телефон</label>"
                 "<input name='phone' placeholder='+79001234567' required autofocus/>"
                 "<button type='submit'>Получить код</button></form>"
@@ -585,14 +595,17 @@ document.addEventListener('submit',function(e){{
             local = self._is_local_hosting()
 
         if not local:
+            # VPS: plain http://IP:PORT/ — no token in the link
+            self.require_token = False
             url = self._url_from_ip(strict_public=not bool((self.public_host or "").strip()))
             if url:
-                logger.info("WebUI VPS link: %s", url)
+                logger.info("WebUI VPS link (no token): %s", url)
                 return url
             self._tunnel_errors = ["vps: no public IP (set weburl_public_host)"]
             return None
 
-        # Local: ngrok only
+        # Local UserLand: ngrok — token still on URL for safety
+        self.require_token = True
         url = await self._tunnel_ngrok(retries=max(2, retries))
         if url:
             return url
@@ -616,7 +629,8 @@ document.addEventListener('submit',function(e){{
         if strict_public and _is_private_ip(host):
             return None
         port = int(self.public_port) if self.public_port else self.port
-        self.public_url = f"http://{host}:{port}/?token={self.token}"
+        self.require_token = False
+        self.public_url = f"http://{host}:{port}/"
         return self.public_url
 
 
@@ -671,7 +685,7 @@ document.addEventListener('submit',function(e){{
             if not url.startswith("http"):
                 m = re.search(r"https?://\S+", url)
                 url = m.group(0) if m else url
-            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
             logger.info("pinggy OK: %s", self.public_url)
             return self.public_url
 
@@ -730,7 +744,7 @@ document.addEventListener('submit',function(e){{
                 ),
             )
             if url:
-                self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+                self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
                 logger.info("cloudflared OK: %s", self.public_url)
                 return self.public_url
 
@@ -783,7 +797,7 @@ document.addEventListener('submit',function(e){{
             if not url.startswith("http"):
                 m = re.search(r"https://\S+", url)
                 url = m.group(0) if m else url
-            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
             logger.info("localtunnel OK: %s", self.public_url)
             return self.public_url
         with contextlib.suppress(Exception):
@@ -822,7 +836,7 @@ document.addEventListener('submit',function(e){{
                 m = re.search(r"bore\.pub:(\d+)", url)
                 if m:
                     url = f"http://bore.pub:{m.group(1)}"
-            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
             return self.public_url
         with contextlib.suppress(Exception):
             if self._tunnel_proc:
@@ -908,7 +922,7 @@ document.addEventListener('submit',function(e){{
                 patterns=(r"https://[a-z0-9-]+\.ngrok(?:-free)?\.(?:app|io|dev)",),
             )
         if url:
-            self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+            self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
             return self.public_url
         with contextlib.suppress(Exception):
             if self._tunnel_proc:
