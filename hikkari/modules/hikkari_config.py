@@ -957,7 +957,7 @@ class HikkariConfigMod(loader.Module):
                     else "configuring_option_lib"
                 )
             ].format(*args)
-        text = self._clip_cfg_text(text)
+            text = self._clip_cfg_text(text)
             text, pagination = self._paginate_text_markup(
                 text,
                 page,
