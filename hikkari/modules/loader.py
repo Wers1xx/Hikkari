@@ -140,6 +140,16 @@ class LoaderMod(loader.Module):
         asyncio.ensure_future(self._storage.preload(modules))
 
     async def client_ready(self):
+        # Force modules repo migration (old Wers1xx/modules → Wersixx/Wers1xx)
+        try:
+            repo = str(self.config.get("MODULES_REPO") or "")
+            if "Wers1xx/modules" in repo or not repo.strip():
+                self.config["MODULES_REPO"] = "https://raw.githubusercontent.com/Wersixx/Wers1xx/main"
+                self._links_cache.clear()
+                logger.info("MODULES_REPO migrated to Wersixx/Wers1xx")
+        except Exception:
+            logger.exception("MODULES_REPO migrate")
+
         while not (settings := self.lookup("settings")):
             await asyncio.sleep(0.5)
 
@@ -356,36 +366,67 @@ class LoaderMod(loader.Module):
         logger.debug("Loading modules: %s", todo)
         return todo
 
-    async def _get_repo(self, repo: str) -> str:
-        repo = repo.strip("/")
+    async def _get_repo(self, repo: str) -> list:
+        repo = (repo or "").strip().rstrip("/")
+        # migrate old default repo
+        if "Wers1xx/modules" in repo:
+            repo = "https://raw.githubusercontent.com/Wersixx/Wers1xx/main"
+            with contextlib.suppress(Exception):
+                self.config["MODULES_REPO"] = repo
 
         if self._links_cache.get(repo, {}).get("exp", 0) >= time.time():
             return self._links_cache[repo]["data"]
 
-        res = await utils.run_sync(
-            requests.get,
+        urls = [
             f"{repo}/full.txt",
-            auth=(
-                tuple(self.config["basic_auth"].split(":", 1))
-                if self.config["basic_auth"]
-                else None
-            ),
-        )
-
-        if not str(res.status_code).startswith("2"):
-            logger.debug(
-                "Can't load repo %s contents because of %s status code",
+            f"{repo}/full.txt?raw=1",
+        ]
+        res = None
+        last_code = None
+        for url in urls:
+            res = await utils.run_sync(
+                requests.get,
+                url,
+                timeout=30,
+                auth=(
+                    tuple(self.config["basic_auth"].split(":", 1))
+                    if self.config["basic_auth"]
+                    else None
+                ),
+            )
+            last_code = res.status_code
+            if str(res.status_code).startswith("2") and (res.text or "").strip():
+                break
+        else:
+            logger.warning(
+                "Can't load repo %s full.txt (HTTP %s)",
                 repo,
-                res.status_code,
+                last_code,
             )
             return []
 
+        lines = []
+        for raw in (res.text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            link = raw.strip().lstrip("\ufeff")
+            if not link or link.startswith("#"):
+                continue
+            # full.txt may list "Name.py" or "Name"
+            if link.endswith(".py"):
+                link = link[:-3]
+            # skip broken names with path traversal
+            if "/" in link or "\\" in link or ".." in link:
+                # allow subdirs: keep as relative path without .py
+                link = link.replace("\\", "/").strip("/")
+                if link.endswith(".py"):
+                    link = link[:-3]
+            lines.append(link)
+
+        logger.info("Repo %s: %s modules from full.txt", repo, len(lines))
         self._links_cache[repo] = {
             "exp": time.time() + 5 * 60,
-            "data": [link for link in res.text.strip().splitlines() if link],
+            "data": lines,
         }
-
-        return self._links_cache[repo]["data"]
+        return lines
 
     async def get_repo_list(
         self,
