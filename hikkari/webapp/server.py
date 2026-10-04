@@ -10,6 +10,7 @@ import logging
 import mimetypes
 import secrets
 import time
+import re
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -398,26 +399,70 @@ def create_app(module: Any) -> web.Application:
 
     @require_admin
     async def api_upload(request: web.Request) -> web.Response:
-        st: WebAppState = request.app["state"]
+        """Upload media to x0.at and return public URL for config."""
+        st = request.app["state"]
+        if not _admin_ok(request, st):
+            return web.json_response({"error": "forbidden"}, status=403)
         reader = await request.multipart()
         field = await reader.next()
         if field is None:
-            return _json({"ok": False, "error": "no file"}, 400)
+            return web.json_response({"error": "no file"}, status=400)
         filename = field.filename or f"upload_{int(time.time())}"
         data = await field.read()
+        if not data:
+            return web.json_response({"error": "empty file"}, status=400)
+
         uploads = Path(st.module.get("upload_dir") or (Path.home() / "Hikkari" / "downloads"))
         uploads.mkdir(parents=True, exist_ok=True)
-        safe = "".join(c for c in filename if c.isalnum() or c in "._-")[:120] or "file"
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "_", Path(filename).name)[:120]
         dest = uploads / safe
         dest.write_bytes(data)
-        # also try send to Saved Messages
-        try:
-            await st.client.send_file("me", str(dest), caption=f"WebApp upload: {safe}")
-        except Exception as e:
-            logger.warning("upload send failed: %s", e)
-        return _json({"ok": True, "path": str(dest), "size": len(data)})
 
-    @require_admin
+        x0_url = None
+        err = None
+        try:
+            import aiohttp
+            form = aiohttp.FormData()
+            form.add_field(
+                "file",
+                data,
+                filename=safe,
+                content_type=field.headers.get("Content-Type", "application/octet-stream"),
+            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post("https://x0.at/", data=form, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    text = (await resp.text()).strip()
+                    if resp.status < 400 and text.startswith("http"):
+                        x0_url = text.split()[0].strip()
+                    else:
+                        err = f"x0.at HTTP {resp.status}: {text[:200]}"
+        except Exception as e:
+            logger.exception("x0.at upload failed")
+            err = str(e)[:200]
+
+        # Optional: also send to Saved Messages for convenience
+        with contextlib.suppress(Exception):
+            cap = f"WebApp upload: {safe}"
+            if x0_url:
+                cap += f"\n{x0_url}"
+            await st.client.send_file("me", str(dest), caption=cap)
+
+        if not x0_url:
+            return web.json_response(
+                {"error": err or "x0.at failed", "local": str(dest)},
+                status=502,
+            )
+        return web.json_response(
+            {
+                "ok": True,
+                "url": x0_url,
+                "filename": safe,
+                "local": str(dest),
+                "hint": "Скопируй url в конфиг",
+            }
+        )
+
+
     async def api_db_get(request: web.Request) -> web.Response:
         st: WebAppState = request.app["state"]
         owner = request.query.get("owner") or "hikkari.main"

@@ -832,16 +832,12 @@ class Hikkari:
         print(_c("Login methods:"))
         print(_c("  1) Phone number (terminal)"))
         print(_c("  2) QR code"))
-        if not getattr(self.arguments, "no_web", False):
-            print(_c("  3) WebUI (browser / tunnel link)"))
 
         user_choice = input(
-            _c("Choose [1/2/3] (default 1): ")
+            _c("Choose [1/2] (default 1): ")
         ).strip().lower()
 
-        if user_choice in {"3", "w", "web", "webui", "weburl"} and not getattr(
-            self.arguments, "no_web", False
-        ):
+        if False:  # WebUI login removed — phone / QR only
             try:
                 from .web_auth import WebAuth
 

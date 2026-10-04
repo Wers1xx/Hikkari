@@ -260,7 +260,20 @@ if ($("#uploadBtn"))
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || r.statusText);
-      $("#upOut").textContent = JSON.stringify(data, null, 2);
+      if (data.url) {
+        $("#upOut").innerHTML =
+          '<div class="ok-line">Готово</div>' +
+          '<a class="media-link" href="' + data.url + '" target="_blank" rel="noopener">' + data.url + "</a>" +
+          '<button type="button" class="btn ghost block" id="copyUrlBtn">Копировать ссылку</button>';
+        const b = $("#copyUrlBtn");
+        if (b)
+          b.onclick = () => {
+            navigator.clipboard.writeText(data.url);
+            b.textContent = "Скопировано";
+          };
+      } else {
+        $("#upOut").textContent = JSON.stringify(data, null, 2);
+      }
     } catch (e) {
       $("#upOut").textContent = e.message;
     }

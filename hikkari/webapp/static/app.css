@@ -460,3 +460,12 @@ nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
   .hero { flex-direction: column; text-align: center; }
   .content { padding: 12px 14px 28px; }
 }
+
+.media-link {
+  display: block;
+  margin: 10px 0;
+  color: #a5b4fc;
+  word-break: break-all;
+  font-size: 14px;
+}
+.ok-line { color: #6ee7b7; font-weight: 600; margin-bottom: 6px; }
