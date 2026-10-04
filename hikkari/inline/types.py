@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -58,19 +59,19 @@ class InlineMessage:
         )
 
     async def delete(self) -> bool:
-        entity = self._units.get(self.unit_id)
-        if not entity:
-            if hasattr(self, "original_call"):
-                return await self.original_call.answer("msg not found", alert=True)
-            return False
-
-        await self.inline_manager._client.delete_messages(
-            entity.get("chat"),
-            entity.get("message_id"),
+        entity = self._units.get(self.unit_id) if getattr(self, "_units", None) else None
+        chat = entity.get("chat") if entity else getattr(self, "chat_id", None)
+        msg_id = entity.get("message_id") if entity else getattr(self, "message_id", None)
+        ok = await self.inline_manager._delete_unit_message(
+            self,
+            unit_id=getattr(self, "unit_id", None),
+            chat_id=chat,
+            message_id=msg_id,
         )
         if hasattr(self, "original_call"):
-            return await self.original_call.answer("")
-        return True
+            with contextlib.suppress(Exception):
+                await self.original_call.answer("" if ok else "msg not found", alert=not ok)
+        return ok
 
     async def unload(self) -> bool:
         return await self.inline_manager._unload_unit(unit_id=self.unit_id)
