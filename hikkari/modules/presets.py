@@ -60,7 +60,7 @@ PRESETS = {
         "https://mods.codrago.life/DoxTool.py",
         "https://mods.codrago.life/randomizer.py",
         "https://mods.kok.gay/yg_quotes",
-        "https://raw.githubusercontent.com/Wers1xx/modules/main/hardspam.py",
+        "https://raw.githubusercontent.com/Wersixx/Wers1xx/main/hardspam.py",
     ],
     "chat": [
         "https://github.com/amm1edev/ame_repo/raw/refs/heads/main/activists.py",
@@ -75,7 +75,7 @@ PRESETS = {
         "https://mods.codrago.life/autoclicker.py",
         "https://raw.githubusercontent.com/SenkoGuardian/SenModules/refs/heads/My-Modules/Gemini.py",
         "https://raw.githubusercontent.com/yummy1gay/modules/main/yg_checks.py",
-        "https://raw.githubusercontent.com/Wers1xx/modules/main/chatmodule.py",
+        "https://raw.githubusercontent.com/Wersixx/Wers1xx/main/chatmodule.py",
     ],
     "service": [
         "https://github.com/amm1edev/ame_repo/raw/refs/heads/main/account_switcher.py",
@@ -91,7 +91,7 @@ PRESETS = {
         "https://github.com/amm1edev/ame_repo/raw/refs/heads/main/searx.py",
         "https://raw.githubusercontent.com/Ruslan-Isaev/modules/refs/heads/main/whois.py",
         "https://raw.githubusercontent.com/radiocycle/Modules/refs/heads/master/Neofetch.py",
-        "https://raw.githubusercontent.com/Wers1xx/modules/main/dbmod.py",
+        "https://raw.githubusercontent.com/Wersixx/Wers1xx/main/dbmod.py",
     ],
     "downloaders": [
         "https://github.com/amm1edev/ame_repo/raw/refs/heads/main/uploader.py",
