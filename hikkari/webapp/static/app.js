@@ -258,8 +258,14 @@ if ($("#uploadBtn"))
         headers: { Authorization: "Bearer " + TOKEN },
         body: fd,
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || r.statusText);
+      const raw = await r.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        throw new Error("Bad response: " + raw.slice(0, 120));
+      }
+      if (!r.ok || data.ok === false) throw new Error(data.error || r.statusText);
       if (data.url) {
         $("#upOut").innerHTML =
           '<div class="ok-line">Готово</div>' +

@@ -398,19 +398,18 @@ def create_app(module: Any) -> web.Application:
 
 
     @require_admin
+    @require_admin
     async def api_upload(request: web.Request) -> web.Response:
         """Upload media to x0.at and return public URL for config."""
         st = request.app["state"]
-        if not _admin_ok(request, st):
-            return web.json_response({"error": "forbidden"}, status=403)
         reader = await request.multipart()
         field = await reader.next()
         if field is None:
-            return web.json_response({"error": "no file"}, status=400)
+            return _json({"ok": False, "error": "no file"}, 400)
         filename = field.filename or f"upload_{int(time.time())}"
         data = await field.read()
         if not data:
-            return web.json_response({"error": "empty file"}, status=400)
+            return _json({"ok": False, "error": "empty file"}, 400)
 
         uploads = Path(st.module.get("upload_dir") or (Path.home() / "Hikkari" / "downloads"))
         uploads.mkdir(parents=True, exist_ok=True)
@@ -448,11 +447,8 @@ def create_app(module: Any) -> web.Application:
             await st.client.send_file("me", str(dest), caption=cap)
 
         if not x0_url:
-            return web.json_response(
-                {"error": err or "x0.at failed", "local": str(dest)},
-                status=502,
-            )
-        return web.json_response(
+            return _json({"ok": False, "error": err or "x0.at failed", "local": str(dest)}, 502)
+        return _json(
             {
                 "ok": True,
                 "url": x0_url,
