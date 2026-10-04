@@ -591,7 +591,7 @@ class Hikkari:
             session_repair.patch_sqlite_session_class()
             n = session_repair.repair_sessions_dir(SESSIONS_DIR)
             if n:
-                logging.info("Repaired %s session file(s) missing entities table", n)
+                logging.debug("Repaired %s session file(s) missing entities table", n)
         except Exception:
             logging.exception("Session self-heal failed (non-fatal)")
         self.sessions = []

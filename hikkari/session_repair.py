@@ -139,7 +139,7 @@ def repair_sessions_dir(directory: str | Path) -> int:
     for path in directory.glob("*.session-journal"):
         try:
             path.unlink()
-            logger.info("Removed stale journal %s", path.name)
+            logger.debug("Removed stale journal %s", path.name)
         except Exception:
             pass
     return n
@@ -194,7 +194,7 @@ def unlock_session(path: Path | str) -> None:
         if p.exists():
             try:
                 p.unlink()
-                logger.info("Removed stale lock file %s", p.name)
+                logger.debug("Removed stale lock file %s", p.name)
             except Exception:
                 logger.debug("Could not remove %s", p, exc_info=True)
     # ensure schema after lock clear

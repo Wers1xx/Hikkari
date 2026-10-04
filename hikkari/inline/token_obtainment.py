@@ -99,7 +99,7 @@ def _persist_bot_token(db, token: str, username: str | None = None, tg_id: int |
         except Exception:
             logger.debug("token backup write failed: %s", path, exc_info=True)
 
-    logger.info("Inline bot token persisted (DB + %s backup file(s))", len(_token_backup_paths(tg_id)))
+    logger.debug("Inline bot token persisted (DB + %s backup file(s))", len(_token_backup_paths(tg_id)))
 
 
 def _load_bot_token(db, tg_id: int | None = None) -> str | None:
@@ -264,7 +264,7 @@ class TokenObtainment(InlineUnit):
 
             _persist_bot_token(self._db, token, username)
             self._token = token
-            logger.info("Inline bot created, token saved (+backup)")
+            logger.debug("Inline bot created, token saved (+backup)")
 
             # Enable inline mode + feedback + avatar
             for msg in [
@@ -364,7 +364,7 @@ class TokenObtainment(InlineUnit):
                 recovered = _load_bot_token(self._db, tg_id=tg)
                 if recovered:
                     self._token = recovered
-                    logger.info("Inline token recovered before assert")
+                    logger.debug("Inline token recovered before assert")
             except Exception:
                 logger.exception("token recovery in _assert_token")
 
@@ -577,7 +577,7 @@ class TokenObtainment(InlineUnit):
                 ):
                     if path.exists():
                         path.unlink(missing_ok=True)
-                        logger.info("Removed stale bot session: %s", path)
+                        logger.debug("Removed stale bot session: %s", path)
         except Exception:
             logger.exception("Failed to cleanup bot session files")
 
