@@ -720,6 +720,20 @@ loader:
   cancel: "🚫 Cancel"
   overwrite_module: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>This module attempted to override the core one (</b><code>{}</code><b>)</b>\n\n<tg-emoji emoji-id=5472146462362048818>💡</tg-emoji><i> Don't report it as bug. It's a security measure to prevent replacing core modules with some junk</i>"
   scam_module: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>The module</b> <code>{name}</code> <b>is a scam, please report it to the support group (</b><code>{prefix}support</code><b>)</b>\n\n<tg-spoiler><i>Protection has stopped its loading.</i></tg-spoiler>"
+  safety_blocked: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>Module</b> <code>{name}</code> <b>blocked</b>
+
+{reasons}
+
+<i>Threat to account/session — install denied.</i>"
+  safety_warn: "<tg-emoji emoji-id=5312383351217201533>⚠️</tg-emoji> <b>Module</b> <code>{name}</code> <b>looks risky</b>
+
+{reasons}
+
+<i>Install only if you trust the source.</i>"
+  safety_install_anyway: "✅ Install anyway"
+  safety_cancel: "🔻 Cancel"
+  safety_installing: "<tg-emoji emoji-id=5325792861885570739>🕔</tg-emoji> <b>Installing despite warnings…</b>"
+  safety_installed_ok: "<tg-emoji emoji-id=5784993237412351403>✅</tg-emoji> <b>Installed (with risk confirmation)</b>"
   overwrite_command: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>This module attempted to override the core command (</b><code>{}{}</code><b>)</b>\n\n<tg-emoji emoji-id=5472146462362048818>💡</tg-emoji><i> Don't report it as bug. It's a security measure to prevent replacing core modules' commands with some junk</i>"
   unload_core: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>You can't unload core module</b> <code>{}</code><b></b>\n\n<tg-emoji emoji-id=5472146462362048818>💡</tg-emoji><i> Don't report it as bug. It's a security measure to prevent replacing core modules with some junk</i>"
   cannot_unload_lib: "<tg-emoji emoji-id=5287372146039861774>❌</tg-emoji> <b>You can't unload library</b>"

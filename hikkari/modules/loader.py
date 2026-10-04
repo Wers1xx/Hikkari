@@ -708,6 +708,122 @@ class LoaderMod(loader.Module):
             logger.exception("install_packages failed")
             return False
 
+
+    # --- Module safety scanner -------------------------------------------------
+    _BLOCK_PATTERNS = [
+        (r"\bDeleteAccountRequest\b", "DeleteAccountRequest — удаление аккаунта"),
+        (r"\baccount\.DeleteAccount\b", "account.DeleteAccount — удаление аккаунта"),
+        (r"\bfunctions\.account\.DeleteAccount\b", "functions.account.DeleteAccount"),
+        (r"\bResetAuthorizationsRequest\b", "ResetAuthorizations — снос всех сессий"),
+        (r"\bauth\.ResetAuthorizations\b", "auth.ResetAuthorizations — снос сессий"),
+        (r"\bfunctions\.auth\.ResetAuthorizations\b", "functions.auth.ResetAuthorizations"),
+        (r"\bResetAuthorizationRequest\b", "ResetAuthorization — снос сессии"),
+        (r"\bLogOutRequest\b", "LogOutRequest — выход из аккаунта"),
+        (r"\bfunctions\.auth\.LogOut\b", "functions.auth.LogOut"),
+        (r"\bauth\.LogOut\b", "auth.LogOut"),
+        (r"\.log_out\s*\(", "client.log_out() — выход из аккаунта"),
+        (r"\bResetLoginEmailRequest\b", "ResetLoginEmail"),
+        (r"delete[_ ]account", "Упоминание delete account"),
+        (r"unlink\s*\([^)]*\.session", "Удаление .session файла"),
+        (r"os\.remove\s*\([^)]*\.session", "os.remove сессии"),
+        (r"\.session[\"']\s*\)\.unlink", "Path.unlink сессии"),
+        (r"shutil\.rmtree\s*\([^)]*sessions", "rmtree sessions/"),
+        (r"DestroySession|destroy_session", "Destroy session"),
+    ]
+
+    _WARN_PROFILE = [
+        (r"\bUpdateProfileRequest\b", "UpdateProfile — изменение профиля"),
+        (r"\baccount\.UpdateProfile\b", "account.UpdateProfile"),
+        (r"\bUpdateUsernameRequest\b", "UpdateUsername — смена юзернейма"),
+        (r"\baccount\.UpdateUsername\b", "account.UpdateUsername"),
+        (r"\bUploadProfilePhotoRequest\b", "UploadProfilePhoto — аватар"),
+        (r"\bphotos\.UploadProfilePhoto\b", "photos.UploadProfilePhoto"),
+        (r"\bDeletePhotosRequest\b", "DeletePhotos — удаление фото профиля"),
+        (r"\bphotos\.DeletePhotos\b", "photos.DeletePhotos"),
+        (r"\bUpdatePersonalChannelRequest\b", "UpdatePersonalChannel"),
+        (r"UpdatePasswordSettings|edit_2fa", "Изменение 2FA/пароля"),
+    ]
+
+    _WARN_CORE = [
+        (r"allmodules\.modules", "Доступ к allmodules.modules"),
+        (r"unload_module\s*\(", "Вызов unload_module"),
+        (r"register_module\s*\(", "Вызов register_module"),
+        (r"CoreOverwriteError|core.?overwrite", "Перезапись ядра"),
+        (r"sys\.modules\s*\[\s*['\"]hikkari", "Подмена sys.modules hikkari"),
+        (r"importlib\.reload\s*\(.*hikkari", "importlib.reload ядра"),
+        (r"hikkari/modules/(?:loader|main|dispatcher|security)", "Правка встроенных файлов"),
+        (r"open\s*\([^)]*hikkari/modules", "Запись в hikkari/modules"),
+        (r"LOADED_MODULES_DIR", "Манипуляции LOADED_MODULES_DIR"),
+        (r"__builtins__\s*=", "Подмена __builtins__"),
+    ]
+
+    _WARN_SPAM = [
+        (r"while\s+True[\s\S]{0,400}send_message\s*\(", "Цикл while True + send_message"),
+        (r"for\s+\w+\s+in\s+[\s\S]{0,300}send_message\s*\(", "Цикл for + send_message"),
+        (r"async def client_ready[\s\S]{0,1500}(?:send_message|forward_messages)\s*\(", "Автоотправка в client_ready"),
+        (r"mass.?send|auto.?spam|flood.?spam|spam.?bot", "Признаки спам-модуля"),
+        (r"InviteToChannelRequest[\s\S]{0,200}for\s+", "Массовый инвайт"),
+    ]
+
+    def _scan_module_safety(self, doc: str) -> tuple[list, list]:
+        """Return (block_reasons, warn_reasons) from static source scan."""
+        if not doc:
+            return [], []
+        # strip strings/comments roughly to reduce false positives on docs
+        src = doc
+        blocked, warns = [], []
+        seen = set()
+
+        def add(lst, reason):
+            if reason not in seen:
+                seen.add(reason)
+                lst.append(reason)
+
+        for pat, reason in self._BLOCK_PATTERNS:
+            if re.search(pat, src, re.I | re.M):
+                add(blocked, reason)
+
+        for pat, reason in self._WARN_PROFILE:
+            if re.search(pat, src, re.I | re.M):
+                add(warns, f"Профиль: {reason}")
+
+        for pat, reason in self._WARN_CORE:
+            if re.search(pat, src, re.I | re.M):
+                add(warns, f"Ядро: {reason}")
+
+        for pat, reason in self._WARN_SPAM:
+            if re.search(pat, src, re.I | re.M):
+                add(warns, f"Спам: {reason}")
+
+        return blocked, warns
+
+    async def _inline__safety_install(
+        self,
+        call: InlineCall,
+        doc: str,
+        name: str | None,
+        origin: str,
+        save_fs: bool,
+        blob_link: bool,
+    ):
+        await call.edit(self.strings["safety_installing"])
+        ok = await self.load_module(
+            doc,
+            call,
+            name=name,
+            origin=origin or "<string>",
+            save_fs=save_fs,
+            blob_link=blob_link,
+            _safety_confirmed=True,
+        )
+        if ok:
+            with contextlib.suppress(Exception):
+                await call.edit(self.strings["safety_installed_ok"])
+        else:
+            with contextlib.suppress(Exception):
+                await call.edit(self.strings["load_failed"])
+
+
     async def load_module(
         self,
         doc: str,
@@ -720,8 +836,61 @@ class LoaderMod(loader.Module):
         did_requires: bool = False,
         did_packages: bool = False,
         _raise_install_errors: bool = False,
+        _safety_confirmed: bool = False,
     ) -> bool:
         module_label = name or origin
+
+        if isinstance(doc, (bytes, bytearray)):
+            try:
+                doc = doc.decode("utf-8")
+            except Exception:
+                doc = doc.decode("utf-8", errors="ignore")
+
+        if isinstance(doc, str) and not _safety_confirmed:
+            blocked, warns = self._scan_module_safety(doc)
+            if blocked:
+                logger.warning(
+                    "Module %s blocked by safety scanner: %s",
+                    module_label,
+                    blocked,
+                )
+                if isinstance(message, Message):
+                    await utils.answer(
+                        message,
+                        self.strings["safety_blocked"].format(
+                            name=utils.escape_html(str(module_label)),
+                            reasons="\n".join(
+                                f"• {utils.escape_html(r)}" for r in blocked
+                            ),
+                        ),
+                    )
+                return False
+            if warns and isinstance(message, Message):
+                await self.inline.form(
+                    self.strings["safety_warn"].format(
+                        name=utils.escape_html(str(module_label)),
+                        reasons="\n".join(
+                            f"• {utils.escape_html(r)}" for r in warns
+                        ),
+                    ),
+                    message,
+                    reply_markup=[
+                        [
+                            {
+                                "text": self.strings["safety_install_anyway"],
+                                "callback": self._inline__safety_install,
+                                "args": (doc, name, origin, save_fs, blob_link),
+                            }
+                        ],
+                        [
+                            {
+                                "text": self.strings["safety_cancel"],
+                                "action": "close",
+                            }
+                        ],
+                    ],
+                )
+                return False
 
         if any(
             line.replace(" ", "") == "#scope:ffmpeg" for line in doc.splitlines()
