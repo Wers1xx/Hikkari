@@ -278,22 +278,14 @@ class List(InlineUnit):
     ):
         match True:
             case _ if page == "close":
-                with contextlib.suppress(Exception):
-                    await call.answer()
-                deleted = False
-                with contextlib.suppress(Exception):
-                    deleted = await self._delete_unit_message(call, unit_id=unit_id)
-                if not deleted:
-                    # strip buttons as fallback
-                    with contextlib.suppress(Exception):
-                        await self._bot_client.edit_message(
-                            call.inline_message_id,
-                            "✖️",
-                            parse_mode="HTML",
-                            buttons=None,
-                        )
-                with contextlib.suppress(Exception):
-                    await self._unload_unit(unit_id)
+                # Reuse robust closer
+                if hasattr(call, "unit_id") and not call.unit_id:
+                    call.unit_id = unit_id
+                try:
+                    call.unit_id = unit_id
+                except Exception:
+                    pass
+                await self._close_unit_handler(call)
                 return
             case _ if self._units[unit_id]["current_index"] < 0 or page >= len(
                 self._units[unit_id]["strings"]
@@ -335,7 +327,12 @@ class List(InlineUnit):
                 total_pages=len(self._units[unit_id]["strings"]),
                 unit_id=unit_id,
             )
-            + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]],
+            + [[{
+                "text": "🔻 Close",
+                "callback": callback,
+                "args": ("close",),
+                "disable_security": True,
+            }]],
         )
 
     async def _list_inline_handler(self: "InlineManager", inline_query):

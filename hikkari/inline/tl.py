@@ -173,8 +173,8 @@ class TelethonBot:
             if "copy" in btn:
                 return make_button(text=text, copy_text=btn["copy"], style=style, icon=icon)
             if "action" in btn and btn["action"] == "close":
-                # close is handled via callback data in generate_markup; plain data
-                return make_button(text=text, data=btn.get("data") or "close", style=style, icon=icon)
+                data = btn.get("_callback_data") or btn.get("data") or "close"
+                return make_button(text=text, data=data, style=style, icon=icon)
             return make_button(text=text, data=text, style=style, icon=icon)
 
         def _normalize_rows(markup):

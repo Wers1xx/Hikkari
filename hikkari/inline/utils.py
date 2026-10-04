@@ -115,9 +115,12 @@ class Utils(InlineUnit):
                 if "callback" not in button:
                     if button.get("action") == "close":
                         button["callback"] = self._close_unit_handler
+                        button["disable_security"] = True
+                        button.setdefault("args", ())
 
                     if button.get("action") == "unload":
                         button["callback"] = self._unload_unit_handler
+                        button["disable_security"] = True
 
                     if button.get("action") == "answer":
                         if not button.get("message"):
@@ -165,15 +168,24 @@ class Utils(InlineUnit):
                             btn_kwargs["data"] = button["_callback_data"]
 
                             if setup_callbacks:
+                                args = button.get("args", ())
+                                if isinstance(args, dict):
+                                    args = ()
                                 self._custom_map[button["_callback_data"]] = {
                                     "handler": button["callback"],
                                     "always_allow": button.get("always_allow", [])
                                     or [],
-                                    "args": button.get("args", {}),
-                                    "kwargs": button.get("kwargs", {}),
+                                    "args": args if args is not None else (),
+                                    "kwargs": button.get("kwargs", {}) or {},
                                     "force_me": button.get("force_me", False),
                                     "disable_security": button.get(
                                         "disable_security", False
+                                    ),
+                                    # so security checks don't hard-fail
+                                    "message": button.get("message", True),
+                                    "perms_map": button.get(
+                                        "perms_map",
+                                        lambda: self._client.dispatcher.security._default,
                                     ),
                                 }
 
@@ -232,70 +244,70 @@ class Utils(InlineUnit):
     generate_markup = _generate_markup
 
     async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Force-close inline form: answer callback, delete via bot then user client."""
-        # Always ack button so Telegram stops spinner (esp. Docker / slow hosts)
+        """Close form/list: answer, strip buttons, delete message. Always visible feedback."""
         with contextlib.suppress(Exception):
             await call.answer()
 
         unit_id = getattr(call, "unit_id", None)
-        units = getattr(call, "_units", None) or getattr(self, "_units", {})
-        unit = units.get(unit_id) if unit_id and isinstance(units, dict) else None
+        # Try resolve unit_id from custom map / units by matching callback
+        if not unit_id and isinstance(getattr(self, "_units", None), dict):
+            # best-effort: single unit
+            if len(self._units) == 1:
+                unit_id = next(iter(self._units))
+
+        unit = None
+        if unit_id and isinstance(getattr(self, "_units", None), dict):
+            unit = self._units.get(unit_id)
 
         chat = None
         msg_id = None
+        inline_msg_id = getattr(call, "inline_message_id", None)
         if isinstance(unit, dict):
             chat = unit.get("chat")
             msg_id = unit.get("message_id")
+            inline_msg_id = inline_msg_id or unit.get("inline_message_id")
         if chat is None:
-            chat = getattr(call, "chat_id", None) or getattr(
-                getattr(call, "message", None), "chat_id", None
-            )
-            if chat is None:
-                chat = getattr(getattr(getattr(call, "message", None), "chat", None), "id", None)
+            chat = getattr(call, "chat_id", None)
         if msg_id is None:
-            msg_id = getattr(call, "message_id", None) or getattr(
-                getattr(call, "message", None), "message_id", None
-            ) or getattr(getattr(call, "message", None), "id", None)
+            msg_id = getattr(call, "message_id", None)
 
-        deleted = False
-
-        # 1) Bot API delete (message was sent by inline bot)
-        bot = getattr(self, "bot", None)
-        if not deleted and bot is not None and chat is not None and msg_id is not None:
+        # A) Strip buttons / show closed (works even when delete is forbidden)
+        cleared = False
+        if inline_msg_id:
             with contextlib.suppress(Exception):
-                await bot.delete_message(int(chat), int(msg_id))
-                deleted = True
-            if not deleted:
-                with contextlib.suppress(Exception):
-                    # telethon-style bot client
-                    bot_client = getattr(self, "_bot_client", None) or getattr(bot, "client", None)
-                    if bot_client is not None:
-                        await bot_client.delete_messages(int(chat), [int(msg_id)])
-                        deleted = True
+                await self._bot_client.edit_message(
+                    inline_msg_id,
+                    "✖️",
+                    parse_mode="HTML",
+                    buttons=None,
+                    link_preview=False,
+                )
+                cleared = True
+        if not cleared:
+            with contextlib.suppress(Exception):
+                if hasattr(call, "edit"):
+                    await call.edit("✖️", reply_markup=None)
+                    cleared = True
 
-        # 2) User client delete
-        if not deleted and chat is not None and msg_id is not None:
+        # B) Delete message via bot
+        if chat is not None and msg_id is not None:
+            bot = getattr(self, "bot", None)
+            if bot is not None:
+                with contextlib.suppress(Exception):
+                    await bot.delete_message(int(chat), int(msg_id))
+            bot_client = getattr(self, "_bot_client", None)
+            if bot_client is not None:
+                with contextlib.suppress(Exception):
+                    await bot_client.delete_messages(int(chat), [int(msg_id)])
             with contextlib.suppress(Exception):
                 await self._client.delete_messages(int(chat), [int(msg_id)])
-                deleted = True
 
-        # 3) Shared delete helper
-        if not deleted:
-            with contextlib.suppress(Exception):
-                if await self._delete_unit_message(call, unit_id=unit_id, chat_id=chat, message_id=msg_id):
-                    deleted = True
+        with contextlib.suppress(Exception):
+            await self._delete_unit_message(
+                call, unit_id=unit_id, chat_id=chat, message_id=msg_id
+            )
 
-        # 4) Last resort: strip buttons / mark closed via edit
-        if not deleted and unit_id:
-            with contextlib.suppress(Exception):
-                await self._edit_unit(
-                    "✖️",
-                    unit_id=unit_id,
-                    reply_markup=None,
-                )
-                deleted = True
-
-        # Unload unit + on_unload always
+        # C) unload
         if isinstance(unit, dict):
             on_unload = unit.get("on_unload")
             if callable(on_unload):

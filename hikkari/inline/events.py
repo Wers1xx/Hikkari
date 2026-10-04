@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -354,42 +355,46 @@ class Events(InlineUnit):
                     return result
 
         if call_data in self._custom_map:
-            match True:
-                case _ if (
-                    self._custom_map[call_data].get("disable_security", False)
-                    or (
-                        self._custom_map[call_data].get("force_me", False)
-                        and user_id == self._me
-                    )
-                    or not self._custom_map[call_data].get("force_me", False)
-                    and (
-                        await self.check_inline_security(
-                            func=self._custom_map[call_data].get(
-                                "perms_map",
-                                lambda: self._client.dispatcher.security._default,
-                            )(),
-                            user=user_id,
-                        )
-                        if "message" in self._custom_map[call_data]
-                        else False
-                    )
-                ):
-                    pass
-                case (
-                    _
-                ) if user_id not in self._client.dispatcher.security._owner and user_id not in self._custom_map[
-                    call_data
-                ].get(
-                    "always_allow", []
-                ):
-                    await call.answer(self.translator.getkey("inline.button403"))
-                    return
+            entry = self._custom_map[call_data]
+            owners = set()
+            with contextlib.suppress(Exception):
+                owners.add(int(self._me))
+            with contextlib.suppress(Exception):
+                owners |= {int(x) for x in (self._client.dispatcher.security._owner or [])}
 
-            await self._custom_map[call_data]["handler"](
-                (InlineCall if call.via_inline else BotInlineCall)(call, self, None),
-                *self._custom_map[call_data].get("args", []),
-                **self._custom_map[call_data].get("kwargs", {}),
+            allowed = bool(entry.get("disable_security", False))
+            if not allowed and user_id in owners:
+                allowed = True
+            if not allowed and user_id in (entry.get("always_allow") or []):
+                allowed = True
+            if not allowed and entry.get("force_me", False) and user_id == self._me:
+                allowed = True
+            if not allowed:
+                with contextlib.suppress(Exception):
+                    allowed = await self.check_inline_security(
+                        func=entry.get(
+                            "perms_map",
+                            lambda: self._client.dispatcher.security._default,
+                        )(),
+                        user=user_id,
+                    )
+
+            if not allowed:
+                await call.answer(self.translator.getkey("inline.button403"), alert=True)
+                return
+
+            args = entry.get("args", ()) or ()
+            if isinstance(args, dict):
+                args = ()
+            kwargs = entry.get("kwargs", {}) or {}
+            if not isinstance(kwargs, dict):
+                kwargs = {}
+
+            icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+                call, self, None
             )
+            # attach unit_id if handler is list/gallery partial
+            await entry["handler"](icall, *args, **kwargs)
             return
 
     async def _chosen_inline_handler(
