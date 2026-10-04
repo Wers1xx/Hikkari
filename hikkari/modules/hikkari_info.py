@@ -42,18 +42,9 @@ class HikkariInfoMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "custom_message",
-                doc=lambda: (
-                    self.strings["_cfg_cst_msg"]
-                    + "\n"
-                    + (
-                        "\n"
-                        + self.strings["_cfg_cst_ph"].format(
-                            "\n" + utils.config_placeholders()
-                        )
-                        if utils.config_placeholders()
-                        else ""
-                    )
-                ),
+                doc=lambda: self.strings["_cfg_cst_msg"]
+                + "\nPlaceholders: {ping}, {uptime}, {version}, {build}, {owner}, …",
+                validator=loader.validators.String(max_len=4096),
             ),
             loader.ConfigValue(
                 "banner_url",

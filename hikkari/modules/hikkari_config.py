@@ -854,6 +854,14 @@ class HikkariConfigMod(loader.Module):
             ],
         ]
 
+    def _clip_cfg_text(self, text: str, limit: int = 900) -> str:
+        if not text or len(text) <= limit:
+            return text
+        cut = text[: max(0, limit - 1)]
+        if "<" in cut and cut.rfind("<") > cut.rfind(">"):
+            cut = cut[: cut.rfind("<")]
+        return cut + "…"
+
     async def inline__configure_option(
         self,
         call: InlineCall,
@@ -867,7 +875,7 @@ class HikkariConfigMod(loader.Module):
         args = [
             utils.escape_html(config_opt),
             utils.escape_html(mod),
-            utils.escape_non_html(module.config.getdoc(config_opt)),
+            utils.escape_non_html(self._clip_cfg_text(str(module.config.getdoc(config_opt) or ""), 400)),
             self.prep_value(module.config.getdef(config_opt)),
             (
                 self.prep_value(module.config[config_opt])
@@ -949,6 +957,7 @@ class HikkariConfigMod(loader.Module):
                     else "configuring_option_lib"
                 )
             ].format(*args)
+        text = self._clip_cfg_text(text)
             text, pagination = self._paginate_text_markup(
                 text,
                 page,
