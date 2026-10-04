@@ -795,9 +795,13 @@ class HikkariWebMod(loader.Module):
             from ..version import __version__
             import os
 
-            tok = str(self.config.get("ngrok_token") or "").strip()
+            tok = str(self.config.get("ngrok_token") or "").strip().strip('"').strip("'")
             if not tok:
                 tok = (os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN") or "").strip()
+            # also from global config.json
+            if not tok:
+                with contextlib.suppress(Exception):
+                    tok = str(main.get_config_key("ngrok_token") or "").strip()
             if not tok:
                 await utils.answer(
                     status,

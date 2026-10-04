@@ -203,6 +203,8 @@ class HikkariConfigMod(loader.Module):
     ):
         # Heroku-compatible: assign first, then edit form
         try:
+            if isinstance(query, str):
+                query = query.strip()
             self.lookup(mod).config[option] = query
         except loader.validators.ValidationError as e:
             await call.edit(

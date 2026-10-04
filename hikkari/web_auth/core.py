@@ -101,16 +101,27 @@ def _ensure_ngrok() -> Optional[str]:
 
 def _ngrok_authtoken(override: str | None = None) -> Optional[str]:
     """Token priority: override → env → config.json."""
-    if override and str(override).strip():
-        return str(override).strip()
-    tok = os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN")
+    def _clean(t):
+        if t is None:
+            return None
+        s = str(t).strip().strip('"').strip("'").strip()
+        # accidental paste of whole export line
+        if "NGROK_AUTHTOKEN=" in s:
+            s = s.split("NGROK_AUTHTOKEN=", 1)[-1].strip().strip('"').strip("'")
+        return s or None
+
+    if override:
+        c = _clean(override)
+        if c:
+            return c
+    tok = _clean(os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN"))
     if tok:
-        return tok.strip()
+        return tok
     try:
         from .. import main as _main
-        tok = _main.get_config_key("ngrok_token") or _main.get_config_key("ngrok_authtoken")
+        tok = _clean(_main.get_config_key("ngrok_token") or _main.get_config_key("ngrok_authtoken"))
         if tok:
-            return str(tok).strip()
+            return tok
     except Exception:
         pass
     return None
