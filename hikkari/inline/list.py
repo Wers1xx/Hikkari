@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -277,7 +278,22 @@ class List(InlineUnit):
     ):
         match True:
             case _ if page == "close":
-                await self._delete_unit_message(call, unit_id=unit_id)
+                with contextlib.suppress(Exception):
+                    await call.answer()
+                deleted = False
+                with contextlib.suppress(Exception):
+                    deleted = await self._delete_unit_message(call, unit_id=unit_id)
+                if not deleted:
+                    # strip buttons as fallback
+                    with contextlib.suppress(Exception):
+                        await self._bot_client.edit_message(
+                            call.inline_message_id,
+                            "✖️",
+                            parse_mode="HTML",
+                            buttons=None,
+                        )
+                with contextlib.suppress(Exception):
+                    await self._unload_unit(unit_id)
                 return
             case _ if self._units[unit_id]["current_index"] < 0 or page >= len(
                 self._units[unit_id]["strings"]

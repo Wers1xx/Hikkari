@@ -316,6 +316,14 @@ class LoaderMod(loader.Module):
             ]
             for repo in repos
         ]
+        buttons.append(
+            [
+                {
+                    "text": "🔻 Close",
+                    "action": "close",
+                }
+            ]
+        )
         await self.inline.form(
             self.strings["choose_repo"],
             message,
