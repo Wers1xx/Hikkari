@@ -237,7 +237,7 @@ class HikkariWebAppMod(loader.Module):
                 with contextlib.suppress(Exception):
                     if self._ngrok_proc and self._ngrok_proc.poll() is None:
                         self._ngrok_proc.terminate()
-                base, proc = await start_ngrok(port, tok)
+                base, proc, _err = await start_ngrok(port, tok)
                 self._ngrok_proc = proc
                 self._public_base = base
                 if base:

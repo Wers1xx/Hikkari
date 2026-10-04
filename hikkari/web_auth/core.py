@@ -899,57 +899,29 @@ document.addEventListener('submit',function(e){{
             logger.warning("tunnel output (no URL): %s", " | ".join(buf[-15:]))
         return None
 
-    async def _tunnel_ngrok(self, retries: int = 2) -> Optional[str]:
-        """Optional if user has NGROK_AUTHTOKEN — not required."""
+    async def _tunnel_ngrok(self, retries: int = 3) -> Optional[str]:
+        """Reliable ngrok v3 tunnel using shared helper + authtoken file."""
         token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
         if not token:
+            self._tunnel_errors = ["ngrok: no authtoken"]
             return None
-        binary = _ensure_ngrok()
-        if not binary:
-            return None
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                [binary, "config", "add-authtoken", token],
-                capture_output=True,
-                timeout=15,
-                check=False,
-            )
         try:
-            # Unique web interface port so it does not clash with another ngrok
-            import random
-            inspect_port = random.randint(4045, 4099)
-            self._tunnel_proc = subprocess.Popen(
-                [
-                    binary,
-                    "http",
-                    str(self.port),
-                    f"--web-addr=127.0.0.1:{inspect_port}",
-                    "--log=stdout",
-                    "--log-format=logfmt",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            self._ngrok_inspect = inspect_port
-        except Exception:
-            logger.exception("ngrok Popen")
+            from ..webapp.ngrok_tunnel import start_ngrok
+            url, proc, err = await start_ngrok(int(self.port), token, retries=max(3, retries))
+            self._tunnel_proc = proc
+            if url:
+                self.require_token = True
+                self.public_url = f"{url.rstrip('/')}/?token={self.token}"
+                logger.info("ngrok OK: %s", self.public_url)
+                return self.public_url
+            self._tunnel_errors = [f"ngrok: {err or 'failed'}"]
+            logger.error("ngrok failed: %s", err)
             return None
-        url = await self._wait_ngrok_api(timeout=35, port=getattr(self, "_ngrok_inspect", 4040))
-        if not url:
-            url = await self._wait_url_from_proc(
-                timeout=20,
-                patterns=(r"https://[a-z0-9-]+\.ngrok(?:-free)?\.(?:app|io|dev)",),
-            )
-        if url:
-            self.public_url = (f"{url.rstrip('/')}/?token={self.token}" if self.require_token else f"{url.rstrip('/')}/")
-            return self.public_url
-        with contextlib.suppress(Exception):
-            if self._tunnel_proc:
-                self._tunnel_proc.terminate()
-        self._tunnel_proc = None
-        return None
+        except Exception as e:
+            logger.exception("ngrok")
+            self._tunnel_errors = [f"ngrok: {e}"]
+            return None
+
 
     async def _wait_ngrok_api(self, timeout: float = 25, port: int = 4040) -> Optional[str]:
         import json
