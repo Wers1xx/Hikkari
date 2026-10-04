@@ -18,6 +18,10 @@
 
 """Entry point. Checks for user and starts main script"""
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Python version.*end of life.*")
+
 import getpass
 import hashlib
 import os

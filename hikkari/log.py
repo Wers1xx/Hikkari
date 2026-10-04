@@ -628,3 +628,11 @@ def init():
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.captureWarnings(True)
+    # Mute noisy third-party FutureWarnings (google.api_core etc.)
+    logging.getLogger("py.warnings").setLevel(logging.ERROR)
+    try:
+        import warnings as _warnings
+        _warnings.filterwarnings("ignore", category=FutureWarning)
+        _warnings.filterwarnings("ignore", module=r"google\\.api_core.*")
+    except Exception:
+        pass
