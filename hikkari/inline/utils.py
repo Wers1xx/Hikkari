@@ -384,6 +384,28 @@ class Utils(InlineUnit):
 
         return reply_markup
 
+
+    def _clip_inline_text(
+        self: "InlineManager",
+        text: str | None,
+        *,
+        has_media: bool = False,
+    ) -> str | None:
+        """Telegram limits: 1024 caption with media, 4096 plain text."""
+        if text is None:
+            return None
+        if not isinstance(text, str):
+            text = str(text)
+        limit = 1024 if has_media else 4096
+        if len(text) <= limit:
+            return text
+        # Prefer cutting at tag boundary roughly
+        cut = text[: max(0, limit - 1)]
+        # avoid broken trailing partial tag
+        if "<" in cut and cut.rfind("<") > cut.rfind(">"):
+            cut = cut[: cut.rfind("<")]
+        return cut + "…"
+
     def sanitise_text(self: "InlineManager", text: str) -> str:
         # Keep <tg-emoji> for premium so custom emoji render in forms
         if getattr(getattr(self._client, "hikkari_me", None), "premium", False):
@@ -453,7 +475,9 @@ class Utils(InlineUnit):
             audio = {"url": audio}
 
         if isinstance(text, str):
-            text = self.sanitise_text(text)
+                        text = self.sanitise_text(text)
+            _has_media = bool(photo or file or video or audio or gif)
+            text = self._clip_inline_text(text, has_media=_has_media)
 
         media_params = [
             photo is None,
@@ -608,7 +632,7 @@ class Utils(InlineUnit):
                         e,
                     )
                 else:
-                    logger.warning(
+                    logger.debug(
                         "RPCError while editing inline message via inline_message_id: %s. "
                         "Attempting fallback via chat_id + message_id...",
                         e,
