@@ -16,6 +16,7 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+from pathlib import Path
 import asyncio
 import atexit as _atexit
 import contextlib
@@ -304,7 +305,7 @@ _ASSET_URLS = {
 }
 
 
-def ensure_builtin_asset(name: str) -> Path | None:
+def ensure_builtin_asset(name: str):
     """Find local asset or download once into BASE_PATH/assets."""
     name = (name or "").strip().lstrip("/")
     if not name or ".." in name or "/" in name or "\\" in name:
@@ -341,7 +342,7 @@ def ensure_builtin_asset(name: str) -> Path | None:
         return None
 
 
-def resolve_banner_media(banner) -> object | None:
+def resolve_banner_media(banner):
     """Resolve config banner → local file path or remote webpage media."""
     if not banner:
         return None
