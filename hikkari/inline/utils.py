@@ -475,7 +475,7 @@ class Utils(InlineUnit):
             audio = {"url": audio}
 
         if isinstance(text, str):
-                        text = self.sanitise_text(text)
+            text = self.sanitise_text(text)
             _has_media = bool(photo or file or video or audio or gif)
             text = self._clip_inline_text(text, has_media=_has_media)
 
