@@ -72,8 +72,17 @@ async def start_ngrok(port: int, token: str, retries: int = 3) -> tuple[Optional
         with contextlib.suppress(Exception):
             subprocess.run(["pkill", "-f", f"ngrok http {port}"], capture_output=True)
         try:
+            import random
+            inspect_port = random.randint(4045, 4099)
             proc = subprocess.Popen(
-                [binary, "http", str(port), "--log=stdout", "--log-format=logfmt"],
+                [
+                    binary,
+                    "http",
+                    str(port),
+                    f"--web-addr=127.0.0.1:{inspect_port}",
+                    "--log=stdout",
+                    "--log-format=logfmt",
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -83,7 +92,7 @@ async def start_ngrok(port: int, token: str, retries: int = 3) -> tuple[Optional
             logger.exception("ngrok start")
             continue
 
-        url = await _wait_api(timeout=30)
+        url = await _wait_api(timeout=35, port=inspect_port)
         if not url:
             url = await _wait_log(proc, timeout=20)
         if url:
@@ -95,14 +104,15 @@ async def start_ngrok(port: int, token: str, retries: int = 3) -> tuple[Optional
     return None, None
 
 
-async def _wait_api(timeout: float = 30) -> Optional[str]:
+async def _wait_api(timeout: float = 30, port: int = 4040) -> Optional[str]:
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout
+    api = f"http://127.0.0.1:{port}/api/tunnels"
     while loop.time() < deadline:
         try:
-            def fetch():
+            def fetch(api=api):
                 req = urllib.request.Request(
-                    "http://127.0.0.1:4040/api/tunnels",
+                    api,
                     headers={"User-Agent": "hikkari"},
                 )
                 with urllib.request.urlopen(req, timeout=2) as resp:

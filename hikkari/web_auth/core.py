@@ -915,16 +915,28 @@ document.addEventListener('submit',function(e){{
                 check=False,
             )
         try:
+            # Unique web interface port so it does not clash with another ngrok
+            import random
+            inspect_port = random.randint(4045, 4099)
             self._tunnel_proc = subprocess.Popen(
-                [binary, "http", str(self.port), "--log=stdout", "--log-format=logfmt"],
+                [
+                    binary,
+                    "http",
+                    str(self.port),
+                    f"--web-addr=127.0.0.1:{inspect_port}",
+                    "--log=stdout",
+                    "--log-format=logfmt",
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
             )
+            self._ngrok_inspect = inspect_port
         except Exception:
+            logger.exception("ngrok Popen")
             return None
-        url = await self._wait_ngrok_api(timeout=25)
+        url = await self._wait_ngrok_api(timeout=35, port=getattr(self, "_ngrok_inspect", 4040))
         if not url:
             url = await self._wait_url_from_proc(
                 timeout=20,
@@ -939,15 +951,16 @@ document.addEventListener('submit',function(e){{
         self._tunnel_proc = None
         return None
 
-    async def _wait_ngrok_api(self, timeout: float = 25) -> Optional[str]:
+    async def _wait_ngrok_api(self, timeout: float = 25, port: int = 4040) -> Optional[str]:
         import json
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout
+        api = f"http://127.0.0.1:{port}/api/tunnels"
         while loop.time() < deadline:
             try:
-                def fetch():
+                def fetch(api=api):
                     req = urllib.request.Request(
-                        "http://127.0.0.1:4040/api/tunnels",
+                        api,
                         headers={"User-Agent": "hikkari"},
                     )
                     with urllib.request.urlopen(req, timeout=2) as resp:
