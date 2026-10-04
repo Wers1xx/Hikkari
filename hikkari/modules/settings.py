@@ -1,3 +1,4 @@
+from pathlib import Path
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -108,8 +109,7 @@ class CoreMod(loader.Module):
         else:
             branch_text = self.strings["unstable"].format(version.branch)
 
-        from .. import main as _main
-        banner = _main.BASE_PATH / "assets" / "hikkari-cmd.jpg"
+        banner = utils.ensure_builtin_asset("hikkari-cmd.jpg")
         await utils.answer(
             message,
             self.strings["hikkari"].format(
@@ -123,7 +123,7 @@ class CoreMod(loader.Module):
                 f"{hikkaritl.__version__} #{hikkaritl.tl.alltlobjects.LAYER}",
             )
             + (branch_text),
-            file=str(banner) if banner.is_file() else None,
+            file=str(banner) if banner and Path(banner).is_file() else None,
             reply_to=getattr(message, "reply_to_msg_id", None),
         )
 

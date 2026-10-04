@@ -264,18 +264,92 @@ def safe_getattr(obj, attr, default=None):
         return default
 
 
+def _asset_search_dirs():
+    """All places where built-in media may live."""
+    dirs = []
+    try:
+        from .. import main as _main
+        base = Path(getattr(_main, "BASE_PATH", Path.cwd()))
+        dirs.append(base / "assets")
+        dirs.append(base / "hikkari" / "assets")
+    except Exception:
+        pass
+    here = Path(__file__).resolve()
+    # hikkari/utils/other.py → hikkari/assets, repo assets
+    dirs.append(here.parents[1] / "assets")  # hikkari/assets
+    dirs.append(here.parents[2] / "assets")  # repo/assets
+    dirs.append(Path.cwd() / "assets")
+    dirs.append(Path.cwd() / "hikkari" / "assets")
+    # unique preserve order
+    seen = set()
+    out = []
+    for d in dirs:
+        try:
+            key = str(d.resolve())
+        except Exception:
+            key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
+_ASSET_URLS = {
+    "hikkari-info.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
+    "hikkari-started.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+    "hikkari-config.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg",
+    "hikkari-cmd.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-cmd.jpg",
+    "hikkari-ava.png": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
+    "bot_avatar.png": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
+}
+
+
+def ensure_builtin_asset(name: str) -> Path | None:
+    """Find local asset or download once into BASE_PATH/assets."""
+    name = (name or "").strip().lstrip("/")
+    if not name or ".." in name or "/" in name or "\\" in name:
+        return None
+
+    for d in _asset_search_dirs():
+        p = d / name
+        if p.is_file() and p.stat().st_size > 100:
+            return p
+
+    # Download into primary assets dir
+    try:
+        from .. import main as _main
+        dest_dir = Path(getattr(_main, "BASE_PATH", Path.cwd())) / "assets"
+    except Exception:
+        dest_dir = Path.cwd() / "assets"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / name
+
+    url = _ASSET_URLS.get(name)
+    if not url:
+        return None
+    try:
+        import urllib.request
+        logger = __import__("logging").getLogger(__name__)
+        logger.info("Downloading builtin asset %s …", name)
+        data = urllib.request.urlopen(url, timeout=60).read()
+        if len(data) < 100:
+            return None
+        dest.write_bytes(data)
+        return dest
+    except Exception:
+        __import__("logging").getLogger(__name__).exception("asset download %s", name)
+        return None
+
+
 def resolve_banner_media(banner) -> object | None:
-    """Resolve config banner to Telethon media: local asset path or URL/webpage."""
+    """Resolve config banner → local file path or remote webpage media."""
     if not banner:
         return None
-    from pathlib import Path
-    from .. import main as _main
     try:
         from hikkaritl.tl.types import InputMediaWebPage
     except Exception:
         InputMediaWebPage = None
 
-    # RandomLinkList / list — pick one
     if isinstance(banner, (list, tuple)) and banner:
         import random
         banner = random.choice(list(banner))
@@ -285,21 +359,28 @@ def resolve_banner_media(banner) -> object | None:
         return None
 
     if s.startswith("local:"):
-        path = Path(_main.BASE_PATH) / "assets" / s[6:].strip()
-        if path.is_file():
-            return str(path)
-        # fallback: package-relative
-        alt = Path(__file__).resolve().parents[1] / "assets" / s[6:].strip()
-        if alt.is_file():
-            return str(alt)
-        return None
+        name = s[6:].strip()
+        path = ensure_builtin_asset(name)
+        return str(path) if path else None
 
-    assets = Path(_main.BASE_PATH) / "assets"
-    local_try = assets / s
-    if local_try.is_file():
-        return str(local_try)
+    # bare filename
+    if not s.startswith(("http://", "https://")) and ("." in s) and ("/" not in s):
+        path = ensure_builtin_asset(s)
+        if path:
+            return str(path)
+
+    # try as path under assets
+    path = ensure_builtin_asset(Path(s).name) if not s.startswith("http") else None
+    if path:
+        return str(path)
 
     if s.startswith(("http://", "https://")):
+        # Prefer local mirror if we know the filename
+        name = s.rsplit("/", 1)[-1].split("?", 1)[0]
+        if name in _ASSET_URLS:
+            local = ensure_builtin_asset(name)
+            if local:
+                return str(local)
         if InputMediaWebPage is not None:
             return InputMediaWebPage(s, optional=True)
         return s

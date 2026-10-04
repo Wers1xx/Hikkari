@@ -1143,7 +1143,8 @@ class Hikkari:
                     .get_logs_topic_id_by_client(client.tg_id)
                 )
 
-                started_banner = BASE_PATH / "assets" / "hikkari-started.jpg"
+                from .utils.other import ensure_builtin_asset as _eba
+                started_banner = _eba("hikkari-started.jpg")
                 caption = (
                         "{} <b>{} started!</b>\n\n<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> <b>GitHub commit SHA: <a"
                         ' href="https://github.com/Wers1xx/Hikkari/commit/{}">{}</a></b>\n<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji>'
@@ -1160,7 +1161,7 @@ class Hikkari:
                         upd,
                         "." if pref is None else pref,
                     )
-                if started_banner.is_file():
+                if started_banner and Path(started_banner).is_file():
                     await client.hikkari_inline.bot.send_photo(
                         log_chat_id,
                         str(started_banner),

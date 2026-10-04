@@ -21,6 +21,7 @@ import contextlib
 import difflib
 import functools
 import typing
+from pathlib import Path
 from math import ceil
 
 from hikkaritl.tl.types import Message
@@ -1414,11 +1415,11 @@ class HikkariConfigMod(loader.Module):
         ]
 
         from .. import main as _main
-        _cfg_banner = _main.BASE_PATH / "assets" / "hikkari-config.jpg"
+        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
         await utils.answer(
             call,
             self.strings["choose_core"],
-            photo=str(_cfg_banner) if _cfg_banner.is_file() else None,
+            photo=str(_cfg_banner) if _cfg_banner and Path(_cfg_banner).is_file() else None,
             reply_markup=[
                 [
                     {
@@ -1473,8 +1474,8 @@ class HikkariConfigMod(loader.Module):
         form_kwargs.pop("inline_message_id", None)
 
         from .. import main as _main
-        _cfg_banner = _main.BASE_PATH / "assets" / "hikkari-config.jpg"
-        if "photo" not in form_kwargs and _cfg_banner.is_file():
+        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
+        if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
             form_kwargs["photo"] = str(_cfg_banner)
         await self.inline.form(
             draft.text,

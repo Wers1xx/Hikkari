@@ -292,7 +292,8 @@ class TokenObtainment(InlineUnit):
             try:
                 await fw_protect()
                 from .. import main
-                ava = main.BASE_PATH / "assets" / "hikkari-ava.png"
+                from ..utils.other import ensure_builtin_asset
+                ava = ensure_builtin_asset("hikkari-ava.png")
                 if "DOCKER" in os.environ:
                     m = await conv.send_file(
                         "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/master/assets/hikkari-ava.png"

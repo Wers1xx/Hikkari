@@ -163,7 +163,8 @@ class Database(dict):
 
         if not content_channel:
             from . import main as _main
-            _ava = _main.BASE_PATH / "assets" / "hikkari-ava.png"
+            from .utils.other import ensure_builtin_asset as _eba
+            _ava = _eba("hikkari-ava.png")
             _ava_bytes = _ava.read_bytes() if _ava.is_file() else None
             content_channel, _ = await utils.asset_channel(
                 client=self._client,
