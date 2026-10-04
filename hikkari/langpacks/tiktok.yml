@@ -276,7 +276,7 @@ presets:
   folder_load_usage: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Папку укажи куда модуль кинуть 📂 </b> <code>{prefix}fl <папка></code>"
   folder_not_found: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Папки {} нету 😭</b>"
   no_modules_in_folder: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>В папочке {} модулей нету 😿</b>"
-  folder: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Папка</b> {}\n\n<tg-emoji emoji-id=5134452506935427991>✨</tg-emoji> <b>Ответь {prefix}lp на сообщение это для установки 💫</b>"
+  folder: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Папка</b> {}\n\n<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Ответь {prefix}lp на сообщение это для установки 💫</b>"
   remove_from_folder_usage: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Укажи папку и модуль для удаления. </b> <code>{prefix}removefromfolder <папка> <модуль></code>"
   removed_from_folder: "<tg-emoji emoji-id=5436040291507247633>🎉</tg-emoji> <b>Модуль {} удален из папки</b> <code>{}</code>"
   module_not_in_folder: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Модуль {} не находится в папке {}</b>"
@@ -311,7 +311,7 @@ settings:
   aliases_created: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Добавил {count} алиаса:</b>\n<blockquote expandable>{aliases}</blockquote>"
   aliases_created_line: "{aliases} для {command}"
   aliases_list: "<b>🔗 Импортнул алиасы:</b>\n\n<blockquote expandable>{}</blockquote>"
-  aliases_file: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Твои алиасы</b>\n\n<tg-emoji emoji-id=5134452506935427991>✨</tg-emoji> <b>{prefix}la в ответ на это сообщение для импорта</b>"
+  aliases_file: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Твои алиасы</b>\n\n<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>{prefix}la в ответ на это сообщение для импорта</b>"
   aliases: "<b>🔗 Твои алиасы:</b>\n"
   happy_beta: "\n\n<tg-emoji emoji-id=5465188915990255885>🌟</tg-emoji> <b>Ты теперь счастливый юзер <code>{}</code> версии, это имба</b> ✨"
   no_command: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Нет такой команды</b> <code>{}</code>"
@@ -560,8 +560,8 @@ heroku_info:
   name: HerokuInfo
   _cls_doc: Показать инфу о юзерботе
 loader:
-  link: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Файл</b> {class_name}\n\n<tg-emoji emoji-id=5134452506935427991>✨</tg-emoji> <b>{prefix}lm реплаем сюда, чтоб поставить</b>\n\n<tg-emoji emoji-id=4916086774649848789>🔗</tg-emoji> <code>{prefix}dlm {url}</code>\n\n{not_exact}"
-  file: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Файл</b> {class_name}\n\n<tg-emoji emoji-id=5134452506935427991>✨</tg-emoji> <b>{prefix}lm реплаем сюда, чтоб поставить</b>\n\n{not_exact}"
+  link: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Файл</b> {class_name}\n\n<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>{prefix}lm реплаем сюда, чтоб поставить</b>\n\n<tg-emoji emoji-id=4916086774649848789>🔗</tg-emoji> <code>{prefix}dlm {url}</code>\n\n{not_exact}"
+  file: "<tg-emoji emoji-id=5256113064821926998>📁</tg-emoji> <b>Файл</b> {class_name}\n\n<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>{prefix}lm реплаем сюда, чтоб поставить</b>\n\n{not_exact}"
   finding_module_in_repos: "<tg-emoji emoji-id=5873204392429096339>🔄</tg-emoji> Ищу в репо..."
   loading_module_via_file: "<tg-emoji emoji-id=5873204392429096339>🔄</tg-emoji> Гружу..."
   ml_load_module: "<tg-emoji emoji-id=5873204392429096339>🔄</tg-emoji> Качаю как файл..."
@@ -576,7 +576,7 @@ loader:
   provide_module: "<tg-emoji emoji-id=5312383351217201533>⚠️</tg-emoji> <b>Че качать то?</b>"
   bad_unicode: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Кодировка кривая</b>"
   load_failed: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Не загрузилось (F). Чекни логи.</b>"
-  loaded: "<tg-emoji emoji-id=5134452506935427991>✨</tg-emoji> <b>Модуль</b> <code>{}</code>{} <b>залетел {}</b>{}{}{}{}{}{}{}{}"
+  loaded: "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Модуль</b> <code>{}</code>{} <b>залетел {}</b>{}{}{}{}{}{}{}{}"
   no_class: "<b>Че выгружать?</b>"
   unloaded: "{} <b>Модуль {} выкинул.</b>"
   unload_suggestions: "<tg-emoji emoji-id=5253780051471642059>❌</tg-emoji> <b>Модуль</b> <code>{}</code> <b>не нашел.</b>\n\n<b>Может, ты про:</b>"
