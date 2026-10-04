@@ -124,8 +124,8 @@ class TestMod(loader.Module):
             loader.ConfigValue(
                 "banner_url",
                 [
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
+                    "local:hikkari-started.jpg",
+                    "local:hikkari-info.jpg",
                 ],
                 lambda: self.strings["banner_url"],
                 validator=loader.validators.RandomLink(),
@@ -344,12 +344,9 @@ class TestMod(loader.Module):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
         message = await utils.answer(message, self.config["ping_emoji"])
-        banner = str(self.config["banner_url"]) if self.config["banner_url"] else None
-
-        if self.config["banner_url"] and self.config["quote_media"] is True:
-            banner = InputMediaWebPage(str(self.config["banner_url"]), optional=True)
-        elif not self.config["banner_url"]:
-            banner = None
+        banner = utils.resolve_banner_media(self.config["banner_url"])
+        if banner and self.config.get("quote_media") is True and isinstance(banner, str) and banner.startswith(("http://", "https://")):
+            banner = InputMediaWebPage(banner, optional=True)
 
         from .. import version as ver_mod
         import hikkaritl

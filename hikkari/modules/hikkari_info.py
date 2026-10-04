@@ -58,8 +58,8 @@ class HikkariInfoMod(loader.Module):
             loader.ConfigValue(
                 "banner_url",
                 [
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+                    "local:hikkari-info.jpg",
+                    "local:hikkari-started.jpg",
                 ],
                 lambda: self.strings.get("_cfg_banner", self.strings.get("banner_url", "Banner URL(s)")),
                 validator=loader.validators.RandomLink(),
@@ -203,28 +203,16 @@ class HikkariInfoMod(loader.Module):
         from .. import main as _main
 
         banner = self.config["banner_url"]
-        # Heroku-style media selection
-        if banner and self.config["quote_media"] is True:
-            banner_s = str(banner)
-            if banner_s.startswith("local:"):
-                # local files cannot be quote webpage — send as file
-                media = _main.BASE_PATH / "assets" / banner_s[6:]
-                if not media.is_file():
-                    media = None
-            elif banner_s.startswith(("http://", "https://")):
-                media = InputMediaWebPage(banner_s, optional=True)
-            else:
-                media = InputMediaWebPage(banner_s, optional=True)
-        elif banner:
-            banner_s = str(banner)
-            if banner_s.startswith("local:"):
-                media = _main.BASE_PATH / "assets" / banner_s[6:]
-                if not media.is_file():
-                    media = None
-            else:
-                media = banner_s
-        else:
-            media = None
+        media = utils.resolve_banner_media(banner)
+        # quote_media only wraps remote http(s) as webpage; local files stay as file=
+        if (
+            media
+            and self.config["quote_media"] is True
+            and isinstance(media, str)
+            and media.startswith(("http://", "https://"))
+        ):
+            from hikkaritl.tl.types import InputMediaWebPage
+            media = InputMediaWebPage(media, optional=True)
 
         try:
             match True:

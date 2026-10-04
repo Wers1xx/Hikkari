@@ -19,7 +19,7 @@
 # Utilites
 
 from .messages import *
-from .other import *
+from .other import resolve_banner_media, *
 from .entity import *
 from .hikkari import *
 from .platform import *

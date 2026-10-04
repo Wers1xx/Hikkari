@@ -409,6 +409,13 @@ class Link(Validator):
 
     @staticmethod
     def _validate(value: ConfigAllowedTypes, /) -> str:
+        value = str(value).strip()
+        # Built-in local asset: local:filename.jpg
+        if value.startswith("local:"):
+            name = value[6:].strip()
+            if not name or ".." in name or "/" in name or "\\" in name:
+                raise ValidationError(f"Passed value ({value}) is not a valid local asset")
+            return value
         try:
             if not utils.check_url(value):
                 raise Exception("Invalid URL")

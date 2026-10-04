@@ -262,3 +262,46 @@ def safe_getattr(obj, attr, default=None):
         return getattr(obj, attr, default)
     except AttributeError:
         return default
+
+
+def resolve_banner_media(banner) -> object | None:
+    """Resolve config banner to Telethon media: local asset path or URL/webpage."""
+    if not banner:
+        return None
+    from pathlib import Path
+    from .. import main as _main
+    try:
+        from hikkaritl.tl.types import InputMediaWebPage
+    except Exception:
+        InputMediaWebPage = None
+
+    # RandomLinkList / list — pick one
+    if isinstance(banner, (list, tuple)) and banner:
+        import random
+        banner = random.choice(list(banner))
+
+    s = str(banner).strip()
+    if not s:
+        return None
+
+    if s.startswith("local:"):
+        path = Path(_main.BASE_PATH) / "assets" / s[6:].strip()
+        if path.is_file():
+            return str(path)
+        # fallback: package-relative
+        alt = Path(__file__).resolve().parents[1] / "assets" / s[6:].strip()
+        if alt.is_file():
+            return str(alt)
+        return None
+
+    assets = Path(_main.BASE_PATH) / "assets"
+    local_try = assets / s
+    if local_try.is_file():
+        return str(local_try)
+
+    if s.startswith(("http://", "https://")):
+        if InputMediaWebPage is not None:
+            return InputMediaWebPage(s, optional=True)
+        return s
+
+    return s
