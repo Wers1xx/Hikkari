@@ -439,13 +439,7 @@ def create_app(module: Any) -> web.Application:
             logger.exception("x0.at upload failed")
             err = str(e)[:200]
 
-        # Optional: also send to Saved Messages for convenience
-        with contextlib.suppress(Exception):
-            cap = f"WebApp upload: {safe}"
-            if x0_url:
-                cap += f"\n{x0_url}"
-            await st.client.send_file("me", str(dest), caption=cap)
-
+        # Do not send uploads to Saved Messages
         if not x0_url:
             return _json({"ok": False, "error": err or "x0.at failed", "local": str(dest)}, 502)
         return _json(

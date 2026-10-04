@@ -832,14 +832,29 @@ class Hikkari:
         print(_c("Login methods:"))
         print(_c("  1) Phone number (terminal)"))
         print(_c("  2) QR code"))
+        print(_c("  3) WebUI (ngrok link)"))
 
         user_choice = input(
-            _c("Choose [1/2] (default 1): ")
+            _c("Choose [1/2/3] (default 1): ")
         ).strip().lower()
 
-        if False:  # WebUI login removed — phone / QR only
+        if user_choice in {"3", "w", "web", "webui", "weburl"}:
             try:
                 from .web_auth import WebAuth
+                import os as _os
+
+                ngrok_tok = (
+                    _os.environ.get("NGROK_AUTHTOKEN")
+                    or _os.environ.get("NGROK_TOKEN")
+                    or ""
+                ).strip()
+                if not ngrok_tok:
+                    print(_c("Enter ngrok Authtoken (https://dashboard.ngrok.com):"))
+                    ngrok_tok = input(_c("NGROK_AUTHTOKEN: ")).strip()
+                if not ngrok_tok:
+                    print(_c("ngrok token required for WebUI."))
+                    return False
+                _os.environ["NGROK_AUTHTOKEN"] = ngrok_tok
 
                 await client.disconnect()
                 _need_api = not (
@@ -856,6 +871,9 @@ class Hikkari:
                     app_version=".".join(map(str, __version__)),
                     need_api=_need_api,
                 )
+                web.weburl_mode = "ngrok"
+                web.ngrok_token = ngrok_tok
+                web.require_token = True
                 client = await web.run_until_login(timeout=900)
                 if client is None:
                     print(_c("WebUI login failed or timed out."))

@@ -21,7 +21,7 @@
 Rule: each update/fix bumps patch by +0.0.1 (e.g. 1.0.30 → 1.0.31) (x.y.z → x.y.z+1).
 """
 
-__version__ = (1, 0, 85)
+__version__ = (1, 0, 86)
 
 import os
 

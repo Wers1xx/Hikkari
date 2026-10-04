@@ -587,15 +587,25 @@ document.addEventListener('submit',function(e){{
         Local (UserLand) → ngrok with authtoken (required).
         """
         mode = (self.weburl_mode or "auto").strip().lower()
+        # Always prefer ngrok when token is available / mode=ngrok
+        if mode in ("tunnel", "ngrok", "local") or _ngrok_authtoken(getattr(self, "ngrok_token", None)):
+            self.require_token = True
+            url = await self._tunnel_ngrok(retries=max(2, retries))
+            if url:
+                return url
+            token = _ngrok_authtoken(getattr(self, "ngrok_token", None))
+            if not token:
+                self._tunnel_errors = ["нужен ngrok_token"]
+            else:
+                self._tunnel_errors = ["ngrok failed"]
+            return None
+
         if mode == "ip":
             local = False
-        elif mode in ("tunnel", "ngrok", "local"):
-            local = True
         else:
             local = self._is_local_hosting()
 
         if not local:
-            # VPS: plain http://IP:PORT/ — no token in the link
             self.require_token = False
             url = self._url_from_ip(strict_public=not bool((self.public_host or "").strip()))
             if url:
@@ -604,7 +614,6 @@ document.addEventListener('submit',function(e){{
             self._tunnel_errors = ["vps: no public IP (set weburl_public_host)"]
             return None
 
-        # Local UserLand: ngrok — token still on URL for safety
         self.require_token = True
         url = await self._tunnel_ngrok(retries=max(2, retries))
         if url:

@@ -70,10 +70,18 @@ class HikkariWebAppMod(loader.Module):
                 lambda: "Start WebApp with userbot",
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "ngrok_token",
+                "",
+                lambda: "ngrok Authtoken for public WebApp URL",
+                validator=loader.validators.Hidden(loader.validators.String()),
+            ),
         )
         self._runner = None
         self._web_token = None
         self._web_view_token = None
+        self._ngrok_proc = None
+        self._public_base = None  # https://xxx.ngrok-free.app
 
     async def client_ready(self):
         self._web_token = self.get("token")
@@ -132,6 +140,8 @@ class HikkariWebAppMod(loader.Module):
 
     def _url(self, *, admin: bool = True) -> str:
         tok = self._web_token if admin else self._web_view_token
+        if self._public_base:
+            return f"{self._public_base.rstrip('/')}/?token={tok}"
         port = getattr(self, "_bound_port", None) or int(self.config["port"])
         return f"http://{self._public_host()}:{port}/?token={tok}"
 
@@ -214,9 +224,36 @@ class HikkariWebAppMod(loader.Module):
             str(self.config["host"]),
             port,
         )
+        # Public tunnel via ngrok if token set
+        self._public_base = None
+        tok = str(self.config.get("ngrok_token") or "").strip()
+        if not tok:
+            import os
+            tok = (os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN") or "").strip()
+        if tok:
+            try:
+                from ..webapp.ngrok_tunnel import start_ngrok
+                # stop previous
+                with contextlib.suppress(Exception):
+                    if self._ngrok_proc and self._ngrok_proc.poll() is None:
+                        self._ngrok_proc.terminate()
+                base, proc = await start_ngrok(port, tok)
+                self._ngrok_proc = proc
+                self._public_base = base
+                if base:
+                    logger.info("WebApp ngrok: %s", base)
+                else:
+                    logger.warning("WebApp ngrok failed — local URL only")
+            except Exception:
+                logger.exception("WebApp ngrok")
         logger.info("WebApp up at %s", self._url(admin=True))
 
     async def _stop_server(self):
+        with contextlib.suppress(Exception):
+            if self._ngrok_proc and self._ngrok_proc.poll() is None:
+                self._ngrok_proc.terminate()
+        self._ngrok_proc = None
+        self._public_base = None
         if self._runner is None:
             return
         with contextlib.suppress(Exception):

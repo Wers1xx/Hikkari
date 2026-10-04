@@ -54,6 +54,16 @@ class HikkariWebMod(loader.Module):
 
     strings = {"name": "HikkariAccounts"}
 
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "ngrok_token",
+                "",
+                lambda: "ngrok Authtoken for .weburl public link",
+                validator=loader.validators.Hidden(loader.validators.String()),
+            ),
+        )
+
     @loader.command()
     async def addacc(self, message: Message):
         if "JAMHOST" in os.environ:
@@ -766,3 +776,102 @@ class HikkariWebMod(loader.Module):
             return
 
         await call.edit(self.strings["accdel_done"].format(uid=target_id))
+
+    @loader.command()
+    async def weburl(self, message: Message):
+        """Public WebUI login link via ngrok (owner only)"""
+        if not self._owner_only(message):
+            await utils.answer(message, self.strings["owner_only"])
+            return
+
+        status = await utils.answer(
+            message,
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>WebUI…</b>\n"
+            "Поднимаю ngrok-туннель…",
+        )
+        try:
+            from ..web_auth import WebAuth
+            from .._internal import restart
+            from ..version import __version__
+            import os
+
+            tok = str(self.config.get("ngrok_token") or "").strip()
+            if not tok:
+                tok = (os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_TOKEN") or "").strip()
+            if not tok:
+                await utils.answer(
+                    status,
+                    "🚫 <b>Нужен ngrok_token</b>\n\n"
+                    "<code>.cfg HikkariAccounts</code> → <code>ngrok_token</code>\n"
+                    "или <code>export NGROK_AUTHTOKEN=…</code>\n"
+                    "https://dashboard.ngrok.com",
+                )
+                return
+
+            os.environ["NGROK_AUTHTOKEN"] = tok
+            web = WebAuth(
+                main.hikkari.api_token.ID,
+                main.hikkari.api_token.HASH,
+                proxy=getattr(main.hikkari, "proxy", None),
+                connection=getattr(main.hikkari, "conn", None),
+                device_model="Hikkari",
+                app_version=".".join(map(str, __version__)),
+                need_api=False,
+            )
+            web.weburl_mode = "ngrok"
+            web.ngrok_token = tok
+            web.require_token = True
+            await web.start_server()
+            public = await web.start_tunnel(retries=3)
+            if not public:
+                await web.stop()
+                errs = getattr(web, "_tunnel_errors", []) or []
+                await utils.answer(
+                    status,
+                    "🚫 <b>ngrok не поднялся</b>\n"
+                    + ("<code>" + utils.escape_html(" | ".join(errs[:4])) + "</code>" if errs else ""),
+                )
+                return
+
+            href = utils.escape_html(public)
+            await utils.answer(
+                status,
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
+                f'<a href="{href}">✨ WebUI Hikkari</a>\n'
+                f"<code>{href}</code>\n\n"
+                "<i>ngrok · ~15 мин</i>",
+                parse_mode="HTML",
+                link_preview=False,
+            )
+
+            async def _wait():
+                try:
+                    await asyncio.wait_for(web.done.wait(), timeout=900)
+                except asyncio.TimeoutError:
+                    await web.stop()
+                    return
+                if not web.success or web.client is None:
+                    await web.stop()
+                    return
+                client = web.client
+                await web.stop()
+                try:
+                    me = await client.get_me()
+                    client._tg_id = me.id
+                    client.tg_id = me.id
+                    client.hikka_me = me
+                    client.hikkari_me = me
+                    await main.hikkari.save_client_session(client, delay_restart=False)
+                    await asyncio.sleep(1)
+                    restart()
+                except Exception:
+                    logger.exception("weburl save")
+
+            asyncio.ensure_future(_wait())
+        except Exception as e:
+            logger.exception("weburl")
+            await utils.answer(
+                status,
+                f"🚫 <b>WebUI error:</b> <code>{utils.escape_html(str(e))}</code>",
+            )
+
