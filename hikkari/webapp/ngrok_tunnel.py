@@ -1,5 +1,5 @@
 # ©️ Wers1xx, 2025-2026
-# Simple reliable ngrok helper (v3 agent)
+# Reliable ngrok v3 helper — log file based (works in Docker)
 
 from __future__ import annotations
 
@@ -9,12 +9,11 @@ import json
 import logging
 import os
 import platform
-import queue
 import re
 import shutil
 import stat
 import subprocess
-import threading
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -51,7 +50,9 @@ def ensure_ngrok() -> Optional[str]:
         arch = "amd64"
     url = f"https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-{arch}.zip"
     try:
-        import io, zipfile
+        import io
+        import zipfile
+
         logger.info("Downloading ngrok linux-%s …", arch)
         data = urllib.request.urlopen(url, timeout=180).read()
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
@@ -68,39 +69,65 @@ def ensure_ngrok() -> Optional[str]:
 
 
 def _prepare_token(token: str) -> Path:
-    token = token.strip()
-    # Official path
+    token = token.strip().strip('"').strip("'")
     cfg_dir = Path.home() / ".config" / "ngrok"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     cfg = cfg_dir / "ngrok.yml"
-    # ngrok agent v3 format
+    # Both v2-style and agent block for compatibility
     cfg.write_text(
         f'version: "2"\nauthtoken: {token}\n',
         encoding="utf-8",
     )
     os.environ["NGROK_AUTHTOKEN"] = token
-    # Do NOT force NGROK_CONFIG to project path — use default home config
     os.environ.pop("NGROK_CONFIG", None)
     return cfg
 
 
-def _kill_old_ngrok(binary: str) -> None:
-    with contextlib.suppress(Exception):
-        subprocess.run(["pkill", "-f", "ngrok http"], capture_output=True, timeout=5)
-    with contextlib.suppress(Exception):
-        subprocess.run(["killall", "ngrok"], capture_output=True, timeout=5)
-    time.sleep(0.6)
-
-
-def _reader_thread(proc: subprocess.Popen, q: queue.Queue) -> None:
+def _read_tail(path: Path, n: int = 40) -> str:
     try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            q.put(line)
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        return " | ".join(lines[-n:])
     except Exception:
-        pass
-    finally:
-        q.put(None)
+        return ""
+
+
+def _find_url_in_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = _URL_RE.search(text)
+    if m:
+        return m.group(0)
+    m2 = re.search(r'"url"\s*:\s*"(https://[^"]+ngrok[^"]+)"', text, re.I)
+    if m2:
+        return m2.group(1)
+    m3 = re.search(r"url=(https://\S*ngrok\S*)", text, re.I)
+    if m3:
+        return m3.group(1).strip().rstrip('",')
+    return None
+
+
+async def _api_url(web_port: int = 4040) -> Optional[str]:
+    loop = asyncio.get_event_loop()
+
+    def fetch():
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{web_port}/api/tunnels",
+            headers={"User-Agent": "hikkari"},
+        )
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            return json.loads(resp.read().decode())
+
+    try:
+        data = await loop.run_in_executor(None, fetch)
+    except Exception:
+        return None
+    for tun in data.get("tunnels") or []:
+        pub = (tun.get("public_url") or "").rstrip("/")
+        if pub.startswith("https://"):
+            return pub
+        if pub.startswith("http://") and "ngrok" in pub:
+            return pub.replace("http://", "https://", 1)
+    return None
 
 
 async def start_ngrok(
@@ -108,42 +135,60 @@ async def start_ngrok(
     token: str,
     retries: int = 3,
 ) -> tuple[Optional[str], Optional[subprocess.Popen], str]:
-    token = (token or "").strip()
+    token = (token or "").strip().strip('"').strip("'")
     if not token:
         return None, None, "empty authtoken"
 
     binary = ensure_ngrok()
     if not binary:
-        return None, None, "ngrok binary not found / download failed"
+        return None, None, "ngrok binary missing"
 
-    _prepare_token(token)
+    cfg = _prepare_token(token)
 
-    # Also register via CLI (best-effort)
+    # Diagnose once
+    diag = []
     with contextlib.suppress(Exception):
-        r = subprocess.run(
+        ver = subprocess.run(
+            [binary, "version"], capture_output=True, text=True, timeout=15
+        )
+        diag.append(f"ver={(ver.stdout or ver.stderr or '').strip()[:80]}")
+    with contextlib.suppress(Exception):
+        # register token via CLI (ignore result)
+        subprocess.run(
             [binary, "config", "add-authtoken", token],
             capture_output=True,
             text=True,
             timeout=25,
         )
-        logger.info("add-authtoken rc=%s out=%s err=%s", r.returncode, (r.stdout or "")[:120], (r.stderr or "")[:120])
-
-    # version for logs
-    with contextlib.suppress(Exception):
-        ver = subprocess.run([binary, "version"], capture_output=True, text=True, timeout=10)
-        logger.info("ngrok version: %s", (ver.stdout or ver.stderr or "").strip())
 
     last_err = "unknown"
-    for attempt in range(1, retries + 1):
-        _kill_old_ngrok(binary)
+    log_dir = Path(tempfile.gettempdir()) / "hikkari_ngrok"
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Point at localhost explicitly — works on UserLand / Docker
-        target = f"127.0.0.1:{int(port)}"
+    for attempt in range(1, retries + 1):
+        log_file = log_dir / f"ngrok_{port}_{attempt}.log"
+        with contextlib.suppress(Exception):
+            if log_file.is_file():
+                log_file.unlink()
+
+        # free inspect port if previous zombie held it — do NOT pkill all ngrok mid-run
         env = os.environ.copy()
         env["NGROK_AUTHTOKEN"] = token
 
-        # Default web interface 4040 — no custom --web-addr
-        cmd = [binary, "http", target, "--log=stdout", "--log-format=logfmt"]
+        # Explicit --config so Docker/home paths always match
+        # Log to file (stdout often empty when daemonized / buffered)
+        cmd = [
+            binary,
+            "http",
+            f"127.0.0.1:{int(port)}",
+            "--log",
+            str(log_file),
+            "--log-format",
+            "logfmt",
+            "--log-level",
+            "info",
+            f"--config={cfg}",
+        ]
         logger.info("ngrok try %s: %s", attempt, " ".join(cmd))
 
         try:
@@ -152,107 +197,56 @@ async def start_ngrok(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,
                 env=env,
+                start_new_session=True,
             )
         except Exception as e:
-            last_err = f"popen failed: {e}"
+            last_err = f"popen: {e}"
             continue
 
-        q: queue.Queue = queue.Queue()
-        threading.Thread(target=_reader_thread, args=(proc, q), daemon=True).start()
+        url = None
+        deadline = time.time() + 40
+        while time.time() < deadline:
+            # died?
+            if proc.poll() is not None:
+                tail = _read_tail(log_file)
+                out = ""
+                with contextlib.suppress(Exception):
+                    out = (proc.stdout.read() if proc.stdout else "") or ""
+                last_err = (
+                    f"exit={proc.returncode} log={tail or out or '(empty)'} "
+                    f"{' '.join(diag)}"
+                )
+                logger.error("ngrok attempt %s failed: %s", attempt, last_err)
+                break
 
-        url = await _wait(proc, q, timeout=45)
+            # log file
+            if log_file.is_file():
+                url = _find_url_in_text(log_file.read_text(encoding="utf-8", errors="ignore"))
+                if url:
+                    break
+
+            # local API
+            url = await _api_url(4040)
+            if url:
+                break
+
+            await asyncio.sleep(0.35)
+        else:
+            # timeout still running
+            url = await _api_url(4040) or _find_url_in_text(_read_tail(log_file, 80))
+            if not url:
+                with contextlib.suppress(Exception):
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                last_err = f"timeout log={_read_tail(log_file)} {' '.join(diag)}"
+                logger.error("ngrok attempt %s timeout: %s", attempt, last_err)
+                continue
+
         if url:
-            logger.info("ngrok public URL: %s", url)
+            logger.info("ngrok URL: %s", url)
             return url.rstrip("/"), proc, ""
 
-        # Dump what we saw
-        lines = []
-        while True:
-            try:
-                line = q.get_nowait()
-            except queue.Empty:
-                break
-            if line is None:
-                break
-            lines.append(line.strip())
-
-        rc = proc.poll()
-        with contextlib.suppress(Exception):
-            proc.terminate()
-            proc.wait(timeout=3)
-
-        tail = " | ".join(lines[-20:]) if lines else "(no output)"
-        last_err = f"exit={rc} log={tail[:500]}"
-        logger.error("ngrok attempt %s failed: %s", attempt, last_err)
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.8)
 
     return None, None, last_err
-
-
-async def _wait(proc: subprocess.Popen, q: queue.Queue, timeout: float = 45) -> Optional[str]:
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + timeout
-    collected = []
-
-    while loop.time() < deadline:
-        # stdout lines
-        try:
-            while True:
-                line = q.get_nowait()
-                if line is None:
-                    break
-                line = line.strip()
-                collected.append(line)
-                logger.debug("ngrok: %s", line)
-                m = _URL_RE.search(line)
-                if m:
-                    return m.group(0)
-                # url=https://... in logfmt
-                m2 = re.search(r"url=(https://[^\s]+)", line)
-                if m2 and "ngrok" in m2.group(1):
-                    return m2.group(1).rstrip("\"'")
-        except queue.Empty:
-            pass
-
-        if proc.poll() is not None:
-            # drain queue
-            await asyncio.sleep(0.2)
-            try:
-                while True:
-                    line = q.get_nowait()
-                    if line is None:
-                        break
-                    collected.append(line.strip())
-                    m = _URL_RE.search(line)
-                    if m:
-                        return m.group(0)
-            except queue.Empty:
-                pass
-            logger.warning("ngrok died. log: %s", " | ".join(collected[-15:]))
-            return None
-
-        # API on default 4040
-        try:
-            def fetch():
-                req = urllib.request.Request(
-                    "http://127.0.0.1:4040/api/tunnels",
-                    headers={"User-Agent": "hikkari"},
-                )
-                with urllib.request.urlopen(req, timeout=1.2) as resp:
-                    return json.loads(resp.read().decode())
-            data = await loop.run_in_executor(None, fetch)
-            for tun in data.get("tunnels") or []:
-                pub = (tun.get("public_url") or "").rstrip("/")
-                if pub.startswith("https://"):
-                    return pub
-                if pub.startswith("http://") and "ngrok" in pub:
-                    return pub.replace("http://", "https://", 1)
-        except Exception:
-            pass
-
-        await asyncio.sleep(0.3)
-
-    logger.warning("ngrok timeout. log: %s", " | ".join(collected[-20:]))
-    return None
