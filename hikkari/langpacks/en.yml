@@ -287,7 +287,7 @@ Session will close, session/db files deleted, account removed from list."
   weburl_ok: "✅ <b>Account added via WebUI</b> — restarting…"
   weburl_fail: "🚫 <b>WebUI error:</b> <code>{}</code>"
 hikkari_backup:
-  pperiod: "⌚️ <b>The unit «ALPHA»</b> creates regular backups. These settings can be changed later.\n\nPlease select the backup frequency\n\n<b>🚫 It is thus impossible to restore modules downloaded from files with the .lm command! Be careful and do .backupmods before restoring.</b>"
+  period: "⌚️ <b>The Hikkari</b> creates regular backups. These settings can be changed later.\n\nPlease select the backup frequency\n\n<b>🚫 It is thus impossible to restore modules downloaded from files with the .lm command! Be careful and do .backupmods before restoring.</b>"
   saved: "✅ The periodicity is saved! It can be changed with <code>{prefix}set_backup_period</code>"
   saved_bot: "✅ The periodicity is saved! It can be changed with {prefix}set_backup_period"
   never: "✅ I will not make automatic backups. Can be cancelled using <code>{prefix}set_backup_period</code>"
@@ -321,7 +321,7 @@ hikkari_backup:
   _cmd_doc_backupmods: "Create a backup of mods [will be sent to PM]"
   _cmd_doc_restoredb: "Restore database from file"
   _cmd_doc_restoremods: "<response to file> - Restore mods from backup"
-  _cmd_doc_set_backup_pperiod: "<time in hours> - Set the frequency of backups"
+  _cmd_doc_set_backup_period: "<time in hours> - Set the frequency of backups"
   _cmd_doc_backupall: "Creates a general backup copy (modules + database)"
   _cmd_doc_restoreall: "Restores a common backup (base + modules)"
 
@@ -552,6 +552,10 @@ updater:
   rollback_too_far: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>You're rolling back too far!</b>"
   rollback_confirm: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>Are you sure you want to rollback {num} commit(-s)?</b>"
   rollback_process: "<tg-emoji emoji-id=5873204392429096339>🕗</tg-emoji> <b>Rolling {num} commits back...</b>"
+  update_auto_rollback: \"⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.
+New changes from that update are not applied. Review changelog before updating again.\"
+  rollback_confirm_ver: \"⚠️ <b>Rollback to</b> <code>{ver}</code> (<code>{sha}</code>)? Features and fixes after this version will disappear.\"
+  rollback_version_not_found: \"🚫 <b>Version</b> <code>{}</code> <b>not found in history</b>\"
   autoupdate_notifier: "<emoji document_id=5280488503170335617>⚜️</emoji> New Hikkari update!
 
 <emoji document_id=5280652935993266295>⚜️</emoji> New Hikkari version #{} available
@@ -562,7 +566,7 @@ Changelog:
 
 <b>Updating...</b>"
 
-  autoupdate: "🛡 Unit Alpha also allows you to ignore updates and <b>do it automatically</b>!\n\n💫 However, major updates such as changing the global version (1.x.x -> 2.x.x) will be ignored for automatic updates and you will have to update manually"
+  autoupdate: "🛡 Hikkari also allows you to ignore updates and <b>do it automatically</b>!\n\n💫 However, major updates such as changing the global version (1.x.x -> 2.x.x) will be ignored for automatic updates and you will have to update manually"
   autoupdate_on: "🎆 Automatic updates <b>have been enabled!\nEnjoy using it!</b>"
   autoupdate_off: "❌ Automatic updates <b>have been disabled!</b>\nTo enable them, use the command <code>{prefix}autoupdate</code>"
   announcement: "<b>📢 Announcement:</b>\n\n<blockquote>{}</blockquote>"

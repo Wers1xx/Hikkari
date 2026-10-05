@@ -18,6 +18,8 @@
 
 import ast
 import asyncio
+import re
+from pathlib import Path
 import contextlib
 import errno
 import json
@@ -551,6 +553,8 @@ class UpdaterMod(loader.Module):
         restart()
 
     async def download_common(self):
+        self._save_pre_update_sha()
+
         def _sync():
             try:
                 with Repo(os.path.dirname(utils.get_base_dir())) as repo:
@@ -675,6 +679,8 @@ class UpdaterMod(loader.Module):
 
             try:
                 req_update = await self.download_common()
+                if self._try_auto_rollback():
+                    raise RuntimeError("Hikkari update auto-rollback")
             except TimeoutError:
                 logger.exception("Timed out while fetching updates from git remote")
                 return
@@ -903,42 +909,145 @@ class UpdaterMod(loader.Module):
             text=self.inline.sanitise_text(msg),
         )
 
+    def _find_commit_for_version(self, ver: str) -> str | None:
+        """Find newest commit where version.py matches X.Y.Z"""
+        if NO_GIT:
+            return None
+        try:
+            import git as _git
+            with _git.Repo() as repo:
+                for commit in repo.iter_commits(max_count=400):
+                    try:
+                        blob = commit.tree / "hikkari" / "version.py"
+                        data = blob.data_stream.read().decode("utf-8", errors="ignore")
+                        m = re.search(r"__version__\s*=\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)", data)
+                        if not m:
+                            continue
+                        found = f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
+                        if found == ver:
+                            return commit.hexsha
+                    except Exception:
+                        continue
+        except Exception:
+            logger.exception("find version commit")
+        return None
+
+
+    def _save_pre_update_sha(self) -> str | None:
+        if NO_GIT:
+            return None
+        try:
+            import git as _git
+            with _git.Repo() as repo:
+                sha = repo.head.commit.hexsha
+            marker = Path.cwd() / ".hikkari_pre_update"
+            marker.write_text(sha, encoding="utf-8")
+            return sha
+        except Exception:
+            logger.exception("save pre-update sha")
+            return None
+
+    def _try_auto_rollback(self) -> bool:
+        """If current tree fails import test, reset to .hikkari_pre_update."""
+        marker = Path.cwd() / ".hikkari_pre_update"
+        if not marker.is_file():
+            return False
+        try:
+            old = marker.read_text(encoding="utf-8").strip()
+            if not old:
+                return False
+            # quick syntax check of core package
+            import py_compile, sys
+            core = Path.cwd() / "hikkari" / "__main__.py"
+            try:
+                py_compile.compile(str(core), doraise=True)
+                # also version + main
+                py_compile.compile(str(Path.cwd() / "hikkari" / "main.py"), doraise=True)
+            except Exception as e:
+                logger.error("Update broke boot (%s) — rolling back to %s", e, old[:7])
+                import subprocess
+                subprocess.run(["git", "reset", "--hard", old], check=False)
+                fail_flag = Path.cwd() / ".hikkari_update_rolled_back"
+                fail_flag.write_text(old, encoding="utf-8")
+                return True
+        except Exception:
+            logger.exception("auto-rollback")
+        return False
+
+    def _clear_pre_update(self):
+        for name in (".hikkari_pre_update",):
+            with contextlib.suppress(Exception):
+                (Path.cwd() / name).unlink(missing_ok=True)
+
+
     @loader.command()
     async def rollback(self, message: Message):
-        if not (args := utils.get_args_raw(message)).isdigit():
+        """[N | X.Y.Z] — откат на N коммитов назад или к версии X.Y.Z"""
+        args = (utils.get_args_raw(message) or "").strip()
+        if not args:
             await utils.answer(message, self.strings["invalid_args"])
             return
-        if int(args) > 10:
-            await utils.answer(message, self.strings["rollback_too_far"])
+
+        target = None  # ("commits", n) or ("sha", sha, label)
+        if re.fullmatch(r"\d+\.\d+\.\d+", args):
+            sha = self._find_commit_for_version(args)
+            if not sha:
+                await utils.answer(
+                    message,
+                    self.strings.get(
+                        "rollback_version_not_found",
+                        f"🚫 <b>Version</b> <code>{args}</code> <b>not found in git history</b>",
+                    ),
+                )
+                return
+            target = ("sha", sha, args)
+            confirm = self.strings.get(
+                "rollback_confirm_ver",
+                "⚠️ <b>Rollback to version</b> <code>{ver}</code> (<code>{sha}</code>)?",
+            ).format(ver=args, sha=sha[:7])
+        elif args.isdigit():
+            n = int(args)
+            if n < 1 or n > 50:
+                await utils.answer(message, self.strings["rollback_too_far"])
+                return
+            target = ("commits", n, str(n))
+            confirm = self.strings["rollback_confirm"].format(num=n)
+        else:
+            await utils.answer(message, self.strings["invalid_args"])
             return
+
         await self.inline.form(
             message=message,
-            text=self.strings["rollback_confirm"].format(num=args),
+            text=confirm,
             reply_markup=[
                 [
                     {
                         "text": "✅",
                         "callback": self.rollback_confirm,
-                        "args": [args],
+                        "args": [target[0], target[1], target[2]],
                         "style": "success",
                     }
                 ],
-                [
-                    {
-                        "text": "❌",
-                        "action": "close",
-                        "style": "danger",
-                    }
-                ],
+                [{"text": "❌", "action": "close", "style": "danger"}],
             ],
         )
 
-    async def rollback_confirm(self, call: InlineCall, number: int):
-        await utils.answer(call, self.strings["rollback_process"].format(num=number))
-        utils.ensure_child_watcher()
-        await asyncio.create_subprocess_shell(
-            f"git reset --hard HEAD~{number}", stdout=asyncio.subprocess.PIPE
+    async def rollback_confirm(self, call: InlineCall, mode: str, value, label: str):
+        await utils.answer(
+            call,
+            self.strings.get("rollback_process", "⏳ Rollback…").format(num=label),
         )
+        utils.ensure_child_watcher()
+        if mode == "commits":
+            cmd = f"git reset --hard HEAD~{int(value)}"
+        else:
+            cmd = f"git reset --hard {value}"
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
         await self.restart_common(call)
 
     async def ubstop_func(self, call: Message | InlineCall):

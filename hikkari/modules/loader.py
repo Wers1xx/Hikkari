@@ -607,6 +607,7 @@ class LoaderMod(loader.Module):
             "-q",
             "--disable-pip-version-check",
             "--no-warn-script-location",
+            "--prefer-binary",
             *(["--user"] if need_user_flag else []),
             *requirements,
         ]
