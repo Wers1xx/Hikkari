@@ -753,6 +753,23 @@ class UpdaterMod(loader.Module):
         self.config["autoupdate"] = False
         self.set("autoupdate_answered", True)
 
+        rb = Path.cwd() / ".hikkari_update_rolled_back"
+        if rb.is_file():
+            with contextlib.suppress(Exception):
+                old = rb.read_text(encoding="utf-8").strip()
+                rb.unlink(missing_ok=True)
+                self._clear_pre_update()
+                await self.inline.bot.send_message(
+                    self.tg_id,
+                    self.strings.get(
+                        "update_auto_rollback",
+                        "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
+                    ).format(sha=(old or "?")[:7]),
+                )
+        else:
+            with contextlib.suppress(Exception):
+                self._clear_pre_update()
+
     async def _add_folder(self):
         folders = await self._client(GetDialogFiltersRequest())
 
