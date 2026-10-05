@@ -120,7 +120,7 @@ class HikkariConfigMod(loader.Module):
             else self.hide_value(self.lookup(mod).config[option])
         )
 
-    def _get_inline_value(self, mod: str, option: str, limit: int = 600) -> str:
+    def _get_inline_value(self, mod: str, option: str, limit: int = 2500) -> str:
         value = self._get_value(mod, option)
         if len(value) <= limit:
             return value
@@ -135,10 +135,16 @@ class HikkariConfigMod(loader.Module):
         text: str,
         page: int,
         callback: typing.Any,
+        length: int = 4096,
     ) -> tuple[str, list[list[dict[str, typing.Any]]]]:
+        # length=900 when parent form has photo (caption limit ~1024)
         parsed_text, parsed_entities = html.parse(text)
         pages = list(
-            utils.smart_split(parsed_text, typing.cast(typing.Any, parsed_entities))
+            utils.smart_split(
+                parsed_text,
+                typing.cast(typing.Any, parsed_entities),
+                length,
+            )
         )
 
         if len(pages) <= 1:
@@ -873,18 +879,14 @@ class HikkariConfigMod(loader.Module):
         obj_type: bool | str = False,
     ):
         module = self.lookup(mod)
-        # Short values only — long custom_message etc. hang Telegram caption edits
+        # Like Heroku: full value in form, split via smart_split (caption-safe page size)
         args = [
             utils.escape_html(config_opt),
             utils.escape_html(mod),
-            utils.escape_non_html(
-                self._clip_cfg_text(str(module.config.getdoc(config_opt) or ""), 280)
-            ),
-            self._clip_cfg_text(
-                str(self.prep_value(module.config.getdef(config_opt))), 200
-            ),
+            utils.escape_non_html(str(module.config.getdoc(config_opt) or "")),
+            self.prep_value(module.config.getdef(config_opt)),
             (
-                self._get_inline_value(mod, config_opt, limit=500)
+                self.prep_value(module.config[config_opt])
                 if not module.config._config[config_opt].validator
                 or module.config._config[config_opt].validator.internal_id != "Hidden"
                 or force_hidden
@@ -963,7 +965,6 @@ class HikkariConfigMod(loader.Module):
                     else "configuring_option_lib"
                 )
             ].format(*args)
-            text = self._clip_cfg_text(text)
             text, pagination = self._paginate_text_markup(
                 text,
                 page,
@@ -974,6 +975,7 @@ class HikkariConfigMod(loader.Module):
                     force_hidden=force_hidden,
                     obj_type=obj_type,
                 ),
+                length=900,
             )
             match validator.internal_id:
                 case "Boolean":
@@ -1030,7 +1032,6 @@ class HikkariConfigMod(loader.Module):
                 else "configuring_option_lib"
             )
         ].format(*args)
-        text = self._clip_cfg_text(text, 900)
 
         text, pagination = self._paginate_text_markup(
             text,
@@ -1042,6 +1043,7 @@ class HikkariConfigMod(loader.Module):
                 force_hidden=force_hidden,
                 obj_type=obj_type,
             ),
+            length=900,
         )
 
         markup = additonal_button_row + [
