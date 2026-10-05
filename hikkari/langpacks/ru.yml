@@ -504,10 +504,9 @@ updater:
   rollback_too_far: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Вы откатываетесь слишком далеко!</b>"
   rollback_confirm: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>Вы уверены, что хотите откатить {num} коммит(-а,-ов)?</b>"
   rollback_process: "<tg-emoji emoji-id=5873204392429096339>🕗</tg-emoji> <b>Откат {num} коммит(-a,-ов)...</b>"
-  update_auto_rollback: \"⚠️ <b>Обновление сломало запуск и было откачено</b> до <code>{sha}</code>.
-Новые изменения из того обновления не применены. Смотри changelog перед следующим апдейтом.\"
-  rollback_confirm_ver: \"⚠️ <b>Откат на версию</b> <code>{ver}</code> (<code>{sha}</code>)? Функции и фиксы после этой версии пропадут.\"
-  rollback_version_not_found: \"🚫 <b>Версия</b> <code>{}</code> <b>не найдена в истории</b>\"
+  rollback_version_not_found: "🚫 <b>Версия</b> <code>{}</code> <b>не найдена в истории</b>"
+  rollback_confirm_ver: "⚠️ <b>Откат на версию</b> <code>{ver}</code> (<code>{sha}</code>)? Функции и фиксы после этой версии пропадут."
+  update_auto_rollback: "⚠️ <b>Обновление сломало запуск и было откачено</b> до <code>{sha}</code>. Новые изменения из того обновления не применены. Смотри changelog перед следующим апдейтом."
   autoupdate_notifier: "<emoji document_id=5280488503170335617>⚜️</emoji> Новое обновление Hikkari!
 
 <emoji document_id=5280652935993266295>⚜️</emoji> Новая версия Hikkari #{} доступна

@@ -552,10 +552,9 @@ updater:
   rollback_too_far: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>You're rolling back too far!</b>"
   rollback_confirm: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>Are you sure you want to rollback {num} commit(-s)?</b>"
   rollback_process: "<tg-emoji emoji-id=5873204392429096339>🕗</tg-emoji> <b>Rolling {num} commits back...</b>"
-  update_auto_rollback: \"⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.
-New changes from that update are not applied. Review changelog before updating again.\"
-  rollback_confirm_ver: \"⚠️ <b>Rollback to</b> <code>{ver}</code> (<code>{sha}</code>)? Features and fixes after this version will disappear.\"
-  rollback_version_not_found: \"🚫 <b>Version</b> <code>{}</code> <b>not found in history</b>\"
+  rollback_version_not_found: "🚫 <b>Version</b> <code>{}</code> <b>not found in history</b>"
+  rollback_confirm_ver: "⚠️ <b>Rollback to</b> <code>{ver}</code> (<code>{sha}</code>)? Features and fixes after this version will disappear."
+  update_auto_rollback: "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>. New changes from that update are not applied. Review changelog before updating again."
   autoupdate_notifier: "<emoji document_id=5280488503170335617>⚜️</emoji> New Hikkari update!
 
 <emoji document_id=5280652935993266295>⚜️</emoji> New Hikkari version #{} available
