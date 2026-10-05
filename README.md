@@ -25,6 +25,13 @@ python3 -m hikkari
 
 Root: add `--root` if needed.
 
+## Hosting bots
+
+| Host | Bot |
+|------|-----|
+| **WersHost** | [@WersHost_bot](https://t.me/WersHost_bot) |
+| **UserBotHost** | [@UserBotHost_bot](https://t.me/UserBotHost_bot) |
+
 ## Docker
 
 ```bash
@@ -38,7 +45,7 @@ docker run -d --name Hikkari --restart unless-stopped -v "$(pwd)":/data/Hikkari 
 | Command | Description |
 |--------|-------------|
 | `.help` | Modules & commands |
-| `.find <query>` | Search modules in repos |
+| `.find <query>` | Search modules (HikkariFind) |
 | `.dlmod <name\|url>` | Install module |
 | `.update` | Update userbot |
 | `.rollback N` / `.rollback X.Y.Z` | Rollback commits or version |
