@@ -119,7 +119,7 @@ class HikkariConfigMod(loader.Module):
             else self.hide_value(self.lookup(mod).config[option])
         )
 
-    def _get_inline_value(self, mod: str, option: str, limit: int = 2500) -> str:
+    def _get_inline_value(self, mod: str, option: str, limit: int = 600) -> str:
         value = self._get_value(mod, option)
         if len(value) <= limit:
             return value
@@ -872,13 +872,18 @@ class HikkariConfigMod(loader.Module):
         obj_type: bool | str = False,
     ):
         module = self.lookup(mod)
+        # Short values only — long custom_message etc. hang Telegram caption edits
         args = [
             utils.escape_html(config_opt),
             utils.escape_html(mod),
-            utils.escape_non_html(self._clip_cfg_text(str(module.config.getdoc(config_opt) or ""), 400)),
-            self.prep_value(module.config.getdef(config_opt)),
+            utils.escape_non_html(
+                self._clip_cfg_text(str(module.config.getdoc(config_opt) or ""), 280)
+            ),
+            self._clip_cfg_text(
+                str(self.prep_value(module.config.getdef(config_opt))), 200
+            ),
             (
-                self.prep_value(module.config[config_opt])
+                self._get_inline_value(mod, config_opt, limit=500)
                 if not module.config._config[config_opt].validator
                 or module.config._config[config_opt].validator.internal_id != "Hidden"
                 or force_hidden
@@ -1024,6 +1029,7 @@ class HikkariConfigMod(loader.Module):
                 else "configuring_option_lib"
             )
         ].format(*args)
+        text = self._clip_cfg_text(text, 900)
 
         text, pagination = self._paginate_text_markup(
             text,
@@ -1037,44 +1043,48 @@ class HikkariConfigMod(loader.Module):
             ),
         )
 
-        await call.edit(
-            text,
-            reply_markup=additonal_button_row
-            + [
-                [
-                    {
-                        "text": self.strings["enter_value_btn"],
-                        "input": self.strings["enter_value_desc"],
-                        "handler": self.inline__set_config,
-                        "args": (mod, config_opt, call.inline_message_id),
-                        "kwargs": {"obj_type": obj_type},
-                    }
-                ],
-                [
-                    {
-                        "text": self.strings["set_default_btn"],
-                        "callback": self.inline__reset_default,
-                        "args": (mod, config_opt),
-                        "kwargs": {"obj_type": obj_type},
-                    }
-                ],
-                *pagination,
-                [
-                    {
-                        "text": self.strings["back_btn"],
-                        "callback": self.inline__configure,
-                        "args": (mod,),
-                        "style": "primary",
-                        "kwargs": self._guess_back_to_page(mod, config_opt, obj_type),
-                    },
-                    {
-                        "text": self.strings["close_btn"],
-                        "action": "close",
-                        "style": "danger",
-                    },
-                ],
+        markup = additonal_button_row + [
+            [
+                {
+                    "text": self.strings["enter_value_btn"],
+                    "input": self.strings["enter_value_desc"],
+                    "handler": self.inline__set_config,
+                    "args": (mod, config_opt, call.inline_message_id),
+                    "kwargs": {"obj_type": obj_type},
+                }
             ],
-        )
+            [
+                {
+                    "text": self.strings["set_default_btn"],
+                    "callback": self.inline__reset_default,
+                    "args": (mod, config_opt),
+                    "kwargs": {"obj_type": obj_type},
+                }
+            ],
+            *pagination,
+            [
+                {
+                    "text": self.strings["back_btn"],
+                    "callback": self.inline__configure,
+                    "args": (mod,),
+                    "style": "primary",
+                    "kwargs": self._guess_back_to_page(mod, config_opt, obj_type),
+                },
+                {
+                    "text": self.strings["close_btn"],
+                    "action": "close",
+                    "style": "danger",
+                },
+            ],
+        ]
+        try:
+            await call.edit(text, reply_markup=markup)
+        except Exception:
+            logger.exception("configure_option edit failed")
+            with contextlib.suppress(Exception):
+                await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
+            with contextlib.suppress(Exception):
+                await call.answer("⚠️ text truncated", show_alert=False)
 
     async def inline__configure_page(
         self,
