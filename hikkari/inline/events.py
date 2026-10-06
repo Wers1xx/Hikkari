@@ -285,6 +285,82 @@ class Events(InlineUnit):
         )
         user_id = call.sender_id
 
+        # --- Official Rich Message navigation (Bot API 10.3 <tg-button>) ---
+        # callback_data format: hk|<unit_id>|p|<page>
+        if isinstance(call_data, str) and call_data.startswith("hk|"):
+            try:
+                parts = call_data.split("|")
+                if len(parts) >= 4 and parts[2] == "p":
+                    uid = parts[1]
+                    new_page = int(parts[3])
+                    unit = self._units.get(uid)
+                    if not unit or unit.get("type") != "rich":
+                        await call.answer("Expired")
+                        return
+                    if unit.get("force_me") and user_id != self._me:
+                        if user_id not in (
+                            self._client.dispatcher.security._owner
+                            + unit.get("always_allow", [])
+                        ):
+                            await call.answer("⛔")
+                            return
+                    pages = unit.get("pages") or []
+                    if not pages:
+                        await call.answer()
+                        return
+                    new_page = max(0, min(new_page, len(pages) - 1))
+                    if new_page == unit.get("page"):
+                        await call.answer(f"{new_page + 1}/{len(pages)}")
+                        return
+                    from ..utils.rich_api import (
+                        nav_button_row,
+                        markup_to_tg_rows,
+                        edit_rich_message,
+                        _find_bot_token,
+                    )
+                    body = pages[new_page]
+                    nav = nav_button_row(uid, new_page, len(pages))
+                    if nav:
+                        body = body + "\n" + nav
+                    btn_html = markup_to_tg_rows(unit.get("buttons") or [], uid)
+                    if btn_html:
+                        body = body + "\n" + btn_html
+                    unit["page"] = new_page
+                    unit["rich_html"] = body
+                    token = _find_bot_token(self._client)
+                    imid = getattr(call, "inline_message_id", None)
+                    ok = False
+                    if token and imid:
+                        ok = await edit_rich_message(
+                            str(token), body, inline_message_id=str(imid)
+                        )
+                    if not ok and token:
+                        # fallback: chat + message_id
+                        chat_id = getattr(call, "chat_id", None) or (
+                            getattr(getattr(call, "message", None), "chat", None)
+                            and getattr(call.message.chat, "id", None)
+                        )
+                        mid = getattr(call, "message_id", None) or getattr(
+                            getattr(call, "message", None), "message_id", None
+                        )
+                        if chat_id and mid:
+                            ok = await edit_rich_message(
+                                str(token),
+                                body,
+                                chat_id=chat_id,
+                                message_id=int(mid),
+                            )
+                    await call.answer(f"{new_page + 1}/{len(pages)}" if ok else "…")
+                    return
+            except Exception:
+                logger.exception("rich nav callback failed")
+                try:
+                    await call.answer("Error", alert=True)
+                except Exception:
+                    pass
+                return
+
+
         for func in self._allmodules.callback_handlers.values():
             if await self.check_inline_security(func=func, user=user_id):
                 try:

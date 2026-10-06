@@ -553,7 +553,7 @@ class Help(loader.Module):
         no_commands_.sort(key=str.lower)
 
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
-            """sections: list of (title, joined_module_html_lines)"""
+            """Rich help with official <tg-button-row> page navigation."""
             try:
                 from ..utils.rich import can_use_rich
                 from ..utils.rich_api import pick_banner_url, html_table
@@ -562,52 +562,62 @@ class Help(loader.Module):
                 if not getattr(self.inline, "init_complete", False):
                     return False
                 banner_url = pick_banner_url(self.config.get("banner_url"))
-                parts = []
-                if banner_url:
-                    parts.append(f'<figure><img src="{banner_url}"/></figure>')
-                parts.append(f"<h2>{text_header}</h2>")
+                entries = []
                 for sec_title, joined in sections:
                     if not joined or not joined.strip():
                         continue
-                    rows = []
-                    # lines like: emoji <code>Name</code>: ( cmd | cmd )
                     for raw in joined.split("\n"):
                         raw = raw.strip()
                         if not raw:
                             continue
-                        # extract module name from <code>...</code>
                         m = re.search(r"<code>([^<]+)</code>", raw)
                         name = m.group(1) if m else raw[:40]
-                        # commands after :
                         cmds = ""
                         if ":" in raw:
                             after = raw.split(":", 1)[1]
                             after = re.sub(r"<[^>]+>", "", after).strip()
                             cmds = after.strip(" ()")
-                        rows.append((name, cmds or "—"))
-                    if rows:
+                        entries.append((sec_title, name, cmds or "—"))
+                if not entries:
+                    return False
+                per_page = 10
+                total = max(1, (len(entries) + per_page - 1) // per_page)
+                pages = []
+                for p in range(total):
+                    chunk = entries[p * per_page : (p + 1) * per_page]
+                    parts = []
+                    if banner_url and p == 0:
+                        parts.append(f'<figure><img src="{banner_url}"/></figure>')
+                    parts.append(
+                        f"<h2>{text_header}</h2>"
+                        f"<p><i>стр. {p + 1}/{total} · {len(entries)} modules</i></p>"
+                    )
+                    by_sec = {}
+                    for sec, name, cmds in chunk:
+                        by_sec.setdefault(sec, []).append((name, cmds))
+                    for sec, rows in by_sec.items():
                         table = html_table(rows, header=("Module", "Commands"))
                         parts.append(
-                            f"<details><summary><b>{sec_title}</b> ({len(rows)})</summary>\n"
-                            f"{table}\n"
-                            f"</details>"
+                            f"<details open><summary><b>{sec}</b> ({len(rows)})</summary>\n"
+                            f"{table}\n</details>"
                         )
-                html = "\n".join(parts)
+                    pages.append("\n".join(parts))
                 m = await self.inline.rich(
                     message,
-                    html,
+                    pages[0],
                     title="Hikkari Help",
                     description=text_header[:80],
                     thumbnail_url=banner_url,
                     silent=True,
+                    pages=pages,
+                    page=0,
                 )
                 return bool(m)
             except Exception:
                 logger.debug("help rich failed", exc_info=True)
                 return False
 
-
-
+        
         async def _send_help_pages(text_header: str, sections: list[tuple[str, list[str]]]) -> bool:
             """Paginated form for large module lists. sections: (title, list of line html)"""
             try:

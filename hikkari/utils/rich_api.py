@@ -34,6 +34,176 @@ def pick_banner_url(banner) -> str | None:
     return None
 
 
+def tg_button(
+    text: str,
+    *,
+    type: str = "callback_data",
+    data: str | None = None,
+    url: str | None = None,
+    style: str | None = None,
+    query: str | None = None,
+    copy_text: str | None = None,
+) -> str:
+    """
+    Official Rich Message button (Bot API 10.3).
+    https://core.telegram.org/bots/api#richmessagebutton
+    Types: url | callback_data | web_app | login_url | switch_inline_query |
+           switch_inline_query_current_chat | copy_text | disabled
+    Styles: danger | success | primary | link
+    """
+    import html as html_mod
+    t = html_mod.escape(str(text)[:64])
+    attrs = [f'type="{type}"']
+    if style and style in ("danger", "success", "primary", "link"):
+        attrs.append(f'style="{style}"')
+    if type == "url" and url:
+        attrs.append(f'url="{html_mod.escape(str(url), quote=True)}"')
+    elif type == "callback_data" and data is not None:
+        # 1-64 bytes
+        d = str(data)[:64]
+        attrs.append(f'data="{html_mod.escape(d, quote=True)}"')
+    elif type == "web_app" and url:
+        attrs.append(f'url="{html_mod.escape(str(url), quote=True)}"')
+    elif type in ("switch_inline_query", "switch_inline_query_current_chat") and query is not None:
+        attrs.append(f'query="{html_mod.escape(str(query), quote=True)}"')
+    elif type == "copy_text" and copy_text is not None:
+        attrs.append(f'text="{html_mod.escape(str(copy_text), quote=True)}"')
+    return f"<tg-button {' '.join(attrs)}>{t}</tg-button>"
+
+
+def tg_button_row(
+    buttons: list[str],
+    *,
+    align: str = "center",
+) -> str:
+    """
+    Official button row block: <tg-button-row align="...">...</tg-button-row>
+    1-8 buttons per row.
+    """
+    if not buttons:
+        return ""
+    al = align if align in ("left", "center", "right") else "center"
+    body = "".join(buttons[:8])
+    return f'<tg-button-row align="{al}">{body}</tg-button-row>'
+
+
+def nav_button_row(
+    unit_id: str,
+    page: int,
+    total: int,
+    *,
+    prefix: str = "hk",
+) -> str:
+    """Prev / page indicator / Next as official Rich buttons."""
+    if total <= 1:
+        return ""
+    page = max(0, min(page, total - 1))
+    btns = []
+    if page > 0:
+        btns.append(
+            tg_button(
+                "◀",
+                type="callback_data",
+                data=f"{prefix}|{unit_id}|p|{page - 1}",
+                style="primary",
+            )
+        )
+    btns.append(
+        tg_button(
+            f"{page + 1}/{total}",
+            type="callback_data",
+            data=f"{prefix}|{unit_id}|p|{page}",
+            style="link",
+        )
+    )
+    if page < total - 1:
+        btns.append(
+            tg_button(
+                "▶",
+                type="callback_data",
+                data=f"{prefix}|{unit_id}|p|{page + 1}",
+                style="primary",
+            )
+        )
+    return tg_button_row(btns, align="center")
+
+
+def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
+    """
+    Convert Hikkari reply_markup (list of rows of dicts) to official <tg-button-row> HTML.
+    """
+    if not markup:
+        return ""
+    import html as html_mod
+    rows_out = []
+    for row in markup:
+        if not isinstance(row, (list, tuple)):
+            row = [row]
+        btns = []
+        for btn in row:
+            if not isinstance(btn, dict):
+                continue
+            text = str(btn.get("text") or "•")[:64]
+            if btn.get("url"):
+                btns.append(tg_button(text, type="url", url=str(btn["url"]), style=btn.get("style")))
+            elif btn.get("web_app"):
+                btns.append(tg_button(text, type="web_app", url=str(btn["web_app"]), style=btn.get("style") or "primary"))
+            else:
+                # callback — prefer pre-assigned _callback_data from form system
+                data = btn.get("_callback_data") or btn.get("data") or "noop"
+                if unit_id and not str(data).startswith(("hk|", "rh|")):
+                    # keep form's short data; events still match unit buttons
+                    data = str(data)[:64]
+                style = btn.get("style") or "primary"
+                btns.append(tg_button(text, type="callback_data", data=str(data)[:64], style=style))
+        if btns:
+            rows_out.append(tg_button_row(btns, align="center"))
+    return "\n".join(rows_out)
+
+
+async def edit_rich_message(
+    token: str,
+    html: str,
+    *,
+    inline_message_id: str | None = None,
+    chat_id: int | str | None = None,
+    message_id: int | None = None,
+) -> bool:
+    """
+    Edit an existing message to a Rich Message (Bot API editMessageText + rich_message).
+    """
+    if not token or not html:
+        return False
+    payload: dict[str, Any] = {
+        "rich_message": {
+            "html": html,
+            "skip_entity_detection": True,
+        },
+    }
+    if inline_message_id:
+        payload["inline_message_id"] = str(inline_message_id)
+    elif chat_id is not None and message_id is not None:
+        payload["chat_id"] = chat_id
+        payload["message_id"] = int(message_id)
+    else:
+        return False
+    url = API.format(token=token, method="editMessageText")
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as resp:
+                data = await resp.json(content_type=None)
+                if not data.get("ok"):
+                    logger.warning(
+                        "editMessageText(rich) failed: %s",
+                        data.get("description") or data,
+                    )
+                    return False
+                return True
+    except Exception as e:
+        logger.warning("editMessageText(rich) error: %s", e)
+        return False
+
 
 def html_table(
     rows: list[tuple[str, str]],

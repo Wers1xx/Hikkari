@@ -455,6 +455,8 @@ class Form(InlineUnit):
         silent: bool = False,
         reply_markup: typing.Optional[list] = None,
         thumbnail_url: typing.Optional[str] = None,
+        pages: typing.Optional[list] = None,
+        page: int = 0,
     ) -> typing.Union[Message, bool]:
         """
         Send a native Rich Message via inline (appears with via @bot),
@@ -473,6 +475,26 @@ class Form(InlineUnit):
 
         unit_id = utils.rand(16)
         markup = self._validate_markup(reply_markup) if reply_markup else []
+        # Official Rich buttons inside HTML (<tg-button-row>), not only reply_markup
+        try:
+            from ..utils.rich_api import markup_to_tg_rows, nav_button_row
+            page_list = list(pages) if pages else None
+            cur = int(page or 0)
+            body = html
+            if page_list:
+                cur = max(0, min(cur, len(page_list) - 1))
+                body = page_list[cur]
+                nav = nav_button_row(unit_id, cur, len(page_list))
+                if nav:
+                    body = body + "\n" + nav
+            btn_html = markup_to_tg_rows(markup, unit_id) if markup else ""
+            if btn_html:
+                body = body + "\n" + btn_html
+            html = body
+        except Exception:
+            logger.debug("rich button embed failed", exc_info=True)
+            page_list = list(pages) if pages else None
+            cur = int(page or 0)
         self._units[unit_id] = {
             "type": "rich",
             "rich_html": html,
@@ -480,6 +502,8 @@ class Form(InlineUnit):
             "title": title,
             "description": description,
             "buttons": markup or [],
+            "pages": page_list,
+            "page": cur if page_list else 0,
             "caller": message,
             "chat": None,
             "message_id": None,
