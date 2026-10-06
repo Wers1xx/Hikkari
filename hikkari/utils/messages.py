@@ -435,9 +435,10 @@ async def answer(
 
                 return result
 
-        # Heroku-style: always pop file/invert_media, handle on edit and send paths
+        # Heroku-style: always pop file/invert_media/photo (photo is only for inline.list)
         file = kwargs.pop("file", None)
         invert_media = kwargs.pop("invert_media", False)
+        kwargs.pop("photo", None)  # not a Telethon edit_message kwarg
 
         if file is not None and invert_media:
             # ✨ bootstrap → edit(text+file, invert). On any failure restore full text+media.
