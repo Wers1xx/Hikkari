@@ -187,3 +187,61 @@ async def try_send_rich(
             last_ok = True
             break
     return last_ok
+
+
+async def answer_inline_rich(
+    token: str,
+    inline_query_id: str | int,
+    html: str,
+    *,
+    title: str = "Hikkari",
+    description: str = "Rich message",
+    result_id: str | None = None,
+    reply_markup: dict | None = None,
+) -> bool:
+    """
+    Answer an inline query with a native Rich Message.
+    When the userbot clicks the result, the message appears with via @bot.
+    Official: answerInlineQuery + InputRichMessageContent.
+    """
+    if not token or not inline_query_id or not html:
+        return False
+    rid = result_id or "rich_" + str(abs(hash(html)))[:12]
+    article: dict[str, Any] = {
+        "type": "article",
+        "id": rid,
+        "title": title[:64],
+        "description": (description or "")[:120],
+        "input_message_content": {
+            "rich_message": {
+                "html": html,
+                "skip_entity_detection": True,
+            }
+        },
+    }
+    if reply_markup is not None:
+        article["reply_markup"] = reply_markup
+
+    payload = {
+        "inline_query_id": str(inline_query_id),
+        "results": [article],
+        "cache_time": 0,
+        "is_personal": True,
+    }
+    url = API.format(token=token, method="answerInlineQuery")
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as resp:
+                data = await resp.json(content_type=None)
+                if not data.get("ok"):
+                    logger.warning(
+                        "answerInlineQuery(rich) failed: %s",
+                        data.get("description") or data,
+                    )
+                    return False
+                logger.info("answerInlineQuery(rich) OK id=%s", inline_query_id)
+                return True
+    except Exception as e:
+        logger.warning("answerInlineQuery(rich) error: %s", e)
+        return False

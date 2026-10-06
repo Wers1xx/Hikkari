@@ -444,6 +444,92 @@ class Form(InlineUnit):
 
         return msg
 
+
+    async def rich(
+        self: "InlineManager",
+        message: typing.Union[Message, int],
+        html: str,
+        *,
+        title: str = "Hikkari",
+        description: str = "Rich message",
+        silent: bool = False,
+    ) -> typing.Union[Message, bool]:
+        """
+        Send a native Rich Message via inline (appears with via @bot),
+        same invocation path as form/list.
+        `html` — official Rich HTML (<table>, <h2>, <details>, ...).
+        """
+        if not isinstance(html, str) or not html.strip():
+            logger.error("inline.rich: empty html")
+            return False
+
+        if not self.init_complete:
+            await self.register_manager(ignore_token_checks=True)
+        if not self.bot_username:
+            logger.error("inline.rich: no bot username")
+            return False
+
+        unit_id = utils.rand(16)
+        self._units[unit_id] = {
+            "type": "rich",
+            "rich_html": html,
+            "text": html,  # fallback if client ignores rich
+            "title": title,
+            "description": description,
+            "buttons": [],
+            "caller": message,
+            "chat": None,
+            "message_id": None,
+            "top_msg_id": utils.get_topic(message) if isinstance(message, Message) else None,
+            "uid": unit_id,
+            "future": Event(),
+            "force_me": True,
+            "disable_security": True,
+            **({"message": message} if isinstance(message, Message) else {}),
+        }
+
+        status_message = None
+        if isinstance(message, Message) and not silent:
+            try:
+                status_message = await (
+                    message.edit if message.out else message.respond
+                )(
+                    (
+                        utils.get_platform_emoji()
+                        if getattr(self._client, "hikkari_me", None)
+                        and self._client.hikkari_me.premium
+                        else "✨"
+                    )
+                    + " <i>Opening rich…</i>",
+                    **({"reply_to": utils.get_topic(message)} if message.out else {}),
+                )
+            except Exception:
+                status_message = None
+
+        try:
+            m = await self._invoke_unit(unit_id, message)
+        except Exception as e:
+            logger.exception("Can't send rich inline")
+            with contextlib.suppress(Exception):
+                del self._units[unit_id]
+            if status_message is not None:
+                with contextlib.suppress(Exception):
+                    await status_message.delete()
+            return False
+
+        self._units[unit_id]["chat"] = utils.get_chat_id(m) if m else None
+        self._units[unit_id]["message_id"] = getattr(m, "id", None)
+
+        if isinstance(message, Message) and message.out:
+            with contextlib.suppress(Exception):
+                await message.delete()
+        if status_message is not None:
+            with contextlib.suppress(Exception):
+                await status_message.delete()
+
+        return m
+
+
     async def _form_inline_handler(self: "InlineManager", inline_query):
         try:
             query = inline_query.query.split()[0]
@@ -497,12 +583,47 @@ class Form(InlineUnit):
 
         if (
             inline_query.query not in self._units
-            or self._units[inline_query.query]["type"] != "form"
+            or self._units[inline_query.query]["type"] not in ("form", "rich")
         ):
             return
 
+
         form = self._units[inline_query.query]
+        # --- Native Rich Message via answerInlineQuery (via @bot) ---
+        if form.get("type") == "rich":
+            try:
+                from ..utils.rich_api import answer_inline_rich, _find_bot_token
+                token = _find_bot_token(self._client) or getattr(self, "_token", None)
+                qid = (
+                    getattr(inline_query, "query_id", None)
+                    or getattr(inline_query, "id", None)
+                    or getattr(getattr(inline_query, "query", None), "query_id", None)
+                )
+                if not token or qid is None:
+                    logger.warning("rich inline: missing token or query_id token=%s qid=%s", bool(token), qid)
+                    return
+                html = form.get("rich_html") or form.get("text") or ""
+                ok = await answer_inline_rich(
+                    str(token),
+                    qid,
+                    html,
+                    title=form.get("title") or "Hikkari",
+                    description=form.get("description") or "Rich",
+                    result_id=form.get("uid") or utils.rand(16),
+                )
+                if not ok and form.get("uid") in self._error_events:
+                    self._error_events[form["uid"]].set()
+                    self._error_events[form["uid"]] = Exception("answerInlineQuery rich failed")
+                return
+            except Exception as e:
+                logger.exception("rich inline handler error")
+                if form.get("uid") in self._error_events:
+                    self._error_events[form["uid"]].set()
+                    self._error_events[form["uid"]] = e
+                return
+
         form_text = form.get("text") or "✨"
+
         try:
             match True:
                 case _ if "photo" in form:

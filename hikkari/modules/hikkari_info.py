@@ -236,11 +236,11 @@ class HikkariInfoMod(loader.Module):
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
 
-        # Native Rich Message via inline bot (Bot API sendRichMessage)
+        # Rich via @bot: same path as inline forms (inline_query → click)
         try:
             from ..utils.rich import is_rich_enabled
-            from ..utils.rich_api import try_send_rich, build_info_html
-            if is_rich_enabled(getattr(self, "_db", None)):
+            from ..utils.rich_api import build_info_html
+            if is_rich_enabled(getattr(self, "_db", None)) and getattr(self, "inline", None):
                 rows = [
                     ("Owner", utils.escape_html(get_display_name(self._client.hikkari_me))),
                     ("Version", ".".join(map(str, version.__version__))),
@@ -258,24 +258,17 @@ class HikkariInfoMod(loader.Module):
                     rows=rows,
                     footer="You are a happy owner of Hikkari!",
                 )
-                try:
-                    chat = utils.get_chat_id(message)
-                except Exception:
-                    chat = getattr(message, "chat_id", None) or message.peer_id
-                ok = await try_send_rich(self._client, chat, html)
-                if ok:
-                    if message.out:
-                        with contextlib.suppress(Exception):
-                            await message.delete()
+                m = await self.inline.rich(
+                    message,
+                    html,
+                    title="Hikkari Info",
+                    description="Component · Current release",
+                )
+                if m:
                     return
-                else:
-                    logger.warning(
-                        "sendRichMessage failed or skipped (token/chat). "
-                        "Classic Heroku-style tree will be used. "
-                        "Open dialog with your inline bot (/start) so bot can write."
-                    )
+                logger.warning("inline.rich failed → classic tree")
         except Exception:
-            logger.warning("native rich path error", exc_info=True)
+            logger.warning("rich via inline failed", exc_info=True)
 
         try:
             match True:
