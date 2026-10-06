@@ -70,24 +70,41 @@ def rich_table(
     rows: Iterable[tuple[str, str]],
     *,
     header: tuple[str, str] | None = ("Component", "Current release"),
+    native: bool = False,
 ) -> str:
     """
-    Native Rich Message table (<table>) for Bot API 10.1+.
-    Classic clients may show simplified fallback.
+    native=True  → official Rich Message HTML <table> (ONLY for sendRichMessage)
+    native=False → classic Telegram HTML (blockquote tree) for sendMessage/edit
     """
     h0, h1 = header or ("Component", "Current release")
-    parts = [
-        f'<table bordered striped>'
-        f"<tr><th>{html_mod.escape(h0)}</th><th>{html_mod.escape(h1)}</th></tr>"
+    if native:
+        parts = [
+            f'<table bordered striped>'
+            f"<tr><th>{html_mod.escape(h0)}</th><th>{html_mod.escape(h1)}</th></tr>"
+        ]
+        for k, v in rows:
+            ks = html_mod.escape(str(k))
+            vs = str(v)
+            if not ("<" in vs and ">" in vs):
+                vs = html_mod.escape(vs)
+            parts.append(f"<tr><td>{ks}</td><td>{vs}</td></tr>")
+        parts.append("</table>")
+        return "".join(parts)
+
+    # Classic readable card (works in normal messages)
+    lines = [
+        f"<b>{html_mod.escape(h0)}</b> · <b>{html_mod.escape(h1)}</b>",
+        "─────────────────",
     ]
     for k, v in rows:
         ks = html_mod.escape(str(k))
         vs = str(v)
         if not ("<" in vs and ">" in vs):
-            vs = html_mod.escape(vs)
-        parts.append(f"<tr><td>{ks}</td><td>{vs}</td></tr>")
-    parts.append("</table>")
-    return "".join(parts)
+            vs = f"<code>{html_mod.escape(vs)}</code>"
+        lines.append(f"• <b>{ks}</b>: {vs}")
+    return "<blockquote>" + "\n".join(lines) + "</blockquote>"
+
+
 
 
 def rich_blocks_from_kv_text(text: str) -> str | None:
@@ -152,9 +169,15 @@ def info_rich_message(
     rows: list[tuple[str, str]],
     footer: str = "",
     header: tuple[str, str] = ("Component", "Current release"),
+    native: bool = False,
 ) -> str:
-    """Full info card like Heroku screenshot."""
-    parts = [title, rich_table(rows, header=header)]
+    """Info card. native=True only when sending via sendRichMessage."""
+    if native:
+        parts = [f"<h2>{title}</h2>", rich_table(rows, header=header, native=True)]
+        if footer:
+            parts.append(f"<p>{footer}</p>")
+        return "\n".join(parts)
+    parts = [title, rich_table(rows, header=header, native=False)]
     if footer:
         parts.append(footer)
     return "\n".join(parts)

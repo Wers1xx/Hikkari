@@ -101,15 +101,36 @@ async def send_rich_message(
         return None
 
 
+def _resolve_chat_id(chat_id) -> int | str | None:
+    """Bot API needs int chat id or @username — not Peer objects."""
+    if chat_id is None:
+        return None
+    if isinstance(chat_id, int):
+        return chat_id
+    if isinstance(chat_id, str):
+        return chat_id
+    # Telethon PeerUser / PeerChannel / InputPeer*
+    for attr in ("user_id", "channel_id", "chat_id"):
+        v = getattr(chat_id, attr, None)
+        if isinstance(v, int):
+            # channels need -100 prefix for Bot API
+            if attr == "channel_id":
+                return int(f"-100{v}")
+            if attr == "chat_id":
+                return -v if v > 0 else v
+            return v
+    return None
+
+
 async def try_send_rich(
     client,
-    chat_id: int | str,
+    chat_id,
     html: str,
     **kwargs,
 ) -> bool:
     """
-    Send rich message via inline bot token if available.
-    Returns True on success.
+    Send via Bot API sendRichMessage using the inline bot token.
+    CRITICAL: only bots can sendRichMessage reliably; user client path is unsupported.
     """
     token = None
     try:
@@ -117,16 +138,34 @@ async def try_send_rich(
             getattr(client, "loader", None), "inline", None
         )
         if inline is not None:
-            token = getattr(inline, "token", None) or getattr(inline, "_token", None)
+            token = (
+                getattr(inline, "token", None)
+                or getattr(inline, "_token", None)
+                or getattr(inline, "bot_token", None)
+            )
         if not token:
             db = getattr(client, "hikkari_db", None)
             if db is not None:
-                token = db.get("hikkari.inline", "bot_token", None) or db.get(
-                    "hikka.inline", "bot_token", None
-                )
+                for key in (
+                    ("hikkari.inline", "bot_token"),
+                    ("hikka.inline", "bot_token"),
+                    ("heroku.inline", "bot_token"),
+                ):
+                    token = db.get(key[0], key[1], None)
+                    if token:
+                        break
     except Exception:
+        logger.debug("token lookup failed", exc_info=True)
         token = None
     if not token:
+        logger.debug("sendRichMessage skipped: no bot token")
         return False
-    result = await send_rich_message(str(token), chat_id, html, **kwargs)
+
+    cid = _resolve_chat_id(chat_id)
+    if cid is None:
+        # try message peer from kwargs
+        logger.debug("sendRichMessage skipped: bad chat_id %r", chat_id)
+        return False
+
+    result = await send_rich_message(str(token), cid, html, **kwargs)
     return result is not None

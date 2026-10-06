@@ -207,7 +207,7 @@ class HikkariInfoMod(loader.Module):
                         )
                 except Exception:
                     pass
-                return info_rich_message(title=title, rows=rows, footer=footer)
+                return info_rich_message(title=title, rows=rows, footer=footer, native=False)
         except Exception:
             import logging as _log
             _log.getLogger(__name__).debug("rich info fallback", exc_info=True)
@@ -243,50 +243,49 @@ class HikkariInfoMod(loader.Module):
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
 
-        # Native Rich Message (Bot API 10.1+) via inline bot when rich_mode ON
+        # Native Rich Messages: ONLY via Bot API sendRichMessage (bot token).
+        # Regular sendMessage/edit strips <table> → garbage text. Never do that.
         try:
-            from ..utils.rich import is_rich_enabled
-            from ..utils.rich_api import try_send_rich, build_info_html
+            from ..utils.rich import is_rich_enabled, info_rich_message
+            from ..utils.rich_api import try_send_rich
             if is_rich_enabled(getattr(self, "_db", None)):
-                rendered = await self._render_info(start)
-                # Prefer structured table HTML for API
-                # re-parse rows from data path is heavy; use rendered table html builder if possible
-                html = rendered
-                # If still classic HTML without <table>, wrap via builder from placeholders
-                if "<table" not in html:
-                    # fallback: send as rich html paragraph blocks
-                    html = f"<h2>Hikkari Userbot</h2><p>{html}</p>"
-                ok = await try_send_rich(
-                    self._client,
-                    message.peer_id,
-                    html,
-                    reply_to_message_id=getattr(message, "reply_to_msg_id", None),
-                )
-                if ok:
-                    if message.out:
-                        with contextlib.suppress(Exception):
-                            await message.delete()
-                    return
+                # rebuild structured rows for native HTML
+                rendered_classic = await self._render_info(start)
+                # Prefer dedicated native HTML if we can pull data again cheaply:
+                # _render_info already returns classic; build native separately
+                data_html = None
+                try:
+                    # Re-use same placeholders via a second lightweight path
+                    # Build native from the same _render_info internals by calling
+                    # info with native flag through a helper on self
+                    from ..utils.rich import is_rich_enabled as _
+                    # Construct native HTML table from strings in rendered is hard;
+                    # call internal builder
+                    native_html = await self._render_info_native(start)
+                    data_html = native_html
+                except Exception:
+                    data_html = None
+                if data_html:
+                    peer = message.peer_id
+                    # Bot API chat id
+                    chat = None
+                    try:
+                        chat = utils.get_chat_id(message)
+                    except Exception:
+                        chat = peer
+                    ok = await try_send_rich(
+                        self._client,
+                        chat,
+                        data_html,
+                        reply_to_message_id=getattr(message, "reply_to_msg_id", None),
+                    )
+                    if ok:
+                        if message.out:
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                        return
         except Exception:
-            logger.debug("native rich info failed, classic path", exc_info=True)
-
-        try:
-            from ..utils.rich import is_rich_enabled
-            if is_rich_enabled(getattr(self, "_db", None)):
-                if self.config.get("banner_url"):
-                    # force webpage quote when rich
-                    pass  # user config still respected below
-        except Exception:
-            pass
-        # quote_media only wraps remote http(s) as webpage; local files stay as file=
-        if (
-            media
-            and self.config["quote_media"] is True
-            and isinstance(media, str)
-            and media.startswith(("http://", "https://"))
-        ):
-            from hikkaritl.tl.types import InputMediaWebPage
-            media = InputMediaWebPage(media, optional=True)
+            logger.debug("native rich info failed → classic", exc_info=True)
 
         try:
             match True:
