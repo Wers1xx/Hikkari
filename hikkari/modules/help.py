@@ -283,6 +283,71 @@ class Help(loader.Module):
             except Exception:
                 pass
 
+
+        # Rich single-module help (commands in <details>)
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import html_table, pick_banner_url
+            if can_use_rich(self._client, self._db) and getattr(
+                self.inline, "init_complete", False
+            ):
+                rows = []
+                for name, fun in commands.items():
+                    doc = utils.escape_html(
+                        inspect.getdoc(fun) or self.strings["undoc"]
+                    )
+                    rows.append(
+                        (
+                            f"{utils.escape_html(self.get_prefix())}{name}",
+                            doc[:100],
+                        )
+                    )
+                if hasattr(module, "inline_handlers"):
+                    for name, fun in module.inline_handlers.items():
+                        doc = utils.escape_html(
+                            inspect.getdoc(fun) or self.strings["undoc"]
+                        )
+                        rows.append(
+                            (f"@{self.inline.bot_username} {name}", doc[:100])
+                        )
+                parts = [f"<h2>{utils.escape_html(str(_name))}</h2>"]
+                if module.__doc__:
+                    parts.append(
+                        f"<p><i>{utils.escape_html((inspect.getdoc(module) or '')[:400])}</i></p>"
+                    )
+                if rows:
+                    table = html_table(rows, header=("Command", "Description"))
+                    parts.append(
+                        f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"{table}\n</details>"
+                    )
+                if placeholders:
+                    parts.append(
+                        f"<details><summary>Placeholders</summary><p>{placeholders}</p></details>"
+                    )
+                if dev_text:
+                    parts.append(
+                        f"<p>{self.strings['developer'].format(dev_text)}</p>"
+                    )
+                if module.__origin__.startswith("<core"):
+                    parts.append(f"<p>{self.strings['core_notice']}</p>")
+                burl = pick_banner_url(self.config.get("banner_url"))
+                if burl:
+                    parts.insert(0, f'<figure><img src="{burl}"/></figure>')
+                html = "\n".join(parts)
+                m = await self.inline.rich(
+                    message,
+                    html,
+                    title=str(_name)[:64],
+                    description="Module help",
+                    thumbnail_url=burl,
+                    silent=True,
+                )
+                if m:
+                    return
+        except Exception:
+            logger.debug("module help rich failed", exc_info=True)
+
         await utils.answer(
             message,
             f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
@@ -298,6 +363,7 @@ class Help(loader.Module):
                 if module.__origin__.startswith("<core")
                 else ""
             ),
+            skip_rich=True,
             **banner_kwargs,
         )
 
@@ -541,9 +607,72 @@ class Help(loader.Module):
                 return False
 
 
+
+        async def _send_help_pages(text_header: str, sections: list[tuple[str, list[str]]]) -> bool:
+            """Paginated form for large module lists. sections: (title, list of line html)"""
+            try:
+                # flatten entries as (section, line)
+                entries = []
+                for sec, lines in sections:
+                    for ln in lines:
+                        if ln.strip():
+                            entries.append((sec, ln.strip()))
+                if not entries:
+                    return False
+                per_page = 12
+                total_pages = max(1, (len(entries) + per_page - 1) // per_page)
+
+                def page_text(page: int) -> str:
+                    page = max(0, min(page, total_pages - 1))
+                    chunk = entries[page * per_page : (page + 1) * per_page]
+                    body = "\n".join(ln for _, ln in chunk)
+                    return (
+                        f"{text_header}\n"
+                        f"<i>стр. {page + 1}/{total_pages}</i>\n"
+                        f"<blockquote expandable>{body}</blockquote>"
+                    )
+
+                async def goto(call, page: int):
+                    page = max(0, min(page, total_pages - 1))
+                    btns = []
+                    nav = []
+                    if page > 0:
+                        nav.append({"text": "◀️", "callback": goto, "args": (page - 1,)})
+                    nav.append({"text": f"{page + 1}/{total_pages}", "data": "noop"})
+                    if page < total_pages - 1:
+                        nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
+                    btns.append(nav)
+                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    await call.edit(page_text(page), reply_markup=btns)
+
+                if total_pages == 1 and await _send_help_rich(
+                    text_header,
+                    [(s, "\n".join(ls)) for s, ls in sections],
+                ):
+                    return True
+
+                # multi-page or rich failed → form with nav
+                first_btns = []
+                nav = [{"text": f"1/{total_pages}", "data": "noop"}]
+                if total_pages > 1:
+                    nav.append({"text": "▶️", "callback": goto, "args": (1,)})
+                first_btns.append(nav)
+                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                await self.inline.form(
+                    page_text(0),
+                    message=message if message.out else utils.get_chat_id(message),
+                    reply_markup=first_btns,
+                    silent=True,
+                )
+                return True
+            except Exception:
+                logger.debug("help pages failed", exc_info=True)
+                return False
+
+
         match True:
             case _ if only_core:
-                if await _send_help_rich(reply, [("Core", "".join(core_))]):
+                if await _send_help_pages(reply, [("Core", core_)]):
                     return
                 await utils.answer(
                     message,
@@ -565,7 +694,7 @@ class Help(loader.Module):
                     skip_rich=True,
                 )
             case _ if only_loaded:
-                if await _send_help_rich(reply, [("Loaded", "".join(plain_ + (no_commands_ if force else [])))]):
+                if await _send_help_pages(reply, [("Loaded", plain_ + (no_commands_ if force else []))]):
                     return
                 await utils.answer(
                     message,
@@ -587,7 +716,7 @@ class Help(loader.Module):
                     skip_rich=True,
                 )
             case _:
-                if await _send_help_rich(reply, [("Core", "".join(core_)), ("Loaded", "".join(plain_ + (no_commands_ if force else [])))]):
+                if await _send_help_pages(reply, [("Core", core_), ("Loaded", plain_ + (no_commands_ if force else []))]):
                     return
                 await utils.answer(
                     message,

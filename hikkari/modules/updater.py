@@ -677,7 +677,9 @@ class UpdaterMod(loader.Module):
 
         try:
             with contextlib.suppress(Exception):
-                msg_obj = await utils.answer(msg_obj, self.strings["downloading"])
+                msg_obj = await utils.answer(
+                    msg_obj, self.strings["downloading"], skip_rich=True
+                )
 
             try:
                 req_update = await self.download_common()
@@ -688,7 +690,9 @@ class UpdaterMod(loader.Module):
                 return
 
             with contextlib.suppress(Exception):
-                msg_obj = await utils.answer(msg_obj, self.strings["installing"])
+                msg_obj = await utils.answer(
+                    msg_obj, self.strings["installing"], skip_rich=True
+                )
 
             if req_update:
                 self.req_common()

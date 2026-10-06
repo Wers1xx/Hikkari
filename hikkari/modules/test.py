@@ -390,26 +390,50 @@ class TestMod(loader.Module):
         except KeyError:
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
-        # Rich mode: native table via @bot + banner
+        # Rich mode: custom_message as Rich HTML, else default table
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import pick_banner_url, build_info_html
             if can_use_rich(self._client, self._db) and getattr(self.inline, "init_complete", False):
                 burl = pick_banner_url(self.config.get("banner_url"))
-                rows = [
-                    ("Ping", f"{data['ping']} ms"),
-                    ("Uptime", str(data["uptime"])),
-                    ("Version", str(data["version"])),
-                    ("Build", re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40]),
-                    ("Platform", str(data.get("platform", ""))),
-                    ("Python", str(data.get("python_ver", ""))),
-                ]
-                html = build_info_html(
-                    title="Hikkari Ping",
-                    rows=rows,
-                    footer=str(data.get("ping_hint") or ""),
-                    banner_url=burl,
-                )
+                custom = self.config.get("custom_message")
+                if custom and str(custom).strip():
+                    html = placeholders_msg
+                    if burl and "<figure" not in html.lower():
+                        html = f'<figure><img src="{burl}"/></figure>\n' + html
+                else:
+                    rows = [
+                        ("Ping", f"{data['ping']} ms"),
+                        ("Uptime", str(data["uptime"])),
+                        ("Version", str(data["version"])),
+                        ("Build", re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40]),
+                        ("Platform", str(data.get("platform", ""))),
+                        ("Python", str(data.get("python_ver", ""))),
+                    ]
+                    html = build_info_html(
+                        title="Hikkari Ping",
+                        rows=rows,
+                        footer=str(data.get("ping_hint") or ""),
+                        banner_url=burl,
+                    )
+                # Optional URL buttons from config rich_buttons: "text|url, text|url"
+                rm = None
+                rb = str(self.config.get("rich_buttons") or "").strip()
+                if rb:
+                    try:
+                        row = []
+                        for part in rb.split(","):
+                            part = part.strip()
+                            if "|" not in part:
+                                continue
+                            t, u = part.split("|", 1)
+                            t, u = t.strip(), u.strip()
+                            if t and u.startswith("http"):
+                                row.append({"text": t, "url": u})
+                        if row:
+                            rm = [row]
+                    except Exception:
+                        rm = None
                 m = await self.inline.rich(
                     message,
                     html,
@@ -417,6 +441,7 @@ class TestMod(loader.Module):
                     description=f"{data['ping']} ms",
                     thumbnail_url=burl,
                     silent=True,
+                    reply_markup=rm,
                 )
                 if m:
                     return

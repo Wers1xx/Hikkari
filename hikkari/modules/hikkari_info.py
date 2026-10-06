@@ -49,6 +49,12 @@ class HikkariInfoMod(loader.Module):
                 validator=loader.validators.String(max_len=4096),
             ),
             loader.ConfigValue(
+                "rich_buttons",
+                "Support|https://t.me/Hikkari_talks, Channel|https://t.me/Hikkari_Channel",
+                lambda: "Rich URL buttons: Text|url, Text2|url2",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
                 "banner_url",
                 [
                     "local:hikkari-info.jpg",
@@ -277,12 +283,30 @@ class HikkariInfoMod(loader.Module):
                         footer="You are a happy owner of Hikkari!",
                         banner_url=banner_url,
                     )
+                rm = None
+                rb = str(self.config.get("rich_buttons") or "").strip()
+                if rb:
+                    try:
+                        row = []
+                        for part in rb.split(","):
+                            part = part.strip()
+                            if "|" not in part:
+                                continue
+                            t, u = part.split("|", 1)
+                            t, u = t.strip(), u.strip()
+                            if t and u.startswith("http"):
+                                row.append({"text": t, "url": u})
+                        if row:
+                            rm = [row]
+                    except Exception:
+                        rm = None
                 m = await self.inline.rich(
                     message,
                     html,
                     title="Hikkari Info",
                     description="Rich info",
                     thumbnail_url=banner_url,
+                    reply_markup=rm,
                 )
                 if m:
                     return

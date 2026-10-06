@@ -1681,11 +1681,15 @@ class LoaderMod(loader.Module):
             developer = ""
 
         banner_kwargs = {}
+        _is_msg = hasattr(message, "document") or hasattr(message, "web_preview")
         if (
             self.config["show_banner"]
             and not subscribe_markup
-            and not message.document
-            or message.web_preview
+            and _is_msg
+            and (
+                not getattr(message, "document", None)
+                or getattr(message, "web_preview", None)
+            )
         ):
             try:
                 banner_url = self._get_banner_url(doc)
