@@ -158,13 +158,13 @@ async def try_send_rich(
         logger.debug("token lookup failed", exc_info=True)
         token = None
     if not token:
-        logger.debug("sendRichMessage skipped: no bot token")
+        logger.warning("sendRichMessage skipped: no bot token in DB/inline")
         return False
 
     cid = _resolve_chat_id(chat_id)
     if cid is None:
         # try message peer from kwargs
-        logger.debug("sendRichMessage skipped: bad chat_id %r", chat_id)
+        logger.warning("sendRichMessage skipped: bad chat_id %r", chat_id)
         return False
 
     result = await send_rich_message(str(token), cid, html, **kwargs)

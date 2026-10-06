@@ -166,51 +166,44 @@ class HikkariInfoMod(loader.Module):
                     "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
                 )
 
-        # Rich mode: table card like Heroku screenshot (Component | Current release)
+        # Rich mode: Heroku-style tree cards (works in normal messages).
+        # Real <table> Rich Messages only via Bot API sendRichMessage in infocmd.
         try:
-            from ..utils.rich import is_rich_enabled, info_rich_message
-            db = getattr(self, "_db", None)
-            if is_rich_enabled(db):
-                title = (
-                    utils.get_platform_emoji()
-                    if getattr(self._client, "hikkari_me", None)
-                    and getattr(self._client.hikkari_me, "premium", False)
-                    else "✨"
-                ) + " <b>Hikkari Userbot</b>"
-                build_s = str(data.get("build", ""))
-                rows = [
-                    ("Version", re.sub(r"<[^>]+>", "", str(data.get("version", "")))),
-                    ("Build", build_s if build_s else "—"),
-                    ("Hikkari TL", str(data.get("htl_ver", getattr(hikkaritl, "__version__", "?")))),
-                    ("Current user", str(data.get("user", "—"))),
-                    ("Prefix", re.sub(r"<[^>]+>", "", str(data.get("prefix", "")))),
-                    ("Uptime", str(data.get("uptime", "—"))),
-                    ("Ping", f"{data.get('ping', '—')} ms"),
-                    ("Platform", re.sub(r"<[^>]+>", "", str(data.get("platform", "—")))),
-                    ("OS", str(data.get("os", "—"))),
-                    ("Python", str(data.get("python_ver", "—"))),
-                    ("Update", re.sub(r"<[^>]+>", "", str(data.get("upd", "—")))),
-                ]
-                # Developers row
-                rows.append(
-                    (
-                        "Developers",
-                        '<a href="https://t.me/Wers1xx">@Wers1xx</a>',
-                    )
+            from ..utils.rich import is_rich_enabled
+            if is_rich_enabled(getattr(self, "_db", None)):
+                star = '<tg-emoji emoji-id="5283176512747507510">✨</tg-emoji>'
+                ver = data.get("version", "—")
+                bld = data.get("build", "—")
+                return (
+                    f"{star} <b>Hikkari Userbot</b>\n"
+                    f"<blockquote>┌\n"
+                    f"├  【{star}】 <b>Owner</b>: {data.get('me', '—')}\n"
+                    f"├  【{star}】 <b>Version</b>: {ver}\n"
+                    f"└</blockquote>\n"
+                    f"<blockquote>┌\n"
+                    f"├  【{star}】 <b>Prefix</b>: {data.get('prefix', '—')}\n"
+                    f"├  【{star}】 <b>Uptime</b>: {data.get('uptime', '—')}\n"
+                    f"├  【{star}】 <b>Branch</b>: {data.get('branch', '—')}\n"
+                    f"└</blockquote>\n"
+                    f"<blockquote>┌\n"
+                    f"├  【{star}】 <b>CPU</b>: {data.get('cpu_usage', '—')}\n"
+                    f"├  【{star}】 <b>RAM</b>: {data.get('ram_usage', '—')}\n"
+                    f"├  【{star}】 <b>Ping</b>: {data.get('ping', '—')} ms\n"
+                    f"└</blockquote>\n"
+                    f"<blockquote>┌\n"
+                    f"├  【{star}】 <b>Update</b>: {data.get('upd', '—')}\n"
+                    f"├  【{star}】 <b>Host</b>: {data.get('platform', '—')}\n"
+                    f"├  【{star}】 <b>OS</b>: {data.get('os', '—')}\n"
+                    f"├  【{star}】 <b>Python</b>: {data.get('python_ver', '—')}\n"
+                    f"├  【{star}】 <b>Build</b>: {bld}\n"
+                    f"├  【{star}】 <b>Hikkari TL</b>: {data.get('htl_ver', '—')}\n"
+                    f"├  【{star}】 <b>Developers</b>: "
+                    f'<a href="https://t.me/Wers1xx">@Wers1xx</a>\n'
+                    f"└</blockquote>\n"
+                    f"{star} <b>You are a happy owner of Hikkari!</b>"
                 )
-                footer = ""
-                try:
-                    if "beta" in str(version.branch).lower() or True:
-                        footer = (
-                            "\n<tg-emoji emoji-id=5465188915990255885>🌟</tg-emoji> "
-                            "<b>You are a happy owner of Hikkari!</b>"
-                        )
-                except Exception:
-                    pass
-                return info_rich_message(title=title, rows=rows, footer=footer, native=False)
         except Exception:
-            import logging as _log
-            _log.getLogger(__name__).debug("rich info fallback", exc_info=True)
+            logger.debug("rich info tree fallback", exc_info=True)
 
         return self.strings["info_message"].format(
                 (
@@ -243,49 +236,46 @@ class HikkariInfoMod(loader.Module):
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
 
-        # Native Rich Messages: ONLY via Bot API sendRichMessage (bot token).
-        # Regular sendMessage/edit strips <table> → garbage text. Never do that.
+        # Native Rich Message via inline bot (Bot API sendRichMessage)
         try:
-            from ..utils.rich import is_rich_enabled, info_rich_message
-            from ..utils.rich_api import try_send_rich
+            from ..utils.rich import is_rich_enabled
+            from ..utils.rich_api import try_send_rich, build_info_html
             if is_rich_enabled(getattr(self, "_db", None)):
-                # rebuild structured rows for native HTML
-                rendered_classic = await self._render_info(start)
-                # Prefer dedicated native HTML if we can pull data again cheaply:
-                # _render_info already returns classic; build native separately
-                data_html = None
+                rows = [
+                    ("Owner", "me"),
+                    ("Version", ".".join(map(str, version.__version__))),
+                    ("Build", str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "—"),
+                    ("Hikkari TL", str(getattr(hikkaritl, "__version__", "?"))),
+                    ("Prefix", utils.escape_html(self.get_prefix())),
+                    ("Uptime", utils.formatted_uptime()),
+                    ("Ping", f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms"),
+                    ("Platform", str(utils.get_named_platform()) if hasattr(utils, "get_named_platform") else "—"),
+                    ("Python", lib_platform.python_version()),
+                    ("Developers", "@Wers1xx"),
+                ]
+                html = build_info_html(
+                    title="Hikkari Userbot",
+                    rows=rows,
+                    footer="You are a happy owner of Hikkari!",
+                )
                 try:
-                    # Re-use same placeholders via a second lightweight path
-                    # Build native from the same _render_info internals by calling
-                    # info with native flag through a helper on self
-                    from ..utils.rich import is_rich_enabled as _
-                    # Construct native HTML table from strings in rendered is hard;
-                    # call internal builder
-                    native_html = await self._render_info_native(start)
-                    data_html = native_html
+                    chat = utils.get_chat_id(message)
                 except Exception:
-                    data_html = None
-                if data_html:
-                    peer = message.peer_id
-                    # Bot API chat id
-                    chat = None
-                    try:
-                        chat = utils.get_chat_id(message)
-                    except Exception:
-                        chat = peer
-                    ok = await try_send_rich(
-                        self._client,
-                        chat,
-                        data_html,
-                        reply_to_message_id=getattr(message, "reply_to_msg_id", None),
+                    chat = getattr(message, "chat_id", None) or message.peer_id
+                ok = await try_send_rich(self._client, chat, html)
+                if ok:
+                    if message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return
+                else:
+                    logger.warning(
+                        "sendRichMessage failed or skipped (token/chat). "
+                        "Classic Heroku-style tree will be used. "
+                        "Open dialog with your inline bot (/start) so bot can write."
                     )
-                    if ok:
-                        if message.out:
-                            with contextlib.suppress(Exception):
-                                await message.delete()
-                        return
         except Exception:
-            logger.debug("native rich info failed → classic", exc_info=True)
+            logger.warning("native rich path error", exc_info=True)
 
         try:
             match True:
