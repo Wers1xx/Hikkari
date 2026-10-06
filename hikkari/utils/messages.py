@@ -440,13 +440,14 @@ async def answer(
         invert_media = kwargs.pop("invert_media", False)
 
         if file is not None and invert_media:
-            # Telegram: invert/quote works reliably if we bootstrap with a short
-            # emoji message then edit to full caption + media.
+            # ✨ bootstrap → edit(text+file, invert). On any failure restore full text+media.
             reply_to = kwargs.pop("reply_to", None)
             extra = {k: v for k, v in kwargs.items() if k != "reply_to"}
+            result = None
             try:
                 if edit:
-                    await message.edit(RICH_STAR, link_preview=False)
+                    with contextlib.suppress(Exception):
+                        await message.edit("✨", link_preview=False)
                     result = await message.edit(
                         text,
                         file=file,
@@ -456,44 +457,68 @@ async def answer(
                     )
                 else:
                     sent = await message.respond(
-                        RICH_STAR,
+                        "✨",
                         reply_to=reply_to,
                         link_preview=False,
                     )
-                    result = await sent.edit(
-                        text,
-                        file=file,
-                        parse_mode=lambda t: (t, entities),
-                        invert_media=True,
-                        **extra,
-                    )
+                    try:
+                        result = await sent.edit(
+                            text,
+                            file=file,
+                            parse_mode=lambda t: (t, entities),
+                            invert_media=True,
+                            **extra,
+                        )
+                    except Exception:
+                        logger.debug("invert edit failed, resend file", exc_info=True)
+                        with contextlib.suppress(Exception):
+                            await sent.delete()
+                        result = await message.client.send_file(
+                            message.peer_id,
+                            file,
+                            caption=text,
+                            parse_mode=lambda t: (t, entities),
+                            reply_to=reply_to,
+                            invert_media=True,
+                            **extra,
+                        )
                     if message.out:
                         with contextlib.suppress(Exception):
                             await message.delete()
             except Exception:
-                logger.debug("invert bootstrap failed, fallback plain edit", exc_info=True)
-                if edit:
-                    result = await message.edit(
-                        text,
-                        file=file,
-                        parse_mode=lambda t: (t, entities),
-                        invert_media=True,
-                        **extra,
-                    )
-                else:
-                    sent = await message.respond(
-                        text,
-                        parse_mode=lambda t: (t, entities),
-                        reply_to=reply_to,
-                        **extra,
-                    )
-                    result = await sent.edit(
-                        text,
-                        file=file,
-                        parse_mode=lambda t: (t, entities),
-                        invert_media=True,
-                        **extra,
-                    )
+                logger.debug("invert path failed, plain file fallback", exc_info=True)
+                try:
+                    if edit:
+                        result = await message.edit(
+                            text,
+                            file=file,
+                            parse_mode=lambda t: (t, entities),
+                            **extra,
+                        )
+                    else:
+                        result = await message.client.send_file(
+                            message.peer_id,
+                            file,
+                            caption=text,
+                            parse_mode=lambda t: (t, entities),
+                            reply_to=reply_to,
+                            **extra,
+                        )
+                        if message.out:
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                except Exception:
+                    if edit:
+                        result = await message.edit(
+                            text, parse_mode=lambda t: (t, entities), **extra
+                        )
+                    else:
+                        result = await message.respond(
+                            text,
+                            parse_mode=lambda t: (t, entities),
+                            reply_to=reply_to,
+                            **extra,
+                        )
         elif file is not None:
             if edit:
                 # Edit existing outbound message with media (InputMediaWebPage works here)
