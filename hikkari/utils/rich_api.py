@@ -1,6 +1,7 @@
 # ©️ Wers1xx, 2025-2026
-# Telegram Bot API 10.1+ Rich Messages helper for Hikkari
-# 🌐 https://github.com/Wers1xx/Hikkari
+# Bot API 10.1+ sendRichMessage bridge for Hikkari
+# Official: https://core.telegram.org/bots/api#sendrichmessage
+# Rich Messages work ONLY via Bot API (bot token), not user MTProto edit.
 
 from __future__ import annotations
 
@@ -18,24 +19,12 @@ def html_table(
     rows: list[tuple[str, str]],
     *,
     header: tuple[str, str] = ("Component", "Current release"),
-    bordered: bool = True,
-    striped: bool = True,
-    compact: bool = False,
 ) -> str:
-    """Build official Rich Message <table> HTML."""
-    attrs = []
-    if bordered:
-        attrs.append("bordered")
-    if striped:
-        attrs.append("striped")
-    if compact:
-        attrs.append("compact")
-    attr = (" " + " ".join(attrs)) if attrs else ""
     h0, h1 = header
     body = [f"<tr><th>{h0}</th><th>{h1}</th></tr>"]
     for k, v in rows:
         body.append(f"<tr><td>{k}</td><td>{v}</td></tr>")
-    return f"<table{attr}>{''.join(body)}</table>"
+    return f"<table bordered striped>{''.join(body)}</table>"
 
 
 def build_info_html(
@@ -45,13 +34,69 @@ def build_info_html(
     footer: str = "",
     header: tuple[str, str] = ("Component", "Current release"),
 ) -> str:
-    parts = [
-        f"<h2>{title}</h2>",
-        html_table(rows, header=header),
-    ]
+    """Official Rich HTML for sendRichMessage (html field)."""
+    parts = [f"<h2>{title}</h2>", html_table(rows, header=header)]
     if footer:
-        parts.append(f"<p>{footer}</p>")
+        parts.append(f"<p><i>{footer}</i></p>")
     return "\n".join(parts)
+
+
+def _resolve_chat_id(chat_id) -> int | str | None:
+    if chat_id is None:
+        return None
+    if isinstance(chat_id, bool):
+        return None
+    if isinstance(chat_id, int):
+        return chat_id
+    if isinstance(chat_id, str):
+        s = chat_id.strip()
+        if s.startswith("@"):
+            return s
+        try:
+            return int(s)
+        except ValueError:
+            return s
+    for attr in ("user_id", "channel_id", "chat_id"):
+        v = getattr(chat_id, attr, None)
+        if isinstance(v, int) and v:
+            if attr == "channel_id":
+                return int(f"-100{v}")
+            if attr == "chat_id":
+                return -abs(v)
+            return v
+    return None
+
+
+def _find_bot_token(client) -> str | None:
+    token = None
+    try:
+        inline = getattr(client, "hikkari_inline", None) or getattr(
+            getattr(client, "loader", None), "inline", None
+        )
+        if inline is not None:
+            token = (
+                getattr(inline, "_token", None)
+                or getattr(inline, "token", None)
+                or getattr(inline, "bot_token", None)
+            )
+        if not token:
+            db = getattr(client, "hikkari_db", None) or getattr(
+                getattr(client, "loader", None), "_db", None
+            )
+            if db is not None:
+                for ns, key in (
+                    ("hikkari.inline", "bot_token"),
+                    ("hikka.inline", "bot_token"),
+                    ("heroku.inline", "bot_token"),
+                ):
+                    token = db.get(ns, key, None)
+                    if token:
+                        break
+    except Exception:
+        logger.debug("token lookup error", exc_info=True)
+    if token:
+        return str(token).strip()
+    return None
 
 
 async def send_rich_message(
@@ -62,64 +107,45 @@ async def send_rich_message(
     message_thread_id: int | None = None,
     reply_to_message_id: int | None = None,
     reply_markup: dict | None = None,
-    skip_entity_detection: bool = True,
 ) -> dict | None:
     """
-    Call Bot API sendRichMessage.
-    Returns parsed JSON result or None on failure.
+    Official Bot API sendRichMessage.
+    Payload uses rich_message.html (NOT fake rich_text blocks).
     """
-    if not token:
+    if not token or not html:
         return None
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "rich_message": {
             "html": html,
-            "skip_entity_detection": skip_entity_detection,
+            "skip_entity_detection": True,
         },
     }
     if message_thread_id is not None:
-        payload["message_thread_id"] = message_thread_id
+        payload["message_thread_id"] = int(message_thread_id)
     if reply_to_message_id is not None:
-        payload["reply_parameters"] = {"message_id": reply_to_message_id}
+        payload["reply_parameters"] = {"message_id": int(reply_to_message_id)}
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
 
     url = API.format(token=token, method="sendRichMessage")
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        timeout = aiohttp.ClientTimeout(total=25)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as resp:
                 data = await resp.json(content_type=None)
                 if not data.get("ok"):
                     logger.warning(
-                        "sendRichMessage failed: %s",
+                        "sendRichMessage failed chat=%s desc=%s",
+                        chat_id,
                         data.get("description") or data,
                     )
                     return None
+                logger.info("sendRichMessage OK chat=%s", chat_id)
                 return data.get("result")
-    except Exception:
-        logger.exception("sendRichMessage request error")
+    except Exception as e:
+        logger.warning("sendRichMessage request error: %s", e)
         return None
-
-
-def _resolve_chat_id(chat_id) -> int | str | None:
-    """Bot API needs int chat id or @username — not Peer objects."""
-    if chat_id is None:
-        return None
-    if isinstance(chat_id, int):
-        return chat_id
-    if isinstance(chat_id, str):
-        return chat_id
-    # Telethon PeerUser / PeerChannel / InputPeer*
-    for attr in ("user_id", "channel_id", "chat_id"):
-        v = getattr(chat_id, attr, None)
-        if isinstance(v, int):
-            # channels need -100 prefix for Bot API
-            if attr == "channel_id":
-                return int(f"-100{v}")
-            if attr == "chat_id":
-                return -v if v > 0 else v
-            return v
-    return None
 
 
 async def try_send_rich(
@@ -129,43 +155,35 @@ async def try_send_rich(
     **kwargs,
 ) -> bool:
     """
-    Send via Bot API sendRichMessage using the inline bot token.
-    CRITICAL: only bots can sendRichMessage reliably; user client path is unsupported.
+    Send Rich Message via inline bot token.
+    Tries current chat, then falls back to owner's user id (bot DM).
     """
-    token = None
-    try:
-        inline = getattr(client, "hikkari_inline", None) or getattr(
-            getattr(client, "loader", None), "inline", None
-        )
-        if inline is not None:
-            token = (
-                getattr(inline, "token", None)
-                or getattr(inline, "_token", None)
-                or getattr(inline, "bot_token", None)
-            )
-        if not token:
-            db = getattr(client, "hikkari_db", None)
-            if db is not None:
-                for key in (
-                    ("hikkari.inline", "bot_token"),
-                    ("hikka.inline", "bot_token"),
-                    ("heroku.inline", "bot_token"),
-                ):
-                    token = db.get(key[0], key[1], None)
-                    if token:
-                        break
-    except Exception:
-        logger.debug("token lookup failed", exc_info=True)
-        token = None
+    token = _find_bot_token(client)
     if not token:
-        logger.warning("sendRichMessage skipped: no bot token in DB/inline")
+        logger.warning(
+            "sendRichMessage skipped: no bot token "
+            "(create inline bot / .yesbot / .ch_bot_token)"
+        )
         return False
 
+    candidates: list[int | str] = []
     cid = _resolve_chat_id(chat_id)
-    if cid is None:
-        # try message peer from kwargs
-        logger.warning("sendRichMessage skipped: bad chat_id %r", chat_id)
-        return False
+    if cid is not None:
+        candidates.append(cid)
 
-    result = await send_rich_message(str(token), cid, html, **kwargs)
-    return result is not None
+    # Fallback: DM with bot (user must have /start'ed the bot)
+    try:
+        me = getattr(client, "hikkari_me", None) or await client.get_me()
+        uid = getattr(me, "id", None)
+        if isinstance(uid, int) and uid not in candidates:
+            candidates.append(uid)
+    except Exception:
+        pass
+
+    last_ok = False
+    for target in candidates:
+        result = await send_rich_message(token, target, html, **kwargs)
+        if result is not None:
+            last_ok = True
+            break
+    return last_ok

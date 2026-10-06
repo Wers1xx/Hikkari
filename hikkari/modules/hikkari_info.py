@@ -242,7 +242,7 @@ class HikkariInfoMod(loader.Module):
             from ..utils.rich_api import try_send_rich, build_info_html
             if is_rich_enabled(getattr(self, "_db", None)):
                 rows = [
-                    ("Owner", "me"),
+                    ("Owner", utils.escape_html(get_display_name(self._client.hikkari_me))),
                     ("Version", ".".join(map(str, version.__version__))),
                     ("Build", str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "—"),
                     ("Hikkari TL", str(getattr(hikkaritl, "__version__", "?"))),
