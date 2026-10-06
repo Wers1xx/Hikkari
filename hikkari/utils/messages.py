@@ -25,6 +25,7 @@ import typing
 
 import grapheme
 import hikkaritl
+from hikkaritl.errors.rpcerrorlist import UserRestrictedError, ChatWriteForbiddenError, PeerFloodError
 from hikkaritl.tl.types import (
     Channel,
     Chat,
@@ -276,6 +277,17 @@ def array_sum(array: list[list[typing.Any]], /) -> list[typing.Any]:
         result += item
 
     return result
+
+
+
+async def _answer_restricted_fallback(message: Message, response: str, **kwargs):
+    """If edit/reply fails due to account limits, drop reply to Saved Messages."""
+    client = message.client
+    try:
+        return await client.send_message("me", response, **{k: v for k, v in kwargs.items() if k in ("parse_mode", "link_preview", "file")})
+    except Exception:
+        logger.exception("answer fallback to Saved Messages failed")
+        return None
 
 
 async def answer(

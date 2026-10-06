@@ -370,7 +370,11 @@ class SecurityManager:
             logger.error("Security config contains unknown bits")
             return False
 
-        return config & self._db.get(__name__, "bounding_mask", DEFAULT_PERMISSIONS)
+        mask = self._db.get(__name__, "bounding_mask", DEFAULT_PERMISSIONS)
+        # bounding_mask=0 would deny every command — treat as full default
+        if not mask:
+            mask = DEFAULT_PERMISSIONS | ALL
+        return config & mask
 
     def _check_tsec_inline(self, user_id: int, command: str) -> bool:
         """
@@ -466,20 +470,23 @@ class SecurityManager:
             and not message.is_group
             and message.edit_date
         ):
-            async for event in self._client.iter_admin_log(
-                utils.get_chat_id(message),
-                limit=10,
-                edit=True,
-            ):
-                if event.action.prev_message.id == message.id:
-                    user_id = event.user_id
-                    is_channel = True
+            try:
+                async for event in self._client.iter_admin_log(
+                    utils.get_chat_id(message),
+                    limit=10,
+                    edit=True,
+                ):
+                    if event.action.prev_message.id == message.id:
+                        user_id = event.user_id
+                        is_channel = True
+                        break
+            except Exception:
+                logger.debug("iter_admin_log failed (non-fatal)", exc_info=True)
 
-        if (
-            user_id == self._client.tg_id
-            or getattr(message, "out", False)
-            and not is_channel
-        ):
+        # Own outgoing messages always allowed (spam-ban must not block self-commands)
+        if message is not None and getattr(message, "out", False) and not is_channel:
+            return True
+        if user_id and user_id == self._client.tg_id:
             return True
 
         logger.debug("Checking security match for %s", config)

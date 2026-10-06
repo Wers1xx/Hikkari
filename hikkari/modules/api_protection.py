@@ -231,8 +231,12 @@ class APIRatelimiterMod(loader.Module):
                         self._lock = False
 
             # While locked, wait a bit so callers don't pile up more requests
-            while self._lock and time.perf_counter() > self._suspend_until:
+            waited = 0.0
+            while self._lock and waited < float(self.config.get('local_floodwait', 30) or 30) + 5:
                 await asyncio.sleep(0.2)
+                waited += 0.2
+            if self._lock:
+                self._lock = False
 
             return await old_call(sender, request, ordered, flood_sleep_threshold)
 

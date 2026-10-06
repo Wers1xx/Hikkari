@@ -408,18 +408,19 @@ class CommandDispatcher:
             return False
 
         if message.is_channel and message.edit_date and not message.is_group:
-            async for event in self._client.iter_admin_log(
-                chat_id,
-                limit=10,
-                edit=True,
-            ):
-                if event.action.prev_message.id == message.id:
-                    if event.user_id != self._client.tg_id:
-                        logger.debug("Ignoring edit in channel")
-                        return False
-
-                    break
-
+            try:
+                async for event in self._client.iter_admin_log(
+                    chat_id,
+                    limit=10,
+                    edit=True,
+                ):
+                    if event.action.prev_message.id == message.id:
+                        if event.user_id != self._client.tg_id:
+                            logger.debug("Ignoring edit in channel")
+                            return False
+                        break
+            except Exception:
+                logger.debug("iter_admin_log in handle_command failed", exc_info=True)
             return False
 
         _cmd_offset = len(prefix) + len(_cmd) - len(_cmd.strip())
@@ -463,7 +464,11 @@ class CommandDispatcher:
         event: events.NewMessage | events.MessageDeleted,
     ):
         """Handle all commands"""
-        message = await self._handle_command(event)
+        try:
+            message = await self._handle_command(event)
+        except Exception:
+            logger.exception("handle_command internal error")
+            return
         if not message:
             return
 
@@ -530,8 +535,12 @@ class CommandDispatcher:
                     f' class="language-logs">{utils.escape_html(exc)}</code></pre>'
                 )
 
-        with contextlib.suppress(Exception):
+        try:
             await (message.edit if message.out else message.reply)(txt)
+        except Exception as e:
+            logger.warning("command_exc reply failed: %s", e)
+            with contextlib.suppress(Exception):
+                await message.client.send_message("me", txt)
 
     async def watcher_exc(self, *_):
         logger.exception("Error running watcher", extra={"stack": inspect.stack()})
