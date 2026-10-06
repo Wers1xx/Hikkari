@@ -33,9 +33,14 @@ def build_info_html(
     rows: list[tuple[str, str]],
     footer: str = "",
     header: tuple[str, str] = ("Component", "Current release"),
+    banner_url: str | None = None,
 ) -> str:
-    """Official Rich HTML for sendRichMessage (html field)."""
-    parts = [f"<h2>{title}</h2>", html_table(rows, header=header)]
+    """Official Rich HTML (html field) for answerInlineQuery / sendRichMessage."""
+    parts: list[str] = []
+    if banner_url and str(banner_url).startswith(("http://", "https://")):
+        parts.append(f'<figure><img src="{banner_url}"/></figure>')
+    parts.append(f"<h2>{title}</h2>")
+    parts.append(html_table(rows, header=header))
     if footer:
         parts.append(f"<p><i>{footer}</i></p>")
     return "\n".join(parts)

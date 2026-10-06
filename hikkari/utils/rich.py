@@ -29,17 +29,37 @@ _KV_RE = re.compile(
 
 
 def is_rich_enabled(db: Any = None) -> bool:
+    """DB flag only. Prefer can_use_rich() for Premium gate."""
     if db is None:
-        return True
+        return False
     try:
         val = db.get(RICH_DB_MOD, RICH_DB_KEY, None)
         if val is None:
             val = db.get("Settings", "rich_mode", None)
         if val is None:
-            return True
+            return False
         return bool(val)
     except Exception:
-        return True
+        return False
+
+
+def can_use_rich(client: Any = None, db: Any = None) -> bool:
+    """
+    Rich Messages require:
+      1) rich_mode enabled in Settings
+      2) account has Telegram Premium (native rich is Premium/bot; userbot owner needs Premium)
+    """
+    if not is_rich_enabled(db):
+        return False
+    if client is None:
+        return False
+    try:
+        me = getattr(client, "hikkari_me", None)
+        if me is None:
+            return False
+        return bool(getattr(me, "premium", False))
+    except Exception:
+        return False
 
 
 def get_rich_template(db: Any = None) -> str:
@@ -180,4 +200,55 @@ def info_rich_message(
     parts = [title, rich_table(rows, header=header, native=False)]
     if footer:
         parts.append(footer)
+    return "\n".join(parts)
+
+
+def to_rich_html(text: str, *, banner_url: str | None = None) -> str:
+    """
+    Convert normal module HTML into Rich Message HTML.
+    - optional banner as <figure><img>
+    - key:value blocks → <table>
+    - rest → <p> / keep blockquotes as <blockquote>
+    """
+    if not text:
+        return ""
+    parts: list[str] = []
+    if banner_url and str(banner_url).startswith(("http://", "https://")):
+        parts.append(f'<figure><img src="{html_mod.escape(str(banner_url))}"/></figure>')
+
+    # Already has table/h2 — treat as rich-ready
+    if "<table" in text.lower() or "<h2" in text.lower() or "<figure" in text.lower():
+        parts.append(text)
+        return "\n".join(parts)
+
+    # Try KV table extraction
+    table = rich_blocks_from_kv_text(text)
+    if table:
+        # strip those lines from body
+        body_lines = []
+        for line in text.splitlines():
+            plain = _TG_EMOJI_RE.sub(lambda m: (m.group(1) or m.group(2) or "").strip(), line)
+            plain = re.sub(r"<[^>]+>", "", plain).strip()
+            if _KV_RE.match(plain or ""):
+                continue
+            body_lines.append(line)
+        body = "\n".join(body_lines).strip()
+        if body:
+            # wrap remaining as paragraphs
+            for block in re.split(r"\n{2,}", body):
+                block = block.strip()
+                if not block:
+                    continue
+                if block.startswith("<blockquote"):
+                    parts.append(block)
+                else:
+                    parts.append(f"<p>{block}</p>")
+        parts.append(table)
+        return "\n".join(parts)
+
+    # Generic: keep structure, wrap loose text
+    if "<blockquote" in text:
+        parts.append(text)
+    else:
+        parts.append(f"<p>{text}</p>")
     return "\n".join(parts)

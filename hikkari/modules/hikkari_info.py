@@ -253,10 +253,12 @@ class HikkariInfoMod(loader.Module):
                     ("Python", lib_platform.python_version()),
                     ("Developers", "@Wers1xx"),
                 ]
+                banner = self.config.get("banner_url") or None
                 html = build_info_html(
                     title="Hikkari Userbot",
                     rows=rows,
                     footer="You are a happy owner of Hikkari!",
+                    banner_url=banner if isinstance(banner, str) else None,
                 )
                 m = await self.inline.rich(
                     message,

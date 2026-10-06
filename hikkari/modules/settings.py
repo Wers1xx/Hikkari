@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from pathlib import Path
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
@@ -108,7 +110,7 @@ class CoreMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "rich_mode",
-                True,
+                False,
                 lambda: "Rich mode: premium emoji / blockquotes in built-in texts",
                 validator=loader.validators.Boolean(),
             ),
@@ -811,6 +813,16 @@ class CoreMod(loader.Module):
 
     async def on_config_change(self, option=None, value=None):
         try:
+            # Rich Messages only for Telegram Premium owners
+            if self.config.get("rich_mode"):
+                me = getattr(getattr(self, "_client", None), "hikkari_me", None)
+                if me is not None and not getattr(me, "premium", False):
+                    self.config["rich_mode"] = False
+                    self._db.set("hikkari.rich", "enabled", False)
+                    logger.warning(
+                        "rich_mode disabled: Telegram Premium required for Rich Messages"
+                    )
+                    return
             self._db.set("hikkari.rich", "enabled", bool(self.config["rich_mode"]))
             self._db.set(
                 "hikkari.rich",

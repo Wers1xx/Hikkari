@@ -453,6 +453,7 @@ class Form(InlineUnit):
         title: str = "Hikkari",
         description: str = "Rich message",
         silent: bool = False,
+        reply_markup: typing.Optional[list] = None,
     ) -> typing.Union[Message, bool]:
         """
         Send a native Rich Message via inline (appears with via @bot),
@@ -470,13 +471,14 @@ class Form(InlineUnit):
             return False
 
         unit_id = utils.rand(16)
+        markup = self._validate_markup(reply_markup) if reply_markup else []
         self._units[unit_id] = {
             "type": "rich",
             "rich_html": html,
             "text": html,  # fallback if client ignores rich
             "title": title,
             "description": description,
-            "buttons": [],
+            "buttons": markup or [],
             "caller": message,
             "chat": None,
             "message_id": None,
@@ -603,6 +605,30 @@ class Form(InlineUnit):
                     logger.warning("rich inline: missing token or query_id token=%s qid=%s", bool(token), qid)
                     return
                 html = form.get("rich_html") or form.get("text") or ""
+                # Bot API inline keyboard for article (optional)
+                rm = None
+                buttons = form.get("buttons") or []
+                if buttons:
+                    try:
+                        rm = {"inline_keyboard": []}
+                        for row in buttons:
+                            r = []
+                            for btn in row:
+                                if not isinstance(btn, dict):
+                                    continue
+                                if btn.get("url"):
+                                    r.append({"text": btn.get("text", "•"), "url": btn["url"]})
+                                elif btn.get("data") or btn.get("callback"):
+                                    r.append({
+                                        "text": btn.get("text", "•"),
+                                        "callback_data": str(btn.get("data") or "noop")[:64],
+                                    })
+                            if r:
+                                rm["inline_keyboard"].append(r)
+                        if not rm["inline_keyboard"]:
+                            rm = None
+                    except Exception:
+                        rm = None
                 ok = await answer_inline_rich(
                     str(token),
                     qid,
@@ -610,6 +636,7 @@ class Form(InlineUnit):
                     title=form.get("title") or "Hikkari",
                     description=form.get("description") or "Rich",
                     result_id=form.get("uid") or utils.rand(16),
+                    reply_markup=rm,
                 )
                 if not ok and form.get("uid") in self._error_events:
                     self._error_events[form["uid"]].set()

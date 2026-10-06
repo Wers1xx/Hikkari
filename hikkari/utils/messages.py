@@ -55,7 +55,7 @@ emoji_pattern = re.compile(
 parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
 try:
-    from .rich import apply_rich, is_rich_enabled, STAR as RICH_STAR
+    from .rich import apply_rich, is_rich_enabled, can_use_rich, to_rich_html, STAR as RICH_STAR
 except Exception:  # pragma: no cover
     def apply_rich(t, db=None):
         return t
@@ -353,6 +353,42 @@ async def answer(
                 **kwargs,
             )
             return result
+
+    # --- Rich mode (Premium + rich_mode): via @bot native Rich Message ---
+    try:
+        client = getattr(message, "client", None)
+        db = getattr(getattr(client, "loader", None), "_db", None) or getattr(
+            client, "hikkari_db", None
+        )
+        if (
+            client is not None
+            and can_use_rich(client, db)
+            and isinstance(response, str)
+            and len(response.strip()) >= 8
+            and not isinstance(message, (InlineMessage, InlineCall, BotInlineCall))
+        ):
+            inline = getattr(getattr(client, "loader", None), "inline", None)
+            if inline is not None and getattr(inline, "init_complete", False):
+                banner = kwargs.get("file")
+                banner_url = None
+                if isinstance(banner, str) and banner.startswith(("http://", "https://")):
+                    banner_url = banner
+                # Don't pass file into classic path if we go rich
+                html = to_rich_html(response, banner_url=banner_url)
+                # Attach buttons if reply_markup was requested — form handles buttons;
+                # for pure text use rich
+                if reply_markup is None:
+                    m = await inline.rich(
+                        message,
+                        html,
+                        title="Hikkari",
+                        description="Rich",
+                        silent=kwargs.get("silent", True),
+                    )
+                    if m:
+                        return m
+    except Exception:
+        logger.debug("rich via answer() failed, classic path", exc_info=True)
 
     if isinstance(message, (InlineMessage, InlineCall, BotInlineCall)):
         await message.edit(response)
