@@ -17,6 +17,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import time
+import re
 import psutil
 import logging
 import hikkaritl
@@ -63,13 +64,13 @@ class HikkariInfoMod(loader.Module):
             ),
             loader.ConfigValue(
                 "quote_media",
-                False,
+                True,
                 "Switch preview media to quote",
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
                 "invert_media",
-                False,
+                True,
                 "Switch preview invert media",
                 validator=loader.validators.Boolean(),
             ),
@@ -157,20 +158,64 @@ class HikkariInfoMod(loader.Module):
         data = await utils.get_placeholders(data, self.config["custom_message"])
         if self.config["custom_message"]:
             try:
-                placeholders_msg = self.config["custom_message"].format(**data)
+                return self.config["custom_message"].format(**data)
             except KeyError:
                 logger.exception("Missing placeholder in custom_message")
-                placeholders_msg = (
+                return (
                     "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
                 )
-        return (
-            placeholders_msg
-            if self.config["custom_message"]
-            else self.strings["info_message"].format(
+
+        # Rich mode: table card like Heroku screenshot (Component | Current release)
+        try:
+            from ..utils.rich import is_rich_enabled, info_rich_message
+            db = getattr(self, "_db", None)
+            if is_rich_enabled(db):
+                title = (
+                    utils.get_platform_emoji()
+                    if getattr(self._client, "hikkari_me", None)
+                    and getattr(self._client.hikkari_me, "premium", False)
+                    else "✨"
+                ) + " <b>Hikkari Userbot</b>"
+                build_s = str(data.get("build", ""))
+                rows = [
+                    ("Version", re.sub(r"<[^>]+>", "", str(data.get("version", "")))),
+                    ("Build", build_s if build_s else "—"),
+                    ("Hikkari TL", str(data.get("htl_ver", getattr(hikkaritl, "__version__", "?")))),
+                    ("Current user", str(data.get("user", "—"))),
+                    ("Prefix", re.sub(r"<[^>]+>", "", str(data.get("prefix", "")))),
+                    ("Uptime", str(data.get("uptime", "—"))),
+                    ("Ping", f"{data.get('ping', '—')} ms"),
+                    ("Platform", re.sub(r"<[^>]+>", "", str(data.get("platform", "—")))),
+                    ("OS", str(data.get("os", "—"))),
+                    ("Python", str(data.get("python_ver", "—"))),
+                    ("Update", re.sub(r"<[^>]+>", "", str(data.get("upd", "—")))),
+                ]
+                # Developers row
+                rows.append(
+                    (
+                        "Developers",
+                        '<a href="https://t.me/Wers1xx">@Wers1xx</a>',
+                    )
+                )
+                footer = ""
+                try:
+                    if "beta" in str(version.branch).lower() or True:
+                        footer = (
+                            "\n<tg-emoji emoji-id=5465188915990255885>🌟</tg-emoji> "
+                            "<b>You are a happy owner of Hikkari!</b>"
+                        )
+                except Exception:
+                    pass
+                return info_rich_message(title=title, rows=rows, footer=footer)
+        except Exception:
+            import logging as _log
+            _log.getLogger(__name__).debug("rich info fallback", exc_info=True)
+
+        return self.strings["info_message"].format(
                 (
                     utils.get_platform_emoji()
-                    if self._client.hikkari_me.premium and self.config["show_hikkari"]
-                    else ""
+                    if self._client.hikkari_me.premium
+                    else "✨ Hikkari"
                 ),
                 me=me,
                 version=_version,
@@ -185,7 +230,7 @@ class HikkariInfoMod(loader.Module):
                 os=self._get_os_name() or self.strings["non_detectable"],
                 python_ver=lib_platform.python_version(),
             )
-        )
+
 
     @loader.command()
     async def infocmd(self, message: Message):
@@ -195,6 +240,15 @@ class HikkariInfoMod(loader.Module):
 
         banner = self.config["banner_url"]
         media = utils.resolve_banner_media(banner)
+        # Rich mode → prefer quote/invert like Heroku info card
+        try:
+            from ..utils.rich import is_rich_enabled
+            if is_rich_enabled(getattr(self, "_db", None)):
+                if self.config.get("banner_url"):
+                    # force webpage quote when rich
+                    pass  # user config still respected below
+        except Exception:
+            pass
         # quote_media only wraps remote http(s) as webpage; local files stay as file=
         if (
             media
