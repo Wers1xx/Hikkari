@@ -162,15 +162,9 @@ class Quickstart(loader.Module):
 
         except Exception:
             logger.exception(
-                "Can't find and/or create content channel
-"
-                "This may cause several consequences, such as:
-"
-                "- Non working inline-logs, backups, assets features
-"
-                "- Often caused by spam ban (UserRestricted)
-"
-                "Userbot continues to run. Use .ch_bot_token for inline bot."
+                "Can't find and/or create content channel "
+                "(spam ban / restricted). Userbot continues; "
+                "use .ch_bot_token for inline bot."
             )
 
         await self.request_join(
