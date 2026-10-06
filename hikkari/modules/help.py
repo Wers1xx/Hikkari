@@ -1,3 +1,4 @@
+import re
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -485,9 +486,61 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
+        async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
+            """sections: list of (title, joined_module_html_lines)"""
+            try:
+                from ..utils.rich import can_use_rich
+                from ..utils.rich_api import pick_banner_url, html_table
+                if not can_use_rich(self._client, self._db):
+                    return False
+                if not getattr(self.inline, "init_complete", False):
+                    return False
+                banner_url = pick_banner_url(self.config.get("banner_url"))
+                parts = []
+                if banner_url:
+                    parts.append(f'<figure><img src="{banner_url}"/></figure>')
+                parts.append(f"<h2>{text_header}</h2>")
+                for sec_title, joined in sections:
+                    if not joined or not joined.strip():
+                        continue
+                    rows = []
+                    # lines like: emoji <code>Name</code>: ( cmd | cmd )
+                    for raw in joined.split("\n"):
+                        raw = raw.strip()
+                        if not raw:
+                            continue
+                        # extract module name from <code>...</code>
+                        m = re.search(r"<code>([^<]+)</code>", raw)
+                        name = m.group(1) if m else raw[:40]
+                        # commands after :
+                        cmds = ""
+                        if ":" in raw:
+                            after = raw.split(":", 1)[1]
+                            after = re.sub(r"<[^>]+>", "", after).strip()
+                            cmds = after.strip(" ()")
+                        rows.append((name, cmds or "—"))
+                    if rows:
+                        parts.append(f"<p><b>{sec_title}</b></p>")
+                        parts.append(html_table(rows, header=("Module", "Commands")))
+                html = "\n".join(parts)
+                m = await self.inline.rich(
+                    message,
+                    html,
+                    title="Hikkari Help",
+                    description=text_header[:80],
+                    thumbnail_url=banner_url,
+                    silent=True,
+                )
+                return bool(m)
+            except Exception:
+                logger.debug("help rich failed", exc_info=True)
+                return False
+
 
         match True:
             case _ if only_core:
+                if await _send_help_rich(reply, [("Core", "".join(core_))]):
+                    return
                 await utils.answer(
                     message,
                     (
@@ -505,8 +558,11 @@ class Help(loader.Module):
                     file=banner,
                     invert_media=self.config["invert_media"],
                     photo=banner_url_str,
+                    skip_rich=True,
                 )
             case _ if only_loaded:
+                if await _send_help_rich(reply, [("Loaded", "".join(plain_ + (no_commands_ if force else [])))]):
+                    return
                 await utils.answer(
                     message,
                     (
@@ -524,8 +580,11 @@ class Help(loader.Module):
                     file=banner,
                     invert_media=self.config["invert_media"],
                     photo=banner_url_str,
+                    skip_rich=True,
                 )
             case _:
+                if await _send_help_rich(reply, [("Core", "".join(core_)), ("Loaded", "".join(plain_ + (no_commands_ if force else [])))]):
+                    return
                 await utils.answer(
                     message,
                     (
@@ -544,6 +603,7 @@ class Help(loader.Module):
                     file=banner,
                     invert_media=self.config["invert_media"],
                     photo=banner_url_str,
+                    skip_rich=True,
                 )
 
     @loader.command(

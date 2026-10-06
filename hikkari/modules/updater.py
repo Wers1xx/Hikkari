@@ -525,6 +525,7 @@ class UpdaterMod(loader.Module):
         if secure_boot:
             self._db.set(loader.__name__, "secure_boot", True)
 
+        # Never use Rich for restart status (must be editable by user/bot cleanly)
         msg_obj = await utils.answer(
             msg_obj,
             self.strings["restarting_caption"].format(
@@ -532,6 +533,7 @@ class UpdaterMod(loader.Module):
                 if self._client.hikkari_me.premium
                 else "Hikkari"
             ),
+            skip_rich=True,
         )
 
         await self.process_restart_message(msg_obj)
@@ -874,13 +876,25 @@ class UpdaterMod(loader.Module):
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
-            await self._client.edit_message(chat_id, message_id, msg)
+            try:
+                await self._client.edit_message(chat_id, message_id, msg)
+            except Exception as e:
+                # via-bot / InlineBotRequiredError — send new + delete old
+                logger.warning("restart edit failed (%s), fallback send", e)
+                try:
+                    await self._client.send_message(chat_id, msg)
+                    await self._client.delete_messages(chat_id, message_id)
+                except Exception:
+                    logger.debug("restart fallback failed", exc_info=True)
             return
 
-        await self.inline.bot.edit_message_text(
-            inline_message_id=self._deserialize_inline_message_id(str(ms)),
-            text=self.inline.sanitise_text(msg),
-        )
+        try:
+            await self.inline.bot.edit_message_text(
+                inline_message_id=self._deserialize_inline_message_id(str(ms)),
+                text=self.inline.sanitise_text(msg),
+            )
+        except Exception:
+            logger.debug("inline restart edit failed", exc_info=True)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -916,15 +930,28 @@ class UpdaterMod(loader.Module):
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
-            await self._client.edit_message(chat_id, message_id, msg)
-            await asyncio.sleep(60)
-            await self._client.delete_messages(chat_id, message_id)
+            try:
+                await self._client.edit_message(chat_id, message_id, msg)
+            except Exception as e:
+                logger.warning("full_restart edit failed (%s), fallback", e)
+                try:
+                    await self._client.send_message(chat_id, msg)
+                except Exception:
+                    pass
+            try:
+                await asyncio.sleep(60)
+                await self._client.delete_messages(chat_id, message_id)
+            except Exception:
+                pass
             return
 
-        await self.inline.bot.edit_message_text(
-            inline_message_id=self._deserialize_inline_message_id(str(ms)),
-            text=self.inline.sanitise_text(msg),
-        )
+        try:
+            await self.inline.bot.edit_message_text(
+                inline_message_id=self._deserialize_inline_message_id(str(ms)),
+                text=self.inline.sanitise_text(msg),
+            )
+        except Exception:
+            logger.debug("inline full_restart edit failed", exc_info=True)
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""

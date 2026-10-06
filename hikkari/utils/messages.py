@@ -355,13 +355,16 @@ async def answer(
             return result
 
     # --- Rich mode (Premium + rich_mode): via @bot native Rich Message ---
+    # skip_rich=True → classic (restart, internal status, config stays on form)
+    _skip_rich = bool(kwargs.pop("skip_rich", False))
     try:
         client = getattr(message, "client", None)
         db = getattr(getattr(client, "loader", None), "_db", None) or getattr(
             client, "hikkari_db", None
         )
         if (
-            client is not None
+            not _skip_rich
+            and client is not None
             and can_use_rich(client, db)
             and isinstance(response, str)
             and len(response.strip()) >= 8

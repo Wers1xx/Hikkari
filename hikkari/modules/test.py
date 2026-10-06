@@ -1,3 +1,4 @@
+import re
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -389,11 +390,45 @@ class TestMod(loader.Module):
         except KeyError:
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
+        # Rich mode: native table via @bot + banner
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import pick_banner_url, build_info_html
+            if can_use_rich(self._client, self._db) and getattr(self.inline, "init_complete", False):
+                burl = pick_banner_url(self.config.get("banner_url"))
+                rows = [
+                    ("Ping", f"{data['ping']} ms"),
+                    ("Uptime", str(data["uptime"])),
+                    ("Version", str(data["version"])),
+                    ("Build", re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40]),
+                    ("Platform", str(data.get("platform", ""))),
+                    ("Python", str(data.get("python_ver", ""))),
+                ]
+                html = build_info_html(
+                    title="Hikkari Ping",
+                    rows=rows,
+                    footer=str(data.get("ping_hint") or ""),
+                    banner_url=burl,
+                )
+                m = await self.inline.rich(
+                    message,
+                    html,
+                    title="Hikkari Ping",
+                    description=f"{data['ping']} ms",
+                    thumbnail_url=burl,
+                    silent=True,
+                )
+                if m:
+                    return
+        except Exception:
+            logger.debug("ping rich failed", exc_info=True)
+
         await utils.answer(
             message,
             placeholders_msg,
             file=banner,
             invert_media=self.config["invert_media"],
+            skip_rich=True,
         )
 
     async def client_ready(self):
