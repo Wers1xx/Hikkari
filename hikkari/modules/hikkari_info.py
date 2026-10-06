@@ -236,36 +236,52 @@ class HikkariInfoMod(loader.Module):
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
 
-        # Rich via @bot: same path as inline forms (inline_query → click)
+        # Rich via @bot (Premium + rich_mode)
         try:
-            from ..utils.rich import is_rich_enabled
-            from ..utils.rich_api import build_info_html
-            if is_rich_enabled(getattr(self, "_db", None)) and getattr(self, "inline", None):
-                rows = [
-                    ("Owner", utils.escape_html(get_display_name(self._client.hikkari_me))),
-                    ("Version", ".".join(map(str, version.__version__))),
-                    ("Build", str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "—"),
-                    ("Hikkari TL", str(getattr(hikkaritl, "__version__", "?"))),
-                    ("Prefix", utils.escape_html(self.get_prefix())),
-                    ("Uptime", utils.formatted_uptime()),
-                    ("Ping", f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms"),
-                    ("Platform", str(utils.get_named_platform()) if hasattr(utils, "get_named_platform") else "—"),
-                    ("Python", lib_platform.python_version()),
-                    ("Developers", "@Wers1xx"),
-                ]
-                from ..utils.rich_api import pick_banner_url
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import build_info_html, pick_banner_url
+            if can_use_rich(self._client, getattr(self, "_db", None)) and getattr(
+                self, "inline", None
+            ):
                 banner_url = pick_banner_url(self.config.get("banner_url"))
-                html = build_info_html(
-                    title="Hikkari Userbot",
-                    rows=rows,
-                    footer="You are a happy owner of Hikkari!",
-                    banner_url=banner_url,
-                )
+                custom = self.config.get("custom_message")
+                if custom:
+                    # User-authored Rich HTML (custom_message) + placeholders
+                    data = await self._info_placeholders(start)
+                    try:
+                        html = str(custom).format(**data)
+                    except Exception:
+                        logger.exception("custom_message format failed")
+                        html = str(custom)
+                    if banner_url and "<figure" not in html.lower():
+                        html = (
+                            f'<figure><img src="{banner_url}"/></figure>\n'
+                            + html
+                        )
+                else:
+                    rows = [
+                        ("Owner", utils.escape_html(get_display_name(self._client.hikkari_me))),
+                        ("Version", ".".join(map(str, version.__version__))),
+                        ("Build", str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "—"),
+                        ("Hikkari TL", str(getattr(hikkaritl, "__version__", "?"))),
+                        ("Prefix", utils.escape_html(self.get_prefix())),
+                        ("Uptime", utils.formatted_uptime()),
+                        ("Ping", f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms"),
+                        ("Platform", str(utils.get_named_platform()) if hasattr(utils, "get_named_platform") else "—"),
+                        ("Python", lib_platform.python_version()),
+                        ("Developers", "@Wers1xx"),
+                    ]
+                    html = build_info_html(
+                        title="Hikkari Userbot",
+                        rows=rows,
+                        footer="You are a happy owner of Hikkari!",
+                        banner_url=banner_url,
+                    )
                 m = await self.inline.rich(
                     message,
                     html,
                     title="Hikkari Info",
-                    description="Component · Current release",
+                    description="Rich info",
                     thumbnail_url=banner_url,
                 )
                 if m:

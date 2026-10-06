@@ -520,8 +520,12 @@ class Help(loader.Module):
                             cmds = after.strip(" ()")
                         rows.append((name, cmds or "—"))
                     if rows:
-                        parts.append(f"<p><b>{sec_title}</b></p>")
-                        parts.append(html_table(rows, header=("Module", "Commands")))
+                        table = html_table(rows, header=("Module", "Commands"))
+                        parts.append(
+                            f"<details><summary><b>{sec_title}</b> ({len(rows)})</summary>\n"
+                            f"{table}\n"
+                            f"</details>"
+                        )
                 html = "\n".join(parts)
                 m = await self.inline.rich(
                     message,
