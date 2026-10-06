@@ -29,7 +29,80 @@ from ..inline.types import InlineCall
 class CoreMod(loader.Module):
     """Control core userbot settings"""
 
-    strings = {"name": "Settings"}
+    strings = {
+        "name": "Settings",
+        "richhelp": (
+            "<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji> <b>Hikkari Rich mode</b>\n\n"
+            "<b>Status:</b> <code>{status}</code>\n\n"
+            "<blockquote expandable><b>What is Rich?</b>\n"
+            "Rich texts are messages with Telegram formatting: premium emoji, "
+            "blockquotes, tables, spoilers, and media quote (banner above text).\n"
+            "Like Heroku <code>.info</code> — structured layout + optional webpage banner.\n"
+            "When <b>ON</b> — built-in replies keep rich markup.\n"
+            "When <b>OFF</b> — premium emoji tags are stripped to plain characters.</blockquote>\n\n"
+            "<blockquote expandable><b>Toggle</b>\n"
+            "• <code>{prefix}cfg Settings rich_mode</code> — true/false\n"
+            "• Or <code>{prefix}config Settings</code> → rich_mode</blockquote>\n\n"
+            "<blockquote expandable><b>Custom template</b>\n"
+            "<code>{prefix}cfg Settings rich_template</code>\n\n"
+            "Placeholders:\n"
+            "• <code>{{text}}</code> — original module text\n"
+            "• <code>{{star}}</code> — Hikkari star emoji\n\n"
+            "Examples:\n"
+            "<code>{{text}}</code>\n"
+            "<code>&lt;blockquote&gt;{{text}}&lt;/blockquote&gt;</code>\n"
+            "<code>{{star}} {{text}}</code></blockquote>\n\n"
+            "<blockquote expandable><b>quote_media / invert_media</b>\n"
+            "Banner above the message (like Heroku info).\n"
+            "Configs:\n"
+            "• Help → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code>\n"
+            "• HikkariInfo → <code>quote_media</code>, <code>invert_media</code>\n"
+            "• HikkariConfig → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code></blockquote>\n\n"
+            "<blockquote expandable><b>Tips</b>\n"
+            "• Use only HTML Telegram understands\n"
+            "• Test: <code>{prefix}ping</code> / <code>{prefix}help</code> / <code>{prefix}info</code>\n"
+            "• Premium sees custom emoji; others see fallback</blockquote>"
+        ),
+        "rich_status_on": "ON ✨",
+        "rich_status_off": "OFF",
+    }
+
+    strings_ru = {
+        "richhelp": (
+            "<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji> <b>Режим Rich в Hikkari</b>\n\n"
+            "<b>Статус:</b> <code>{status}</code>\n\n"
+            "<blockquote expandable><b>Что такое Rich?</b>\n"
+            "Rich — сообщения с оформлением Telegram: премиум-эмодзи, "
+            "blockquote, таблицы, спойлеры и media quote (баннер над текстом).\n"
+            "Как у Heroku <code>.info</code> — таблица/блоки + баннер сверху.\n"
+            "Если <b>ВКЛ</b> — встроенные ответы сохраняют rich-разметку.\n"
+            "Если <b>ВЫКЛ</b> — теги прем-эмодзи убираются до обычных символов.</blockquote>\n\n"
+            "<blockquote expandable><b>Включение</b>\n"
+            "• <code>{prefix}cfg Settings rich_mode</code> — true/false\n"
+            "• Или <code>{prefix}config Settings</code> → rich_mode</blockquote>\n\n"
+            "<blockquote expandable><b>Свой шаблон</b>\n"
+            "<code>{prefix}cfg Settings rich_template</code>\n\n"
+            "Плейсхолдеры:\n"
+            "• <code>{{text}}</code> — исходный текст модуля\n"
+            "• <code>{{star}}</code> — звезда Hikkari\n\n"
+            "Примеры:\n"
+            "<code>{{text}}</code>\n"
+            "<code>&lt;blockquote&gt;{{text}}&lt;/blockquote&gt;</code>\n"
+            "<code>{{star}} {{text}}</code></blockquote>\n\n"
+            "<blockquote expandable><b>quote_media / invert_media</b>\n"
+            "Баннер над сообщением (как info в Heroku).\n"
+            "Конфиги:\n"
+            "• Help → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code>\n"
+            "• HikkariInfo → <code>quote_media</code>, <code>invert_media</code>\n"
+            "• HikkariConfig → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code></blockquote>\n\n"
+            "<blockquote expandable><b>Советы</b>\n"
+            "• Только HTML, который понимает Telegram\n"
+            "• Проверка: <code>{prefix}ping</code> / <code>{prefix}help</code> / <code>{prefix}info</code>\n"
+            "• С Premium видны кастомные эмодзи, без — fallback</blockquote>"
+        ),
+        "rich_status_on": "ВКЛ ✨",
+        "rich_status_off": "ВЫКЛ",
+    }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -729,51 +802,11 @@ class CoreMod(loader.Module):
 
     @loader.command(alias="rh")
     async def richhelp(self, message):
-        """Show Rich mode help and how to customize"""
+        """Show Rich mode help (follows setlang)"""
         prefix = utils.escape_html(self.get_prefix())
         on = bool(self.config.get("rich_mode", True)) if hasattr(self, "config") else True
-        status = "ON ✨" if on else "OFF"
-        text = f"""<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji> <b>Hikkari Rich mode</b>
-
-<b>Status:</b> <code>{status}</code>
-
-<blockquote expandable><b>What is Rich?</b>
-Rich = premium emoji, blockquotes, spoiler, custom formatting in module replies.
-When ON — built-in texts keep / use rich markup.
-When OFF — premium emoji tags are stripped to plain characters.</blockquote>
-
-<blockquote expandable><b>Toggle</b>
-• <code>{prefix}cfg Settings rich_mode</code> — true/false
-• Or <code>{prefix}config Settings</code> → rich_mode</blockquote>
-
-<blockquote expandable><b>Custom template</b>
-<code>{prefix}cfg Settings rich_template</code>
-
-Placeholders:
-• <code>{{text}}</code> — original module text
-• <code>{{star}}</code> — Hikkari star emoji
-
-Examples:
-<code>{{text}}</code>
-<code>&lt;blockquote&gt;{{text}}&lt;/blockquote&gt;</code>
-<code>{{star}} {{text}}</code></blockquote>
-
-<blockquote expandable><b>quote_media / invert_media</b>
-For banners (help, info, cfg, start):
-1) send ✨ briefly
-2) edit to full text + media
-That is required for Telegram invert/quote to apply correctly.
-
-Configs:
-• Help → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code>
-• HikkariInfo → <code>quote_media</code>, <code>invert_media</code>
-• HikkariConfig → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code></blockquote>
-
-<blockquote expandable><b>Tips</b>
-• Use only HTML Telegram understands
-• Test after change: <code>{prefix}ping</code> / <code>{prefix}help</code>
-• Premium account sees custom emoji; others see fallback char</blockquote>
-"""
+        status = self.strings["rich_status_on"] if on else self.strings["rich_status_off"]
+        text = self.strings["richhelp"].format(status=status, prefix=prefix)
         await utils.answer(message, text)
 
     async def on_config_change(self, option=None, value=None):
