@@ -34,6 +34,19 @@ class CoreMod(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
+                "rich_mode",
+                True,
+                lambda: "Rich mode: premium emoji / blockquotes in built-in texts",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
+                "rich_template",
+                "{text}",
+                lambda: "Rich template. Placeholders: {text}, {star}. Example: <blockquote>{text}</blockquote>",
+                validator=loader.validators.String(),
+            ),
+
+            loader.ConfigValue(
                 "allow_nonstandart_prefixes",
                 False,
                 "Allow non-standard prefixes like premium emojis or multi-symbol prefixes",
@@ -47,6 +60,11 @@ class CoreMod(loader.Module):
         )
 
     async def client_ready(self):
+        try:
+            self._db.set("hikkari.rich", "enabled", bool(self.config["rich_mode"]))
+            self._db.set("hikkari.rich", "template", str(self.config["rich_template"] or "{text}"))
+        except Exception:
+            pass
         self._markup = lambda: utils.chunks(
             [
                 {
@@ -708,3 +726,64 @@ class CoreMod(loader.Module):
                 self.strings[f"{platform}_install"],
                 reply_markup=self._markup(),
             )
+
+    @loader.command(alias="rh")
+    async def richhelp(self, message):
+        """Show Rich mode help and how to customize"""
+        prefix = utils.escape_html(self.get_prefix())
+        on = bool(self.config.get("rich_mode", True)) if hasattr(self, "config") else True
+        status = "ON ✨" if on else "OFF"
+        text = f"""<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji> <b>Hikkari Rich mode</b>
+
+<b>Status:</b> <code>{status}</code>
+
+<blockquote expandable><b>What is Rich?</b>
+Rich = premium emoji, blockquotes, spoiler, custom formatting in module replies.
+When ON — built-in texts keep / use rich markup.
+When OFF — premium emoji tags are stripped to plain characters.</blockquote>
+
+<blockquote expandable><b>Toggle</b>
+• <code>{prefix}cfg Settings rich_mode</code> — true/false
+• Or <code>{prefix}config Settings</code> → rich_mode</blockquote>
+
+<blockquote expandable><b>Custom template</b>
+<code>{prefix}cfg Settings rich_template</code>
+
+Placeholders:
+• <code>{{text}}</code> — original module text
+• <code>{{star}}</code> — Hikkari star emoji
+
+Examples:
+<code>{{text}}</code>
+<code>&lt;blockquote&gt;{{text}}&lt;/blockquote&gt;</code>
+<code>{{star}} {{text}}</code></blockquote>
+
+<blockquote expandable><b>quote_media / invert_media</b>
+For banners (help, info, cfg, start):
+1) send ✨ briefly
+2) edit to full text + media
+That is required for Telegram invert/quote to apply correctly.
+
+Configs:
+• Help → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code>
+• HikkariInfo → <code>quote_media</code>, <code>invert_media</code>
+• HikkariConfig → <code>banner_url</code>, <code>media_quote</code>, <code>invert_media</code></blockquote>
+
+<blockquote expandable><b>Tips</b>
+• Use only HTML Telegram understands
+• Test after change: <code>{prefix}ping</code> / <code>{prefix}help</code>
+• Premium account sees custom emoji; others see fallback char</blockquote>
+"""
+        await utils.answer(message, text)
+
+    async def on_config_change(self, option=None, value=None):
+        try:
+            self._db.set("hikkari.rich", "enabled", bool(self.config["rich_mode"]))
+            self._db.set(
+                "hikkari.rich",
+                "template",
+                str(self.config.get("rich_template") or "{text}"),
+            )
+        except Exception:
+            pass
+

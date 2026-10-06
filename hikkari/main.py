@@ -1161,14 +1161,40 @@ class Hikkari:
                         upd,
                         "." if pref is None else pref,
                     )
-                if started_banner and Path(started_banner).is_file():
-                    await client.hikkari_inline.bot.send_photo(
-                        log_chat_id,
-                        str(started_banner),
-                        caption=caption,
-                        message_thread_id=message_thread_id,
-                    )
-                else:
+                # Bootstrap ✨ then edit to caption+media for invert/quote style
+                try:
+                    if started_banner and Path(started_banner).is_file():
+                        msg = await client.hikkari_inline.bot.send_message(
+                            log_chat_id,
+                            "✨",
+                            message_thread_id=message_thread_id,
+                        )
+                        try:
+                            await client.hikkari_inline.bot.edit_message_media(
+                                chat_id=log_chat_id,
+                                message_id=msg.message_id,
+                                media=str(started_banner),
+                                caption=caption,
+                                parse_mode="HTML",
+                            )
+                        except Exception:
+                            # fallback: delete + send_photo
+                            with contextlib.suppress(Exception):
+                                await msg.delete()
+                            await client.hikkari_inline.bot.send_photo(
+                                log_chat_id,
+                                str(started_banner),
+                                caption=caption,
+                                message_thread_id=message_thread_id,
+                            )
+                    else:
+                        await client.hikkari_inline.bot.send_message(
+                            log_chat_id,
+                            caption,
+                            message_thread_id=message_thread_id,
+                            disable_web_page_preview=True,
+                        )
+                except Exception:
                     await client.hikkari_inline.bot.send_message(
                         log_chat_id,
                         caption,

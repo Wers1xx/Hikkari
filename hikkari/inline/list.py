@@ -54,6 +54,7 @@ class List(InlineUnit):
         on_unload: typing.Callable[[], typing.Any] | None = None,
         silent: bool = False,
         custom_buttons: HikkariReplyMarkup | None = None,
+        photo: str | None = None,
     ) -> bool | InlineMessage:
         """
         Send inline list to chat
@@ -154,6 +155,7 @@ class List(InlineUnit):
 
         self._units[unit_id] = {
             "type": "list",
+            **({"photo": photo} if photo else {}),
             "caller": message,
             "chat": None,
             "message_id": None,
@@ -343,23 +345,30 @@ class List(InlineUnit):
                 and unit["type"] == "list"
             ):
                 try:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.article(
-                                title="Hikkari",
-                                text=(
-                                    "✨"
-                                    if unit.get("premium_emoji_pre_edit")
-                                    else self.sanitise_text(unit["strings"][0])
-                                ),
-                                parse_mode="HTML",
-                                link_preview=False,
-                                buttons=self._list_markup(inline_query.query),
-                                id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=60,
+                    caption = (
+                        "✨"
+                        if unit.get("premium_emoji_pre_edit")
+                        else self.sanitise_text(unit["strings"][0])
                     )
+                    buttons = self._list_markup(inline_query.query)
+                    if unit.get("photo") and isinstance(unit["photo"], str):
+                        result = await inline_query.builder.photo(
+                            unit["photo"],
+                            id=utils.rand(20),
+                            text=caption,
+                            parse_mode="HTML",
+                            buttons=buttons,
+                        )
+                    else:
+                        result = await inline_query.builder.article(
+                            title="Hikkari",
+                            text=caption,
+                            parse_mode="HTML",
+                            link_preview=False,
+                            buttons=buttons,
+                            id=utils.rand(20),
+                        )
+                    await inline_query.answer([result], cache_time=60)
                 except Exception as e:
                     if unit["uid"] in self._error_events:
                         self._error_events[unit["uid"]].set()

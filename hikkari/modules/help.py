@@ -310,18 +310,20 @@ class Help(loader.Module):
 
         args = utils.get_args_raw(message)
 
-        banner = str(self.config["banner_url"])
+        banner_url_str = str(self.config["banner_url"] or "").strip() or None
+        banner = banner_url_str
 
-        if self.config["banner_url"] and self.config["media_quote"] is True:
-            banner = InputMediaWebPage(str(self.config["banner_url"]))
+        if banner_url_str and self.config["media_quote"] is True:
+            banner = InputMediaWebPage(banner_url_str)
 
         if (
-            self.config["banner_url"] and self.client.hikkari_me.premium is False
-        ):  # bcs non-premium users can add in caption only 1024 symbols
-            banner = InputMediaWebPage(str(self.config["banner_url"]))
+            banner_url_str and self.client.hikkari_me.premium is False
+        ):  # non-premium caption limit → webpage media
+            banner = InputMediaWebPage(banner_url_str)
 
-        if not self.config["banner_url"]:
+        if not banner_url_str:
             banner = None
+            banner_url_str = None
 
         force = False
         if "-f" in args:
@@ -486,6 +488,7 @@ class Help(loader.Module):
                     ),
                     file=banner,
                     invert_media=self.config["invert_media"],
+                    photo=banner_url_str,
                 )
             case _ if only_loaded:
                 await utils.answer(
@@ -504,6 +507,7 @@ class Help(loader.Module):
                     ),
                     file=banner,
                     invert_media=self.config["invert_media"],
+                    photo=banner_url_str,
                 )
             case _:
                 await utils.answer(
@@ -523,6 +527,7 @@ class Help(loader.Module):
                     ),
                     file=banner,
                     invert_media=self.config["invert_media"],
+                    photo=banner_url_str,
                 )
 
     @loader.command(

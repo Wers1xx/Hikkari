@@ -82,7 +82,54 @@ class HikkariConfigMod(loader.Module):
                 "Change emoji when opening config",
                 validator=loader.validators.String(),
             ),
+            loader.ConfigValue(
+                "banner_url",
+                "",
+                lambda: "Banner for config UI (http URL or empty for built-in)",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "media_quote",
+                True,
+                lambda: "Use quote/webpage media for config banner",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
+                "invert_media",
+                True,
+                lambda: "Invert media (quote style) for config banner",
+                validator=loader.validators.Boolean(),
+            ),
         )
+
+
+    async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
+        """form() with config banner when available."""
+        kw = dict(kwargs)
+        kw.update(self._cfg_banner_kwargs())
+        if reply_markup is not None:
+            kw["reply_markup"] = reply_markup
+        # silent form avoids ✨ hang
+        kw.setdefault("silent", True)
+        return await self.inline.form(text, message=message, **kw)
+
+    def _cfg_banner_kwargs(self) -> dict:
+        """photo + invert for config forms."""
+        from pathlib import Path as _P
+        from ..utils.other import ensure_builtin_asset
+        url = str(self.config.get("banner_url") or "").strip()
+        if not url:
+            p = ensure_builtin_asset("hikkari-config.jpg")
+            if p and _P(p).is_file():
+                url = str(p)
+        if not url:
+            return {}
+        kw = {}
+        if url.startswith(("http://", "https://")):
+            kw["photo"] = url
+        else:
+            kw["photo"] = url  # local path form supports
+        return kw
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
@@ -1499,7 +1546,7 @@ class HikkariConfigMod(loader.Module):
         _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
         if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
             form_kwargs["photo"] = str(_cfg_banner)
-        await self.inline.form(
+        await self._cfg_form(
             draft.text,
             message=message,
             reply_markup=draft.reply_markup,

@@ -54,6 +54,14 @@ emoji_pattern = re.compile(
 
 parser = hikkaritl.utils.sanitize_parse_mode("html")
 logger = logging.getLogger(__name__)
+try:
+    from .rich import apply_rich, is_rich_enabled, STAR as RICH_STAR
+except Exception:  # pragma: no cover
+    def apply_rich(t, db=None):
+        return t
+    def is_rich_enabled(db=None):
+        return True
+    RICH_STAR = '✨'
 
 
 def get_topic(message: Message) -> int | None:
@@ -370,6 +378,14 @@ async def answer(
     )
 
     if isinstance(response, str) and not kwargs.pop("asfile", False):
+        # Rich mode transform for built-in/module texts
+        try:
+            db = getattr(message.client, "hikkari_db", None) or getattr(
+                getattr(message.client, "loader", None), "_db", None
+            )
+            response = apply_rich(response, db)
+        except Exception:
+            pass
         text, entities = parse_mode.parse(response)
 
         if len(text) >= 4096 and not hasattr(message, "hikkari_grepped"):
@@ -382,9 +398,19 @@ async def answer(
                 if len(strings) > 10:
                     raise
 
+                list_kwargs = {}
+                # Keep banner on paginated help/cfg: pass photo URL if available
+                _file = kwargs.get("file")
+                if isinstance(_file, str) and (
+                    _file.startswith("http://") or _file.startswith("https://")
+                ):
+                    list_kwargs["photo"] = _file
+                elif isinstance(kwargs.get("photo"), str):
+                    list_kwargs["photo"] = kwargs["photo"]
                 list_ = await message.client.loader.inline.list(
                     message=message,
                     strings=strings,
+                    **list_kwargs,
                 )
 
                 if not list_:
@@ -414,30 +440,60 @@ async def answer(
         invert_media = kwargs.pop("invert_media", False)
 
         if file is not None and invert_media:
-            # Quote/invert: send plain text then edit with InputMediaWebPage + invert
+            # Telegram: invert/quote works reliably if we bootstrap with a short
+            # emoji message then edit to full caption + media.
             reply_to = kwargs.pop("reply_to", None)
-            if edit:
-                result = await message.edit(
-                    text,
-                    file=file,
-                    parse_mode=lambda t: (t, entities),
-                    invert_media=True,
-                    **{k: v for k, v in kwargs.items() if k != "reply_to"},
-                )
-            else:
-                sent = await message.respond(
-                    text,
-                    parse_mode=lambda t: (t, entities),
-                    reply_to=reply_to,
-                    **kwargs,
-                )
-                result = await sent.edit(
-                    text,
-                    file=file,
-                    parse_mode=lambda t: (t, entities),
-                    invert_media=True,
-                    **{k: v for k, v in kwargs.items() if k != "reply_to"},
-                )
+            extra = {k: v for k, v in kwargs.items() if k != "reply_to"}
+            try:
+                if edit:
+                    await message.edit(RICH_STAR, link_preview=False)
+                    result = await message.edit(
+                        text,
+                        file=file,
+                        parse_mode=lambda t: (t, entities),
+                        invert_media=True,
+                        **extra,
+                    )
+                else:
+                    sent = await message.respond(
+                        RICH_STAR,
+                        reply_to=reply_to,
+                        link_preview=False,
+                    )
+                    result = await sent.edit(
+                        text,
+                        file=file,
+                        parse_mode=lambda t: (t, entities),
+                        invert_media=True,
+                        **extra,
+                    )
+                    if message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+            except Exception:
+                logger.debug("invert bootstrap failed, fallback plain edit", exc_info=True)
+                if edit:
+                    result = await message.edit(
+                        text,
+                        file=file,
+                        parse_mode=lambda t: (t, entities),
+                        invert_media=True,
+                        **extra,
+                    )
+                else:
+                    sent = await message.respond(
+                        text,
+                        parse_mode=lambda t: (t, entities),
+                        reply_to=reply_to,
+                        **extra,
+                    )
+                    result = await sent.edit(
+                        text,
+                        file=file,
+                        parse_mode=lambda t: (t, entities),
+                        invert_media=True,
+                        **extra,
+                    )
         elif file is not None:
             if edit:
                 # Edit existing outbound message with media (InputMediaWebPage works here)

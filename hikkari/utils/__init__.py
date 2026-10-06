@@ -27,3 +27,4 @@ from .git import *
 from .args import *
 from .network import *
 from .placeholders import *
+from .rich import apply_rich, strip_rich, is_rich_enabled, STAR as RICH_STAR
