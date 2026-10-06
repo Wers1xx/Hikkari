@@ -1243,7 +1243,12 @@ class Hikkari:
         await modules.register_all(None)
         modules.send_config()
         await modules.inline.register_manager()
-        await db.ensure_content_channel()
+        try:
+            await db.ensure_content_channel()
+        except Exception:
+            logging.exception(
+                "ensure_content_channel failed (non-fatal; often spam ban)"
+            )
         await modules.send_ready()
 
         if first:

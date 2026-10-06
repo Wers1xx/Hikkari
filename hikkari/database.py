@@ -166,17 +166,29 @@ class Database(dict):
             from .utils.other import ensure_builtin_asset as _eba
             _ava = _eba("hikkari-ava.png")
             _ava_bytes = _ava.read_bytes() if _ava.is_file() else None
-            content_channel, _ = await utils.asset_channel(
-                client=self._client,
-                title="hikkari-userbot",
-                description="✨ Content related to Hikkari will be here",
-                silent=True,
-                invite_bot=True,
-                avatar=_ava_bytes,
-                forum=True,
-                hide_general=True,
-                _folder="hikkari",
-            )
+            try:
+                content_channel, _ = await utils.asset_channel(
+                    client=self._client,
+                    title="hikkari-userbot",
+                    description="✨ Content related to Hikkari will be here",
+                    silent=True,
+                    invite_bot=True,
+                    avatar=_ava_bytes,
+                    forum=True,
+                    hide_general=True,
+                    _folder="hikkari",
+                )
+            except Exception:
+                logger.exception("ensure_content_channel: asset_channel failed")
+                content_channel = None
+
+            if content_channel is None:
+                logger.warning(
+                    "No content channel (spam ban / restricted). "
+                    "Userbot continues; set bot token via .ch_bot_token if inline is needed."
+                )
+                return None
+
             self.set("hikkari.forums", "channel_id", int(content_channel.id))
 
         return content_channel

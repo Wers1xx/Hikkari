@@ -33,6 +33,7 @@ from hikkaritl import hints
 from hikkaritl.tl.custom.message import Message
 from hikkaritl.tl.functions.account import UpdateNotifySettingsRequest
 from hikkaritl.tl.functions.channels import CreateChannelRequest, EditPhotoRequest
+from hikkaritl.errors.rpcerrorlist import UserRestrictedError, ChatWriteForbiddenError
 from hikkaritl.tl.functions.messages import (
     CreateForumTopicRequest,
     EditForumTopicRequest,
@@ -287,17 +288,33 @@ async def asset_channel(
 
     await fw_protect()
 
-    peer = (
-        await client(
-            CreateChannelRequest(
-                title,
-                description,
-                broadcast=channel,
-                megagroup=not channel,
-                forum=forum,
+    try:
+        peer = (
+            await client(
+                CreateChannelRequest(
+                    title,
+                    description,
+                    broadcast=channel,
+                    megagroup=not channel,
+                    forum=forum,
+                )
             )
+        ).chats[0]
+    except UserRestrictedError as e:
+        logger.warning(
+            "Cannot create channel %r — account restricted (spam ban): %s. "
+            "Continuing without asset channel.",
+            title,
+            e,
         )
-    ).chats[0]
+        return None, False
+    except Exception as e:
+        # other create failures must not kill the whole userbot
+        err = type(e).__name__
+        if "Restrict" in err or "Spam" in err or "Flood" in err:
+            logger.warning("Cannot create channel %r (%s): %s", title, err, e)
+            return None, False
+        raise
 
     if invite_bot:
         bot_u = getattr(getattr(getattr(client, "loader", None), "inline", None), "bot_username", None)
