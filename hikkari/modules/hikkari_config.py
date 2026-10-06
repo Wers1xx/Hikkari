@@ -260,6 +260,31 @@ class HikkariConfigMod(loader.Module):
         try:
             if isinstance(query, str):
                 query = query.strip()
+            # Reject placeholder / transfer garbage from broken inline input
+            if isinstance(query, str) and (
+                "Transferring value" in query
+                or "will be deleted automatically" in query
+                or query in {"🔄", "✨"}
+            ):
+                await call.edit(
+                    self.strings.get(
+                        "validation_error",
+                        "🚫 <b>Invalid value</b>",
+                    ).format("empty or transfer placeholder — type the value in the inline field and send it"),
+                    reply_markup={
+                        "text": self.strings.get("try_again", "Try again"),
+                        "callback": self.inline__configure_option,
+                        "kwargs": {
+                            "obj_type": obj_type,
+                            "mod": mod,
+                            "config_opt": option,
+                        },
+                    },
+                )
+                return
+            if query == "" and option not in {"banner_url", "custom_message"}:
+                # empty might be intentional for some options; still allow for string
+                pass
             self.lookup(mod).config[option] = query
         except loader.validators.ValidationError as e:
             await call.edit(

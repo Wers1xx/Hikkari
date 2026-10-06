@@ -440,6 +440,21 @@ async def answer(
         invert_media = kwargs.pop("invert_media", False)
         kwargs.pop("photo", None)  # not a Telethon edit_message kwarg
 
+        # Never pass garbage / non-media strings as file=
+        if isinstance(file, str):
+            bad = (
+                "Transferring value" in file
+                or "will be deleted automatically" in file
+                or (not file.startswith(("http://", "https://"))
+                    and not __import__("pathlib").Path(file).is_file()
+                    and not file.startswith("InputMedia"))
+            )
+            # InputMedia* objects are not str; TL types are objects
+            if bad and "InputMedia" not in type(file).__name__:
+                logger.warning("answer: ignoring invalid file=%r", file[:80])
+                file = None
+                invert_media = False
+
         if file is not None and invert_media:
             # ✨ bootstrap → edit(text+file, invert). On any failure restore full text+media.
             reply_to = kwargs.pop("reply_to", None)

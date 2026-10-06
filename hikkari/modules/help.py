@@ -310,20 +310,36 @@ class Help(loader.Module):
 
         args = utils.get_args_raw(message)
 
-        banner_url_str = str(self.config["banner_url"] or "").strip() or None
-        banner = banner_url_str
+        raw_banner = str(self.config["banner_url"] or "").strip()
+        # Reject garbage saved from broken inline input (transfer msg, etc.)
+        def _valid_banner(u: str) -> bool:
+            if not u:
+                return False
+            if "Transferring value" in u or "will be deleted automatically" in u:
+                return False
+            if u.startswith(("http://", "https://")):
+                return True
+            try:
+                from pathlib import Path as _P
+                return _P(u).is_file()
+            except Exception:
+                return False
 
-        if banner_url_str and self.config["media_quote"] is True:
-            banner = InputMediaWebPage(banner_url_str)
+        if raw_banner and not _valid_banner(raw_banner):
+            # Auto-heal corrupted config
+            with contextlib.suppress(Exception):
+                self.config["banner_url"] = None
+            raw_banner = ""
 
-        if (
-            banner_url_str and self.client.hikkari_me.premium is False
-        ):  # non-premium caption limit → webpage media
-            banner = InputMediaWebPage(banner_url_str)
-
-        if not banner_url_str:
-            banner = None
-            banner_url_str = None
+        banner_url_str = raw_banner or None
+        banner = None
+        if banner_url_str:
+            if self.config["media_quote"] is True or (
+                self.client.hikkari_me.premium is False
+            ):
+                banner = InputMediaWebPage(banner_url_str)
+            else:
+                banner = banner_url_str
 
         force = False
         if "-f" in args:

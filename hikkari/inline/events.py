@@ -46,11 +46,18 @@ class Events(InlineUnit):
             getattr(message, "from_id", None), "user_id", None
         )
         if uid in pending and (message.raw_text or message.message):
+            value = (message.raw_text or message.message or "").strip()
+            # Ignore transfer placeholder / empty
+            if (
+                not value
+                or "Transferring value" in value
+                or "will be deleted automatically" in value
+            ):
+                return
             entry = pending.pop(uid, None)
             if entry:
                 try:
                     handler, unit_id, args, kwargs = entry
-                    value = (message.raw_text or message.message or "").strip()
                     from .types import InlineCall
 
                     self_ref = self
@@ -529,6 +536,16 @@ class Events(InlineUnit):
                             "inline_message_id", call.inline_message_id
                         )
 
+                    if not (value or "").strip():
+                        # User selected result without typing a value — keep pending
+                        logger.debug(
+                            "chosen_inline empty value for %s — ignored",
+                            unit_id,
+                        )
+                        return
+                    if "Transferring value" in value:
+                        logger.debug("chosen_inline transfer text ignored")
+                        return
                     logger.info(
                         "chosen_inline → handler %s value=%r unit=%s",
                         getattr(handler, "__name__", handler),
