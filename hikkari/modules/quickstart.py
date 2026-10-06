@@ -47,21 +47,28 @@ class Quickstart(loader.Module):
                 try:
                     content_channel = await self.client.get_entity(existing_channel_id)
                     logger.debug(
-                        f"Found existing content channel with ID {existing_channel_id}"
+                        "Found existing content channel with ID %s",
+                        existing_channel_id,
                     )
                 except Exception as e:
                     logger.warning(
-                        f"Saved channel ID {existing_channel_id} not found or inaccessible: {e}"
+                        "Saved channel ID %s not found or inaccessible: %s",
+                        existing_channel_id,
+                        e,
                     )
                     content_channel = None
-                    self.db.set("hikkari.forums", "forums_cache", {"hikkari-userbot": {}})
+                    self.db.set(
+                        "hikkari.forums", "forums_cache", {"hikkari-userbot": {}}
+                    )
 
             if not content_channel:
                 async for dialog in self.client.iter_dialogs():
                     if dialog.title and "hikkari-userbot" in dialog.title.lower():
                         content_channel = dialog.entity
                         logger.debug(
-                            f"Found existing channel '{dialog.title}' with ID {dialog.entity.id}"
+                            "Found existing channel '%s' with ID %s",
+                            dialog.title,
+                            dialog.entity.id,
                         )
                         self.db.set(
                             "hikkari.forums", "channel_id", int(dialog.entity.id)
@@ -72,77 +79,98 @@ class Quickstart(loader.Module):
                 content_channel = await self.db.ensure_content_channel()
 
             if not content_channel:
-                raise RuntimeError("Failed to get or create content channel!")
+                logger.warning(
+                    "Content channel unavailable (spam ban / restricted). "
+                    "Assets/logs/backups channel features limited. "
+                    "Use .ch_bot_token for inline if needed."
+                )
+            else:
+                forum_entity = None
+                existing_forum_id = self.db.get("hikkari.forums", "forum_id", None)
 
-            forum_entity = None
-            existing_forum_id = self.db.get("hikkari.forums", "forum_id", None)
+                if existing_forum_id:
+                    try:
+                        forum_entity = await self.client.get_entity(existing_forum_id)
+                    except Exception:
+                        forum_entity = None
 
-            if existing_forum_id:
-                try:
-                    forum_entity = await self.client.get_entity(existing_forum_id)
-                except Exception:
-                    forum_entity = None
+                if not forum_entity:
+                    try:
+                        if not (
+                            hasattr(content_channel, "forum")
+                            or not content_channel.forum
+                        ):
+                            from hikkaritl.tl.functions.channels import ToggleForumRequest
 
-            if not forum_entity:
-                try:
-                    if not (
-                        hasattr(content_channel, "forum") or not content_channel.forum
-                    ):
-                        from hikkaritl.tl.functions.channels import ToggleForumRequest
-
-                        try:
-                            await self.client(
-                                ToggleForumRequest(
-                                    channel=content_channel,
-                                    enabled=True,
+                            try:
+                                await self.client(
+                                    ToggleForumRequest(
+                                        channel=content_channel,
+                                        enabled=True,
+                                    )
                                 )
-                            )
-                        except Exception as e:
-                            logger.debug(
-                                f"Channel might already be a forum or conversion failed: {e}"
-                            )
+                            except Exception as e:
+                                logger.debug(
+                                    "Channel might already be a forum or conversion failed: %s",
+                                    e,
+                                )
 
-                    forum_entity = content_channel
-                    self.db.set("hikkari.forums", "forum_id", int(content_channel.id))
-                except Exception:
-                    forum_entity = content_channel
+                        forum_entity = content_channel
+                        self.db.set(
+                            "hikkari.forums", "forum_id", int(content_channel.id)
+                        )
+                    except Exception:
+                        forum_entity = content_channel
 
-            required_topics = [
-                (
-                    "Assets",
-                    "🌆 Your Hikkari assets will be stored here",
-                    5877307202888273539,
-                ),
-                (
-                    "Backups",
-                    "💾 Your Hikkari backups will be stored here",
-                    5877307202888273539,
-                ),
-            ]
+                required_topics = [
+                    (
+                        "Assets",
+                        "🌆 Your Hikkari assets will be stored here",
+                        5877307202888273539,
+                    ),
+                    (
+                        "Backups",
+                        "💾 Your Hikkari backups will be stored here",
+                        5877307202888273539,
+                    ),
+                ]
 
-            for topic_title, topic_desc, emoji_id in required_topics:
+                for topic_title, topic_desc, emoji_id in required_topics:
+                    try:
+                        await utils.asset_forum_topic(
+                            client=self.client,
+                            db=self.db,
+                            peer=forum_entity.id
+                            if forum_entity
+                            else content_channel.id,
+                            title=topic_title,
+                            description=topic_desc,
+                            icon_emoji_id=emoji_id,
+                        )
+                        logger.debug("Created or verified topic '%s'", topic_title)
+                    except Exception:
+                        logger.exception(
+                            "Failed to create/verify topic '%s'", topic_title
+                        )
+
                 try:
-                    await utils.asset_forum_topic(
-                        client=self.client,
-                        db=self.db,
-                        peer=forum_entity.id if forum_entity else content_channel.id,
-                        title=topic_title,
-                        description=topic_desc,
-                        icon_emoji_id=emoji_id,
-                    )
-                    logger.debug(f"Created or verified topic '{topic_title}'")
+                    await utils.invite_inline_bot(self.client, content_channel)
                 except Exception:
-                    logger.exception(f"Failed to create/verify topic '{topic_title}'")
-
-            await utils.invite_inline_bot(self.client, content_channel)
+                    logger.warning(
+                        "invite_inline_bot failed (non-fatal)", exc_info=True
+                    )
 
         except Exception:
             logger.exception(
-                "Can't find and/or create content channel\n"
-                "This may cause several consequences, such as:\n"
-                "- Non working inline-logs, backups, assets features\n"
-                "- This error will occur every restart\n\n"
-                "You can try solving this by leaving some channels/groups"
+                "Can't find and/or create content channel
+"
+                "This may cause several consequences, such as:
+"
+                "- Non working inline-logs, backups, assets features
+"
+                "- Often caused by spam ban (UserRestricted)
+"
+                "Userbot continues to run. Use .ch_bot_token for inline bot."
             )
 
         await self.request_join(
