@@ -72,24 +72,22 @@ def rich_table(
     header: tuple[str, str] | None = ("Component", "Current release"),
 ) -> str:
     """
-    Build a Telegram-looking 2-column table using <blockquote> + monospace rows.
-    Visually close to native tables (Component | Current release).
+    Native Rich Message table (<table>) for Bot API 10.1+.
+    Classic clients may show simplified fallback.
     """
-    lines: list[str] = []
-    if header:
-        h0, h1 = header
-        lines.append(f"<b>{html_mod.escape(h0)}</b>\t\t<b>{html_mod.escape(h1)}</b>")
-        lines.append("────────────────────")
+    h0, h1 = header or ("Component", "Current release")
+    parts = [
+        f'<table bordered striped>'
+        f"<tr><th>{html_mod.escape(h0)}</th><th>{html_mod.escape(h1)}</th></tr>"
+    ]
     for k, v in rows:
-        k = html_mod.escape(str(k))
-        # value may already contain HTML (links etc.) — don't escape if tagged
+        ks = html_mod.escape(str(k))
         vs = str(v)
-        if "<" in vs and ">" in vs:
-            lines.append(f"<code>{k}</code>\t\t{vs}")
-        else:
-            lines.append(f"<code>{k}</code>\t\t<code>{html_mod.escape(vs)}</code>")
-    body = "\n".join(lines)
-    return f"<blockquote>{body}</blockquote>"
+        if not ("<" in vs and ">" in vs):
+            vs = html_mod.escape(vs)
+        parts.append(f"<tr><td>{ks}</td><td>{vs}</td></tr>")
+    parts.append("</table>")
+    return "".join(parts)
 
 
 def rich_blocks_from_kv_text(text: str) -> str | None:

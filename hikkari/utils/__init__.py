@@ -28,3 +28,4 @@ from .args import *
 from .network import *
 from .placeholders import *
 from .rich import apply_rich, strip_rich, is_rich_enabled, STAR as RICH_STAR
+from .rich_api import try_send_rich, build_info_html, html_table, send_rich_message

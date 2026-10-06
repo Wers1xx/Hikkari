@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -241,6 +242,34 @@ class HikkariInfoMod(loader.Module):
         banner = self.config["banner_url"]
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
+
+        # Native Rich Message (Bot API 10.1+) via inline bot when rich_mode ON
+        try:
+            from ..utils.rich import is_rich_enabled
+            from ..utils.rich_api import try_send_rich, build_info_html
+            if is_rich_enabled(getattr(self, "_db", None)):
+                rendered = await self._render_info(start)
+                # Prefer structured table HTML for API
+                # re-parse rows from data path is heavy; use rendered table html builder if possible
+                html = rendered
+                # If still classic HTML without <table>, wrap via builder from placeholders
+                if "<table" not in html:
+                    # fallback: send as rich html paragraph blocks
+                    html = f"<h2>Hikkari Userbot</h2><p>{html}</p>"
+                ok = await try_send_rich(
+                    self._client,
+                    message.peer_id,
+                    html,
+                    reply_to_message_id=getattr(message, "reply_to_msg_id", None),
+                )
+                if ok:
+                    if message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return
+        except Exception:
+            logger.debug("native rich info failed, classic path", exc_info=True)
+
         try:
             from ..utils.rich import is_rich_enabled
             if is_rich_enabled(getattr(self, "_db", None)):
