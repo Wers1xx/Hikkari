@@ -46,6 +46,17 @@ class HikkariBackupMod(loader.Module):
 
     strings = {"name": "HikkariBackup"}
 
+
+    def _peer_channel(self):
+        """Full peer id for content channel or None."""
+        cid = getattr(self, "_content_channel_id", None)
+        if not cid:
+            return None
+        try:
+            return int(f"-100{cid}")
+        except (TypeError, ValueError):
+            return None
+
     async def client_ready(self):
         if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
             return
@@ -78,7 +89,7 @@ class HikkariBackupMod(loader.Module):
         self._content_channel_id = await utils.wait_for_content_channel(self._db)
         if not self._content_channel_id:
             logger.warning("No content channel — backup/log channel unavailable")
-
+            return
 
     async def _set_backup_period(self, call: BotInlineCall, value: int):
         if not value:
@@ -185,8 +196,12 @@ class HikkariBackupMod(loader.Module):
                 logger.error("Backups topic not found in database")
                 return
 
+            peer = self._peer_channel()
+            if not peer:
+                logger.warning("No content channel peer — skip bot send")
+                return
             await self.inline.bot.send_document(
-                int(f"-100{self._content_channel_id}"),
+                peer,
                 archive,
                 reply_markup=self.inline.generate_markup(
                     [
@@ -323,6 +338,7 @@ class HikkariBackupMod(loader.Module):
             self._content_channel_id = await utils.wait_for_content_channel(self._db)
         if not self._content_channel_id:
             logger.warning("No content channel — backup/log channel unavailable")
+            return
 
 
         backup_topic_id = await utils.get_topic_id(self._db, "Backups")
@@ -331,8 +347,12 @@ class HikkariBackupMod(loader.Module):
             await utils.answer(message, self.strings["backup_sent"])
             return
 
+        peer = self._peer_channel()
+        if not peer:
+            logger.warning("No content channel peer — skip bot send")
+            return
         backup_msg = await self.inline.bot.send_document(
-            int(f"-100{self._content_channel_id}"),
+            peer,
             txt,
             caption=self.strings["backup_caption"].format(
                 prefix=utils.escape_html(self.get_prefix())
@@ -435,6 +455,7 @@ class HikkariBackupMod(loader.Module):
             self._content_channel_id = await utils.wait_for_content_channel(self._db)
         if not self._content_channel_id:
             logger.warning("No content channel — backup/log channel unavailable")
+            return
 
 
         backup_topic_id = await utils.get_topic_id(self._db, "Backups")
@@ -450,8 +471,12 @@ class HikkariBackupMod(loader.Module):
             )
             return
 
+        peer = self._peer_channel()
+        if not peer:
+            logger.warning("No content channel peer — skip bot send")
+            return
         backup_msg = await self.inline.bot.send_document(
-            int(f"-100{self._content_channel_id}"),
+            peer,
             archive,
             caption=self.strings["modules_backup"].format(
                 mods_quantity,
@@ -560,8 +585,12 @@ class HikkariBackupMod(loader.Module):
             )
             return
 
+        peer = self._peer_channel()
+        if not peer:
+            logger.warning("No content channel peer — skip bot send")
+            return
         backup_msg = await self.inline.bot.send_document(
-            int(f"-100{self._content_channel_id}"),
+            peer,
             archive,
             caption=self.strings["backupall_info"].format(
                 prefix=utils.escape_html(self.get_prefix()),

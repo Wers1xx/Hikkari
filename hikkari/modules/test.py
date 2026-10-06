@@ -399,10 +399,15 @@ class TestMod(loader.Module):
     async def client_ready(self):
         self._content_channel_id = await utils.wait_for_content_channel(self._db)
         if not self._content_channel_id:
-            logger.warning("No content channel — backup/log channel unavailable")
+            logger.warning("No content channel — log channel unavailable")
+            self.logchat = None
+            return
 
         self.logchat = int(f"-100{self._content_channel_id}")
-        logging.getLogger().handlers[0].install_tg_log(self)
-        logger.debug("Bot logging installed for %s", self.logchat)
+        try:
+            logging.getLogger().handlers[0].install_tg_log(self)
+            logger.debug("Bot logging installed for %s", self.logchat)
+        except Exception:
+            logger.exception("install_tg_log failed (non-fatal)")
 
         self._pass_config_to_logger()
