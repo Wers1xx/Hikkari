@@ -21,6 +21,7 @@ import contextlib
 import datetime
 import io
 import logging
+logger = logging.getLogger(__name__)
 import os
 import shutil
 import re
@@ -75,6 +76,9 @@ class HikkariBackupMod(loader.Module):
             )
 
         self._content_channel_id = await utils.wait_for_content_channel(self._db)
+        if not self._content_channel_id:
+            logger.warning("No content channel — backup/log channel unavailable")
+
 
     async def _set_backup_period(self, call: BotInlineCall, value: int):
         if not value:
@@ -317,6 +321,9 @@ class HikkariBackupMod(loader.Module):
 
         if not getattr(self, "_content_channel_id", None):
             self._content_channel_id = await utils.wait_for_content_channel(self._db)
+        if not self._content_channel_id:
+            logger.warning("No content channel — backup/log channel unavailable")
+
 
         backup_topic_id = await utils.get_topic_id(self._db, "Backups")
         if not backup_topic_id:
@@ -426,6 +433,9 @@ class HikkariBackupMod(loader.Module):
 
         if not getattr(self, "_content_channel_id", None):
             self._content_channel_id = await utils.wait_for_content_channel(self._db)
+        if not self._content_channel_id:
+            logger.warning("No content channel — backup/log channel unavailable")
+
 
         backup_topic_id = await utils.get_topic_id(self._db, "Backups")
         if not backup_topic_id:

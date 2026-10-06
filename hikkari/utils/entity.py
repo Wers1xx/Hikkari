@@ -473,17 +473,31 @@ async def asset_forum_topic(
     return new_topic
 
 
-async def wait_for_content_channel(db: "Database", delay: float = 10) -> int:
+async def wait_for_content_channel(
+    db: "Database",
+    delay: float = 2,
+    retries: int = 3,
+) -> int | None:
+    """Return content channel id or None.
+
+    Does NOT loop forever (spam-ban accounts cannot create channels).
+    """
     cid = db.get("hikkari.forums", "channel_id", None)
+    if cid:
+        return cid
 
-    while not cid:
-        logger.warning(
-            "Hikkari content channel not found in database. Sleeping 10 seconds..."
-        )
-        await asyncio.sleep(delay)
+    for attempt in range(max(1, retries)):
         cid = db.get("hikkari.forums", "channel_id", None)
+        if cid:
+            return cid
+        if attempt == 0:
+            logger.warning(
+                "Hikkari content channel not in DB (spam ban / not created). "
+                "Skipping wait — assets/logs channel features limited."
+            )
+        await asyncio.sleep(delay)
 
-    return cid
+    return None
 
 
 async def get_topic_id(db: "Database", topic_name: str) -> int | None:
