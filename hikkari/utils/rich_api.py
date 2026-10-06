@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -159,6 +160,53 @@ def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
         if btns:
             rows_out.append(tg_button_row(btns, align="center"))
     return "\n".join(rows_out)
+
+
+
+
+def to_rich_compatible(html: str) -> str:
+    """Normalize classic userbot HTML to official Rich HTML tags."""
+    if not html or not isinstance(html, str):
+        return html or ""
+    # <emoji document_id=ID>X</emoji> → <tg-emoji emoji-id="ID">X</tg-emoji>
+    html = re.sub(
+        r'<emoji\s+document_id=["\']?(\d+)["\']?\s*>\s*([^<]*)</emoji>',
+        r'<tg-emoji emoji-id="\1">\2</tg-emoji>',
+        html,
+        flags=re.I,
+    )
+    # already tg-emoji without quotes
+    html = re.sub(
+        r'<tg-emoji\s+emoji-id=(\d+)\s*>',
+        r'<tg-emoji emoji-id="\1">',
+        html,
+        flags=re.I,
+    )
+    return html
+
+
+def parse_rich_url_buttons(spec: str) -> str:
+    """
+    Config string "Text|https://..., Text2|url2" → official <tg-button-row> HTML.
+    """
+    if not spec or not str(spec).strip():
+        return ""
+    btns = []
+    for part in str(spec).split(","):
+        part = part.strip()
+        if "|" not in part:
+            continue
+        t, u = part.split("|", 1)
+        t, u = t.strip(), u.strip()
+        if t and u.startswith(("http://", "https://", "tg://")):
+            btns.append(tg_button(t, type="url", url=u, style="primary"))
+    if not btns:
+        return ""
+    # split into rows of max 3
+    rows = []
+    for i in range(0, len(btns), 3):
+        rows.append(tg_button_row(btns[i : i + 3], align="center"))
+    return "\n".join(rows)
 
 
 async def edit_rich_message(

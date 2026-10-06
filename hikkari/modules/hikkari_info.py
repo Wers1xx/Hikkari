@@ -283,30 +283,20 @@ class HikkariInfoMod(loader.Module):
                         footer="You are a happy owner of Hikkari!",
                         banner_url=banner_url,
                     )
-                rm = None
-                rb = str(self.config.get("rich_buttons") or "").strip()
-                if rb:
-                    try:
-                        row = []
-                        for part in rb.split(","):
-                            part = part.strip()
-                            if "|" not in part:
-                                continue
-                            t, u = part.split("|", 1)
-                            t, u = t.strip(), u.strip()
-                            if t and u.startswith("http"):
-                                row.append({"text": t, "url": u})
-                        if row:
-                            rm = [row]
-                    except Exception:
-                        rm = None
+                from ..utils.rich_api import parse_rich_url_buttons, to_rich_compatible
+                html = to_rich_compatible(html)
+                # Official Rich buttons (Bot API 10.3) inside message body
+                btn_html = parse_rich_url_buttons(
+                    str(self.config.get("rich_buttons") or "")
+                )
+                if btn_html:
+                    html = html + "\n" + btn_html
                 m = await self.inline.rich(
                     message,
                     html,
                     title="Hikkari Info",
                     description="Rich info",
                     thumbnail_url=banner_url,
-                    reply_markup=rm,
                 )
                 if m:
                     return

@@ -345,7 +345,10 @@ class TestMod(loader.Module):
     async def ping(self, message: Message):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
-        message = await utils.answer(message, self.config["ping_emoji"])
+        # Measure latency with a lightweight classic edit (not Rich)
+        message = await utils.answer(
+            message, self.config["ping_emoji"], skip_rich=True
+        )
         banner = utils.resolve_banner_media(self.config["banner_url"])
         if banner and self.config.get("quote_media") is True and isinstance(banner, str) and banner.startswith(("http://", "https://")):
             banner = InputMediaWebPage(banner, optional=True)
@@ -390,15 +393,26 @@ class TestMod(loader.Module):
         except KeyError:
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
-        # Rich mode: custom_message as Rich HTML, else default table
+        # Rich mode: official HTML + <tg-button-row> navigation/URL buttons
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import pick_banner_url, build_info_html
-            if can_use_rich(self._client, self._db) and getattr(self.inline, "init_complete", False):
+            from ..utils.rich_api import (
+                pick_banner_url,
+                build_info_html,
+                to_rich_compatible,
+                parse_rich_url_buttons,
+            )
+            if can_use_rich(self._client, self._db) and getattr(
+                self.inline, "init_complete", False
+            ):
                 burl = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
                 if custom and str(custom).strip():
-                    html = placeholders_msg
+                    html = to_rich_compatible(placeholders_msg)
+                    # If still classic-ish, wrap as simple paragraphs
+                    if "<table" not in html.lower() and "<h2" not in html.lower():
+                        # keep user structure; already converted emoji
+                        pass
                     if burl and "<figure" not in html.lower():
                         html = f'<figure><img src="{burl}"/></figure>\n' + html
                 else:
@@ -406,7 +420,10 @@ class TestMod(loader.Module):
                         ("Ping", f"{data['ping']} ms"),
                         ("Uptime", str(data["uptime"])),
                         ("Version", str(data["version"])),
-                        ("Build", re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40]),
+                        (
+                            "Build",
+                            re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
+                        ),
                         ("Platform", str(data.get("platform", ""))),
                         ("Python", str(data.get("python_ver", ""))),
                     ]
@@ -416,24 +433,12 @@ class TestMod(loader.Module):
                         footer=str(data.get("ping_hint") or ""),
                         banner_url=burl,
                     )
-                # Optional URL buttons from config rich_buttons: "text|url, text|url"
-                rm = None
-                rb = str(self.config.get("rich_buttons") or "").strip()
-                if rb:
-                    try:
-                        row = []
-                        for part in rb.split(","):
-                            part = part.strip()
-                            if "|" not in part:
-                                continue
-                            t, u = part.split("|", 1)
-                            t, u = t.strip(), u.strip()
-                            if t and u.startswith("http"):
-                                row.append({"text": t, "url": u})
-                        if row:
-                            rm = [row]
-                    except Exception:
-                        rm = None
+                html = to_rich_compatible(html)
+                btn_html = parse_rich_url_buttons(
+                    str(self.config.get("rich_buttons") or "")
+                )
+                if btn_html:
+                    html = html + "\n" + btn_html
                 m = await self.inline.rich(
                     message,
                     html,
@@ -441,7 +446,6 @@ class TestMod(loader.Module):
                     description=f"{data['ping']} ms",
                     thumbnail_url=burl,
                     silent=True,
-                    reply_markup=rm,
                 )
                 if m:
                     return

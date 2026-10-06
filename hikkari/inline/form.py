@@ -477,11 +477,18 @@ class Form(InlineUnit):
         markup = self._validate_markup(reply_markup) if reply_markup else []
         # Official Rich buttons inside HTML (<tg-button-row>), not only reply_markup
         try:
-            from ..utils.rich_api import markup_to_tg_rows, nav_button_row
+            from ..utils.rich_api import (
+                markup_to_tg_rows,
+                nav_button_row,
+                to_rich_compatible,
+                parse_rich_url_buttons,
+            )
+            html = to_rich_compatible(html)
             page_list = list(pages) if pages else None
             cur = int(page or 0)
             body = html
             if page_list:
+                page_list = [to_rich_compatible(p) for p in page_list]
                 cur = max(0, min(cur, len(page_list) - 1))
                 body = page_list[cur]
                 nav = nav_button_row(unit_id, cur, len(page_list))
