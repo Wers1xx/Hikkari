@@ -300,6 +300,16 @@ class HikkariInfoMod(loader.Module):
                 )
                 if m:
                     return
+                try:
+                    from ..utils.rich_api import try_send_rich
+                    chat = utils.get_chat_id(message)
+                    if await try_send_rich(self._client, chat, html):
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
+                                await message.delete()
+                        return
+                except Exception:
+                    logger.debug("info sendRichMessage fallback failed", exc_info=True)
                 logger.warning("inline.rich failed → classic tree")
         except Exception:
             logger.warning("rich via inline failed", exc_info=True)
