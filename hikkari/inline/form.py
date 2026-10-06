@@ -454,6 +454,7 @@ class Form(InlineUnit):
         description: str = "Rich message",
         silent: bool = False,
         reply_markup: typing.Optional[list] = None,
+        thumbnail_url: typing.Optional[str] = None,
     ) -> typing.Union[Message, bool]:
         """
         Send a native Rich Message via inline (appears with via @bot),
@@ -487,6 +488,7 @@ class Form(InlineUnit):
             "future": Event(),
             "force_me": True,
             "disable_security": True,
+            **({"thumbnail_url": thumbnail_url} if thumbnail_url else {}),
             **({"message": message} if isinstance(message, Message) else {}),
         }
 
@@ -637,6 +639,7 @@ class Form(InlineUnit):
                     description=form.get("description") or "Rich",
                     result_id=form.get("uid") or utils.rand(16),
                     reply_markup=rm,
+                    thumbnail_url=form.get("thumbnail_url"),
                 )
                 if not ok and form.get("uid") in self._error_events:
                     self._error_events[form["uid"]].set()

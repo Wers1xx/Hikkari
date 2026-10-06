@@ -14,6 +14,26 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
+def pick_banner_url(banner) -> str | None:
+    """RandomLinkList / list / str → first http(s) URL."""
+    if banner is None:
+        return None
+    if isinstance(banner, str):
+        s = banner.strip()
+        # "[https://...]" style
+        if s.startswith("[") and s.endswith("]"):
+            s = s[1:-1].strip()
+        if s.startswith(("http://", "https://")):
+            return s.split()[0].strip("[],")
+        return None
+    if isinstance(banner, (list, tuple)):
+        for item in banner:
+            u = pick_banner_url(item)
+            if u:
+                return u
+    return None
+
+
 
 def html_table(
     rows: list[tuple[str, str]],
@@ -38,7 +58,11 @@ def build_info_html(
     """Official Rich HTML (html field) for answerInlineQuery / sendRichMessage."""
     parts: list[str] = []
     if banner_url and str(banner_url).startswith(("http://", "https://")):
-        parts.append(f'<figure><img src="{banner_url}"/></figure>')
+        # Official Rich HTML media block
+        parts.append(
+            f'<figure><img src="{banner_url}"/>'
+            f"<figcaption>{title}</figcaption></figure>"
+        )
     parts.append(f"<h2>{title}</h2>")
     parts.append(html_table(rows, header=header))
     if footer:
@@ -203,6 +227,7 @@ async def answer_inline_rich(
     description: str = "Rich message",
     result_id: str | None = None,
     reply_markup: dict | None = None,
+    thumbnail_url: str | None = None,
 ) -> bool:
     """
     Answer an inline query with a native Rich Message.
@@ -224,6 +249,8 @@ async def answer_inline_rich(
             }
         },
     }
+    if thumbnail_url and str(thumbnail_url).startswith(("http://", "https://")):
+        article["thumbnail_url"] = str(thumbnail_url)
     if reply_markup is not None:
         article["reply_markup"] = reply_markup
 

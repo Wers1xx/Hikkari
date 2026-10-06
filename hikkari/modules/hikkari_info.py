@@ -253,18 +253,20 @@ class HikkariInfoMod(loader.Module):
                     ("Python", lib_platform.python_version()),
                     ("Developers", "@Wers1xx"),
                 ]
-                banner = self.config.get("banner_url") or None
+                from ..utils.rich_api import pick_banner_url
+                banner_url = pick_banner_url(self.config.get("banner_url"))
                 html = build_info_html(
                     title="Hikkari Userbot",
                     rows=rows,
                     footer="You are a happy owner of Hikkari!",
-                    banner_url=banner if isinstance(banner, str) else None,
+                    banner_url=banner_url,
                 )
                 m = await self.inline.rich(
                     message,
                     html,
                     title="Hikkari Info",
                     description="Component · Current release",
+                    thumbnail_url=banner_url,
                 )
                 if m:
                     return

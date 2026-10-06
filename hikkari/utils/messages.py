@@ -369,11 +369,8 @@ async def answer(
         ):
             inline = getattr(getattr(client, "loader", None), "inline", None)
             if inline is not None and getattr(inline, "init_complete", False):
-                banner = kwargs.get("file")
-                banner_url = None
-                if isinstance(banner, str) and banner.startswith(("http://", "https://")):
-                    banner_url = banner
-                # Don't pass file into classic path if we go rich
+                from .rich_api import pick_banner_url
+                banner_url = pick_banner_url(kwargs.get("file"))
                 html = to_rich_html(response, banner_url=banner_url)
                 # Attach buttons if reply_markup was requested — form handles buttons;
                 # for pure text use rich
