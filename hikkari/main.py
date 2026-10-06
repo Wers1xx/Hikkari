@@ -1161,80 +1161,22 @@ class Hikkari:
                         upd,
                         "." if pref is None else pref,
                     )
-                # Start badge with media:
-                # 1) prefer user-client: ✨ → edit(caption+file, invert_media)
-                # 2) bot send_photo one-shot (never leave lone ✨)
-                sent_ok = False
-                banner_path = (
-                    str(started_banner)
-                    if started_banner and Path(started_banner).is_file()
-                    else None
-                )
-                # --- user client path (invert_media works here) ---
-                if banner_path and not sent_ok:
-                    try:
-                        peer = log_chat_id
-                        star_msg = await client.send_message(
-                            peer,
-                            "✨",
-                            reply_to=message_thread_id,
-                            link_preview=False,
-                        )
-                        try:
-                            await star_msg.edit(
-                                caption,
-                                file=banner_path,
-                                parse_mode="HTML",
-                                invert_media=True,
-                            )
-                            sent_ok = True
-                        except Exception:
-                            logging.debug(
-                                "badge user edit invert failed", exc_info=True
-                            )
-                            with contextlib.suppress(Exception):
-                                await star_msg.delete()
-                            await client.send_file(
-                                peer,
-                                banner_path,
-                                caption=caption,
-                                parse_mode="HTML",
-                                reply_to=message_thread_id,
-                            )
-                            sent_ok = True
-                    except Exception:
-                        logging.debug("badge user-client path failed", exc_info=True)
-
-                # --- bot path (reliable photo+caption, no stuck ✨) ---
-                if not sent_ok and getattr(client, "hikkari_inline", None):
-                    bot = getattr(client.hikkari_inline, "bot", None)
-                    if bot and banner_path:
-                        try:
-                            await bot.send_photo(
-                                log_chat_id,
-                                banner_path,
-                                caption=caption,
-                                message_thread_id=message_thread_id,
-                                parse_mode="HTML",
-                            )
-                            sent_ok = True
-                        except Exception:
-                            logging.debug("badge bot photo failed", exc_info=True)
-                    if not sent_ok and bot:
-                        try:
-                            await bot.send_message(
-                                log_chat_id,
-                                caption,
-                                message_thread_id=message_thread_id,
-                                disable_web_page_preview=True,
-                                parse_mode="HTML",
-                            )
-                            sent_ok = True
-                        except Exception:
-                            logging.debug("badge bot text failed", exc_info=True)
-
-                if not sent_ok:
-                    logging.debug("badge: all send paths failed")
+                if started_banner and Path(started_banner).is_file():
+                    await client.hikkari_inline.bot.send_photo(
+                        log_chat_id,
+                        str(started_banner),
+                        caption=caption,
+                        message_thread_id=message_thread_id,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await client.hikkari_inline.bot.send_message(
+                        log_chat_id,
+                        caption,
+                        message_thread_id=message_thread_id,
+                        disable_web_page_preview=True,
+                        parse_mode="HTML",
+                    )
             except Exception as badge_error:
                 logging.debug(f"Failed to send badge photo: {badge_error}")
             logging.debug(
