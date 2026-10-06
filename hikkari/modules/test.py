@@ -20,6 +20,7 @@ import re
 import getpass
 import inspect
 import logging
+import contextlib
 logger = logging.getLogger(__name__)
 import os
 import platform as lib_platform
@@ -393,7 +394,7 @@ class TestMod(loader.Module):
         except KeyError:
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
-        # Rich mode: official HTML + <tg-button-row> navigation/URL buttons
+        # Rich mode: official table + <tg-button-row> + via/@bot or sendRichMessage
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
@@ -401,18 +402,26 @@ class TestMod(loader.Module):
                 build_info_html,
                 to_rich_compatible,
                 parse_rich_url_buttons,
+                try_send_rich,
             )
             if can_use_rich(self._client, self._db) and getattr(
                 self.inline, "init_complete", False
             ):
                 burl = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
-                if custom and str(custom).strip():
+                # Prefer proper Rich table; only keep raw custom if it already has Rich tags
+                use_raw = bool(
+                    custom
+                    and str(custom).strip()
+                    and (
+                        "<table" in str(custom).lower()
+                        or "<h2" in str(custom).lower()
+                        or "<details" in str(custom).lower()
+                        or "<tg-button" in str(custom).lower()
+                    )
+                )
+                if use_raw:
                     html = to_rich_compatible(placeholders_msg)
-                    # If still classic-ish, wrap as simple paragraphs
-                    if "<table" not in html.lower() and "<h2" not in html.lower():
-                        # keep user structure; already converted emoji
-                        pass
                     if burl and "<figure" not in html.lower():
                         html = f'<figure><img src="{burl}"/></figure>\n' + html
                 else:
@@ -449,8 +458,17 @@ class TestMod(loader.Module):
                 )
                 if m:
                     return
+                # Fallback: Bot API sendRichMessage (still real Rich)
+                chat = utils.get_chat_id(message)
+                if await try_send_rich(self._client, chat, html):
+                    with contextlib.suppress(Exception):
+                        if getattr(message, "out", False):
+                            await message.delete()
+                    return
+            elif can_use_rich(self._client, self._db):
+                logger.info("ping rich: inline bot not ready (.yesbot / .ch_bot_token)")
         except Exception:
-            logger.debug("ping rich failed", exc_info=True)
+            logger.warning("ping rich failed", exc_info=True)
 
         await utils.answer(
             message,

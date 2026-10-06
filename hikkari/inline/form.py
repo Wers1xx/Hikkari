@@ -544,12 +544,25 @@ class Form(InlineUnit):
         try:
             m = await self._invoke_unit(unit_id, message)
         except Exception as e:
-            logger.exception("Can't send rich inline")
+            logger.warning("Can't send rich via inline: %s — trying sendRichMessage", e)
             with contextlib.suppress(Exception):
                 del self._units[unit_id]
             if status_message is not None:
                 with contextlib.suppress(Exception):
                     await status_message.delete()
+            try:
+                from ..utils.rich_api import try_send_rich
+                chat = None
+                if isinstance(message, Message):
+                    chat = utils.get_chat_id(message)
+                ok = await try_send_rich(self._client, chat, html)
+                if ok:
+                    if isinstance(message, Message) and message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return True
+            except Exception:
+                logger.exception("sendRichMessage fallback failed")
             return False
 
         self._units[unit_id]["chat"] = utils.get_chat_id(m) if m else None

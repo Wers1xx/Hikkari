@@ -558,8 +558,10 @@ class Help(loader.Module):
                 from ..utils.rich import can_use_rich
                 from ..utils.rich_api import pick_banner_url, html_table
                 if not can_use_rich(self._client, self._db):
+                    logger.info("help rich skipped: rich_mode off or no Premium")
                     return False
                 if not getattr(self.inline, "init_complete", False):
+                    logger.info("help rich skipped: inline bot not ready")
                     return False
                 banner_url = pick_banner_url(self.config.get("banner_url"))
                 entries = []
@@ -655,13 +657,14 @@ class Help(loader.Module):
                     btns.append([{"text": "🔻 Close", "action": "close"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
-                if total_pages == 1 and await _send_help_rich(
+                # Always prefer official Rich (tables + <details> + <tg-button-row> nav)
+                if await _send_help_rich(
                     text_header,
                     [(s, "\n".join(ls)) for s, ls in sections],
                 ):
                     return True
 
-                # multi-page or rich failed → form with nav
+                # Rich unavailable → classic form with nav
                 first_btns = []
                 nav = [{"text": f"1/{total_pages}", "data": "noop"}]
                 if total_pages > 1:
