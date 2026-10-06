@@ -232,6 +232,149 @@ class LoaderMod(loader.Module):
         )
         return True
 
+
+    async def _gather_module_files(self, message: Message) -> list[Message]:
+        """Collect all module documents from message or reply (incl. albums)."""
+        base = message if getattr(message, "file", None) else await message.get_reply_message()
+        if base is None:
+            return []
+        out: list[Message] = []
+        gid = getattr(base, "grouped_id", None)
+        if gid:
+            try:
+                chat = utils.get_chat_id(base)
+                # fetch nearby messages in the same album
+                ids = list(range(max(1, base.id - 15), base.id + 16))
+                msgs = await self._client.get_messages(chat, ids=ids)
+                for m in msgs:
+                    if (
+                        m
+                        and getattr(m, "grouped_id", None) == gid
+                        and getattr(m, "file", None)
+                    ):
+                        out.append(m)
+            except Exception:
+                logger.debug("album gather failed", exc_info=True)
+        if not out and getattr(base, "file", None):
+            out = [base]
+        # de-dupe by id, preserve order
+        seen = set()
+        uniq = []
+        for m in out:
+            if m.id not in seen:
+                seen.add(m.id)
+                uniq.append(m)
+        return uniq
+
+    def _module_cmds_rows(self, instance) -> list[tuple[str, str]]:
+        rows = []
+        prefix = utils.escape_html(self.get_prefix())
+        for name, fun in sorted(getattr(instance, "commands", {}).items(), key=lambda x: x[0]):
+            doc = utils.escape_html(inspect.getdoc(fun) or self.strings.get("undoc", ""))
+            rows.append((f"{prefix}{name}", doc[:120]))
+        if self.inline.init_complete:
+            for name, fun in sorted(
+                getattr(instance, "inline_handlers", {}).items(), key=lambda x: x[0]
+            ):
+                doc = utils.escape_html(inspect.getdoc(fun) or self.strings.get("undoc", ""))
+                rows.append((f"@{self.inline.bot_username} {name}", doc[:120]))
+        return rows
+
+    async def _rich_module_loaded(
+        self,
+        message: Message,
+        *,
+        modname: str,
+        mod_doc: str,
+        rows: list[tuple[str, str]],
+        subscribe_markup=None,
+        origin: str = "",
+    ) -> bool:
+        """Announce single module install as Rich (details + buttons)."""
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import html_table
+            if not can_use_rich(self._client, self._db):
+                return False
+            if not getattr(self.inline, "init_complete", False):
+                return False
+            parts = [f"<h2>{utils.escape_html(modname)}</h2>"]
+            if mod_doc:
+                plain = re.sub(r"<[^>]+>", "", mod_doc).strip()
+                if plain:
+                    parts.append(f"<p><i>{utils.escape_html(plain)[:400]}</i></p>")
+            if rows:
+                table = html_table(rows, header=("Command", "Description"))
+                parts.append(
+                    f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                    f"{table}\n</details>"
+                )
+            if origin and origin not in ("<string>",):
+                parts.append(f"<p><code>{utils.escape_html(str(origin)[:120])}</code></p>")
+            html = "\n".join(parts)
+            m = await self.inline.rich(
+                message,
+                html,
+                title=f"✓ {modname}"[:64],
+                description="Module loaded",
+                silent=True,
+                reply_markup=subscribe_markup,
+            )
+            return bool(m)
+        except Exception:
+            logger.debug("loader rich single failed", exc_info=True)
+            return False
+
+    async def _rich_batch_loaded(
+        self,
+        message: Message,
+        results: list[dict],
+    ) -> bool:
+        """Batch install summary as Rich with details per module."""
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import html_table
+            if not can_use_rich(self._client, self._db):
+                return False
+            if not getattr(self.inline, "init_complete", False):
+                return False
+            ok = [r for r in results if r.get("ok")]
+            fail = [r for r in results if not r.get("ok")]
+            parts = [
+                f"<h2>Installed {len(ok)}/{len(results)}</h2>",
+            ]
+            if fail:
+                parts.append(
+                    "<p>Failed: "
+                    + ", ".join(utils.escape_html(r.get("name", "?")) for r in fail)
+                    + "</p>"
+                )
+            for r in ok:
+                name = utils.escape_html(r.get("name", "module"))
+                rows = r.get("rows") or []
+                body = ""
+                if rows:
+                    body = html_table(rows, header=("Command", "Description"))
+                doc = utils.escape_html((r.get("doc") or "")[:200])
+                inner = f"<p><i>{doc}</i></p>\n{body}" if doc else body
+                parts.append(
+                    f"<details><summary><b>{name}</b> ({len(rows)} cmds)</summary>\n"
+                    f"{inner}\n</details>"
+                )
+            html = "\n".join(parts)
+            m = await self.inline.rich(
+                message,
+                html,
+                title=f"Loaded {len(ok)} modules",
+                description="Batch install",
+                silent=True,
+            )
+            return bool(m)
+        except Exception:
+            logger.debug("loader rich batch failed", exc_info=True)
+            return False
+
+
     @loader.command(alias="dlm")
     async def dlmod(self, message: Message, force_pm: bool = False):
         if await self._check_pass(message):
@@ -252,21 +395,49 @@ class LoaderMod(loader.Module):
                         self.update_modules_in_db()
                 case _:
                     not_installed = []
-
-                    await utils.answer(message, f"Installing {len(args)} modules...")
-
-                    for arg in args:
-                        result = await self.download_and_install(arg)
-
-                        if result == MODULE_LOADING_FAILED:
-                            not_installed.append(arg)
+                    batch: list[dict] = []
                     await utils.answer(
                         message,
-                        "{} modules was installed.\n\nModules <code>{}</code> cannot be installed because they are not available in the repo".format(
-                            len(args) - len(not_installed),
-                            "</code>, <code>".join(not_installed),
-                        ),
+                        f"⏳ Installing <b>{len(args)}</b> modules…",
+                        skip_rich=True,
                     )
+                    for arg in args:
+                        self._last_loaded = None
+                        # quiet path via temporary flag
+                        self._quiet_install = True
+                        try:
+                            result = await self.download_and_install(arg)
+                        finally:
+                            self._quiet_install = False
+                        info = getattr(self, "_last_loaded", None) or {}
+                        if result in (MODULE_LOADING_FAILED, MODULE_LOADING_FORBIDDEN):
+                            not_installed.append(arg)
+                            batch.append(
+                                {"name": str(arg), "ok": False, "rows": [], "doc": ""}
+                            )
+                        else:
+                            batch.append(
+                                {
+                                    "name": info.get("name") or str(arg),
+                                    "ok": True,
+                                    "rows": info.get("rows") or [],
+                                    "doc": info.get("doc") or "",
+                                }
+                            )
+                    if not await self._rich_batch_loaded(message, batch):
+                        text = (
+                            f"✅ Installed <b>{len(args) - len(not_installed)}"
+                            f"/{len(args)}</b>"
+                        )
+                        if not_installed:
+                            text += (
+                                "\n\n❌ <code>"
+                                + "</code>, <code>".join(
+                                    utils.escape_html(str(x)) for x in not_installed
+                                )
+                                + "</code>"
+                            )
+                        await utils.answer(message, text, skip_rich=True)
 
                     if self.fully_loaded:
                         self.update_modules_in_db()
@@ -496,10 +667,11 @@ class LoaderMod(loader.Module):
 
                     return MODULE_LOADING_FAILED
 
-            if message:
+            if message and not getattr(self, "_quiet_install", False):
                 message = await utils.answer(
                     message,
                     self.strings["installing"].format(module_name),
+                    skip_rich=True,
                 )
 
             try:
@@ -550,27 +722,57 @@ class LoaderMod(loader.Module):
         if await self._check_pass(message):
             return
 
-        msg = message if message.file else (await message.get_reply_message())
-
-        if msg is None or msg.media is None:
+        files = await self._gather_module_files(message)
+        if not files:
             await utils.answer(message, self.strings["provide_module"])
             return
 
-        await utils.answer(message, self.strings["loading_module_via_file"])
+        await utils.answer(
+            message,
+            self.strings["loading_module_via_file"]
+            if len(files) == 1
+            else f"⏳ Installing <b>{len(files)}</b> modules…",
+            skip_rich=True,
+        )
 
-        path_ = None
-        doc = await msg.download_media(bytes)
+        batch: list[dict] = []
+        quiet = len(files) > 1
+        for msg in files:
+            try:
+                raw = await msg.download_media(bytes)
+                if raw is None:
+                    batch.append({"name": f"id:{msg.id}", "ok": False, "rows": [], "doc": ""})
+                    continue
+                try:
+                    doc = raw.decode()
+                except UnicodeDecodeError:
+                    batch.append({"name": f"id:{msg.id}", "ok": False, "rows": [], "doc": "bad unicode"})
+                    continue
+                fname = getattr(getattr(msg, "file", None), "name", None) or f"file_{msg.id}"
+                ok = await self.load_module(
+                    doc, message, origin=str(fname), save_fs=True, quiet=quiet
+                )
+                info = getattr(self, "_last_loaded", None) or {}
+                batch.append(
+                    {
+                        "name": info.get("name") or fname,
+                        "ok": bool(ok),
+                        "rows": info.get("rows") or [],
+                        "doc": info.get("doc") or "",
+                    }
+                )
+            except Exception:
+                logger.exception("loadmod file failed")
+                batch.append({"name": f"id:{msg.id}", "ok": False, "rows": [], "doc": ""})
 
-        try:
-            doc = doc.decode()
-        except UnicodeDecodeError:
-            await utils.answer(message, self.strings["bad_unicode"])
-            return
-
-        if path_ is not None:
-            await self.load_module(doc, message, origin=path_, save_fs=True)
-        else:
-            await self.load_module(doc, message, save_fs=True)
+        if quiet:
+            if not await self._rich_batch_loaded(message, batch):
+                ok_n = sum(1 for r in batch if r.get("ok"))
+                await utils.answer(
+                    message,
+                    f"✅ Installed <b>{ok_n}/{len(batch)}</b> modules",
+                    skip_rich=True,
+                )
 
     async def approve_internal(
         self,
@@ -838,6 +1040,7 @@ class LoaderMod(loader.Module):
         did_packages: bool = False,
         _raise_install_errors: bool = False,
         _safety_confirmed: bool = False,
+        quiet: bool = False,
     ) -> bool:
         module_label = name or origin
 
@@ -1498,10 +1701,33 @@ class LoaderMod(loader.Module):
             line.replace(" ", "") == "#scope:disable_onload_docs"
             for line in doc.splitlines()
         ):
+            quiet = bool(quiet) or bool(getattr(self, "_quiet_install", False))
+            try:
+                rows = self._module_cmds_rows(instance)
+                self._last_loaded = {
+                    "name": str(modname).strip(),
+                    "rows": rows,
+                    "doc": (inspect.getdoc(instance) or "")[:300] if instance.__doc__ else "",
+                    "ok": True,
+                }
+            except Exception:
+                self._last_loaded = {"name": str(modname), "rows": [], "doc": "", "ok": True}
+            if quiet:
+                return True
+            if await self._rich_module_loaded(
+                message,
+                modname=str(modname),
+                mod_doc=mod_doc or "",
+                rows=self._last_loaded.get("rows") or [],
+                subscribe_markup=subscribe_markup,
+                origin=origin,
+            ):
+                return True
             await utils.answer(
                 message,
                 loaded_msg(),
                 reply_markup=subscribe_markup,
+                skip_rich=True,
                 **banner_kwargs,
             )
             return True
@@ -1539,11 +1765,62 @@ class LoaderMod(loader.Module):
                     )
                 )
 
+        # Remember for batch installs
+        try:
+            rows = self._module_cmds_rows(instance)
+            plain_doc = ""
+            if instance.__doc__:
+                plain_doc = (inspect.getdoc(instance) or "")[:300]
+            self._last_loaded = {
+                "name": modname.strip() if isinstance(modname, str) else str(modname),
+                "rows": rows,
+                "doc": plain_doc,
+                "ok": True,
+            }
+        except Exception:
+            self._last_loaded = {"name": str(modname), "rows": [], "doc": "", "ok": True}
+
+        quiet = bool(quiet) or bool(getattr(self, "_quiet_install", False))
+        if quiet:
+            return True
+
+        # Rich announcement (commands in <details>)
+        # Subscribe callbacks need form units → keep classic form if markup set
+        try:
+            if not subscribe_markup and await self._rich_module_loaded(
+                message,
+                modname=str(modname),
+                mod_doc=mod_doc or "",
+                rows=self._last_loaded.get("rows") or [],
+                subscribe_markup=None,
+                origin=origin,
+            ):
+                return True
+            if subscribe_markup and await self._rich_module_loaded(
+                message,
+                modname=str(modname),
+                mod_doc=mod_doc or "",
+                rows=self._last_loaded.get("rows") or [],
+                subscribe_markup=None,
+                origin=origin,
+            ):
+                # Still show subscribe via separate form under rich
+                await self.inline.form(
+                    self.strings.get("suggest_subscribe", "Subscribe to developer channel?"),
+                    message=message if message.out else utils.get_chat_id(message),
+                    reply_markup=subscribe_markup,
+                    silent=True,
+                )
+                return True
+        except Exception:
+            logger.debug("rich announce failed", exc_info=True)
+
         try:
             await utils.answer(
                 message,
                 loaded_msg(),
                 reply_markup=subscribe_markup,
+                skip_rich=True,
                 **banner_kwargs,
             )
         except MediaCaptionTooLongError:
