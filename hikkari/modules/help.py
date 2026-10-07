@@ -318,7 +318,7 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"<details><summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n</details>"
                     )
                 if placeholders:
@@ -552,8 +552,13 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
+
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
-            """Rich help with official <tg-button-row> page navigation."""
+            """
+            One Rich message: Core block + Loaded block (details closed).
+            Pagination ONLY if total HTML exceeds Telegram Rich limit (~28k).
+            Nav buttons only on multi-page; they edit the same message.
+            """
             try:
                 from ..utils.rich import can_use_rich
                 from ..utils.rich_api import pick_banner_url, html_table
@@ -563,47 +568,140 @@ class Help(loader.Module):
                 if not getattr(self.inline, "init_complete", False):
                     logger.info("help rich skipped: inline bot not ready")
                     return False
+
                 banner_url = pick_banner_url(self.config.get("banner_url"))
-                entries = []
-                for sec_title, joined in sections:
-                    if not joined or not joined.strip():
-                        continue
-                    for raw in joined.split("\n"):
+                RICH_LIMIT = 28000  # under Bot API rich max 32768
+
+                def _rows_from_joined(joined: str) -> list[tuple[str, str]]:
+                    rows: list[tuple[str, str]] = []
+                    if not joined or not str(joined).strip():
+                        return rows
+                    for raw in str(joined).split("\n"):
                         raw = raw.strip()
                         if not raw:
                             continue
                         m = re.search(r"<code>([^<]+)</code>", raw)
-                        name = m.group(1) if m else raw[:40]
-                        cmds = ""
+                        name = m.group(1) if m else re.sub(r"<[^>]+>", "", raw)[:48]
+                        cmds = "—"
                         if ":" in raw:
                             after = raw.split(":", 1)[1]
-                            after = re.sub(r"<[^>]+>", "", after).strip()
-                            cmds = after.strip(" ()")
-                        entries.append((sec_title, name, cmds or "—"))
-                if not entries:
-                    return False
-                per_page = 10
-                total = max(1, (len(entries) + per_page - 1) // per_page)
-                pages = []
-                for p in range(total):
-                    chunk = entries[p * per_page : (p + 1) * per_page]
-                    parts = []
-                    if banner_url and p == 0:
-                        parts.append(f'<figure><img src="{banner_url}"/></figure>')
-                    parts.append(
-                        f"<h2>{text_header}</h2>"
-                        f"<p><i>стр. {p + 1}/{total} · {len(entries)} modules</i></p>"
+                            after = re.sub(r"<[^>]+>", "", after).strip().strip(" ()")
+                            if after:
+                                cmds = after
+                        rows.append((name, cmds))
+                    return rows
+
+                def _details_block(title: str, rows: list[tuple[str, str]]) -> str:
+                    if not rows:
+                        return ""
+                    table = html_table(rows, header=("Module", "Commands"))
+                    # closed by default (no open attribute)
+                    return (
+                        f"<details>"
+                        f"<summary><b>{title}</b> ({len(rows)})</summary>\n"
+                        f"{table}\n"
+                        f"</details>"
                     )
-                    by_sec = {}
-                    for sec, name, cmds in chunk:
-                        by_sec.setdefault(sec, []).append((name, cmds))
-                    for sec, rows in by_sec.items():
-                        table = html_table(rows, header=("Module", "Commands"))
-                        parts.append(
-                            f"<details open><summary><b>{sec}</b> ({len(rows)})</summary>\n"
-                            f"{table}\n</details>"
+
+                # Keep section order: typically Core then Loaded
+                section_rows: list[tuple[str, list[tuple[str, str]]]] = []
+                for sec_title, joined in sections:
+                    rows = _rows_from_joined(joined)
+                    if rows:
+                        section_rows.append((sec_title, rows))
+                if not section_rows:
+                    return False
+
+                total_mods = sum(len(r) for _, r in section_rows)
+
+                def _build_html(
+                    chunks: list[tuple[str, list[tuple[str, str]]]],
+                    *,
+                    page: int | None = None,
+                    pages_total: int | None = None,
+                    with_banner: bool = True,
+                ) -> str:
+                    parts: list[str] = []
+                    if with_banner and banner_url:
+                        parts.append(f'<figure><img src="{banner_url}"/></figure>')
+                    head = f"<h2>{text_header}</h2>"
+                    if pages_total and pages_total > 1 and page is not None:
+                        head += (
+                            f"<p><i>{page + 1}/{pages_total} · {total_mods} modules</i></p>"
                         )
-                    pages.append("\n".join(parts))
+                    else:
+                        head += f"<p><i>{total_mods} modules</i></p>"
+                    parts.append(head)
+                    for title, rows in chunks:
+                        blk = _details_block(title, rows)
+                        if blk:
+                            parts.append(blk)
+                    return "\n".join(parts)
+
+                full_html = _build_html(section_rows, with_banner=True)
+
+                # Under limit → ONE message, no nav buttons at all
+                if len(full_html) <= RICH_LIMIT:
+                    m = await self.inline.rich(
+                        message,
+                        full_html,
+                        title="Hikkari Help",
+                        description=text_header[:80],
+                        thumbnail_url=banner_url,
+                        silent=True,
+                        pages=None,
+                    )
+                    return bool(m)
+
+
+                # Over limit → split into pages that each stay under RICH_LIMIT
+                flat: list[tuple[str, str, str]] = []
+                for title, rows in section_rows:
+                    for name, cmds in rows:
+                        flat.append((title, name, cmds))
+
+                pages: list[str] = []
+                idx = 0
+                n = len(flat)
+                while idx < n:
+                    lo, hi = 1, n - idx
+                    best = 1
+                    while lo <= hi:
+                        mid = (lo + hi) // 2
+                        by: dict[str, list] = {}
+                        for title, name, cmds in flat[idx : idx + mid]:
+                            by.setdefault(title, []).append((name, cmds))
+                        trial = _build_html(
+                            list(by.items()),
+                            page=len(pages),
+                            pages_total=99,
+                            with_banner=(len(pages) == 0),
+                        )
+                        if len(trial) <= RICH_LIMIT:
+                            best = mid
+                            lo = mid + 1
+                        else:
+                            hi = mid - 1
+                    by = {}
+                    for title, name, cmds in flat[idx : idx + best]:
+                        by.setdefault(title, []).append((name, cmds))
+                    pages.append(
+                        _build_html(
+                            list(by.items()),
+                            page=len(pages),
+                            pages_total=99,
+                            with_banner=(len(pages) == 0),
+                        )
+                    )
+                    idx += best
+
+                real_total = max(1, len(pages))
+                if real_total > 1:
+                    pages = [
+                        re.sub(r"\d+/99", f"{pi + 1}/{real_total}", html, count=1)
+                        for pi, html in enumerate(pages)
+                    ]
+
                 m = await self.inline.rich(
                     message,
                     pages[0],
@@ -611,7 +709,7 @@ class Help(loader.Module):
                     description=text_header[:80],
                     thumbnail_url=banner_url,
                     silent=True,
-                    pages=pages if len(pages) > 1 else None,
+                    pages=pages if real_total > 1 else None,
                     page=0,
                 )
                 return bool(m)
@@ -619,7 +717,7 @@ class Help(loader.Module):
                 logger.debug("help rich failed", exc_info=True)
                 return False
 
-        
+
         async def _send_help_pages(text_header: str, sections: list[tuple[str, list[str]]]) -> bool:
             """Paginated form for large module lists. sections: (title, list of line html)"""
             try:

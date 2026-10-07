@@ -292,10 +292,16 @@ class Events(InlineUnit):
                 parts = call_data.split("|")
                 if len(parts) >= 4 and parts[2] == "p":
                     uid = parts[1]
-                    new_page = int(parts[3])
+                    try:
+                        new_page = int(parts[3])
+                    except ValueError:
+                        await call.answer("Bad page")
+                        return
                     unit = self._units.get(uid)
                     if not unit or unit.get("type") != "rich":
-                        await call.answer("Expired")
+                        # stop spinner even on expired
+                        with contextlib.suppress(Exception):
+                            await call.answer("Expired — run .help again")
                         return
                     if unit.get("force_me") and user_id != self._me:
                         if user_id not in (
@@ -312,54 +318,81 @@ class Events(InlineUnit):
                     if new_page == unit.get("page"):
                         await call.answer(f"{new_page + 1}/{len(pages)}")
                         return
+                    # Answer FIRST so Telegram stops the loading spinner
+                    with contextlib.suppress(Exception):
+                        await call.answer(f"{new_page + 1}/{len(pages)}")
                     from ..utils.rich_api import (
-                        nav_button_row,
-                        markup_to_tg_rows,
                         edit_rich_message,
                         _find_bot_token,
                     )
+                    # Page HTML only — navigation lives in reply_markup under the message
                     body = pages[new_page]
-                    nav = nav_button_row(uid, new_page, len(pages))
-                    if nav:
-                        body = body + "\n" + nav
-                    btn_html = markup_to_tg_rows(unit.get("buttons") or [], uid)
-                    if btn_html:
-                        body = body + "\n" + btn_html
                     unit["page"] = new_page
                     unit["rich_html"] = body
                     token = _find_bot_token(self._client)
-                    imid = getattr(call, "inline_message_id", None)
+                    imid = (
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "inlineMessageId", None)
+                    )
                     ok = False
                     if token and imid:
                         ok = await edit_rich_message(
                             str(token), body, inline_message_id=str(imid)
                         )
                     if not ok and token:
-                        # fallback: chat + message_id
-                        chat_id = getattr(call, "chat_id", None) or (
-                            getattr(getattr(call, "message", None), "chat", None)
-                            and getattr(call.message.chat, "id", None)
-                        )
-                        mid = getattr(call, "message_id", None) or getattr(
-                            getattr(call, "message", None), "message_id", None
-                        )
-                        if chat_id and mid:
+                        chat_id = getattr(call, "chat_id", None)
+                        if chat_id is None:
+                            msg = getattr(call, "message", None)
+                            if msg is not None:
+                                chat = getattr(msg, "chat", None)
+                                chat_id = getattr(chat, "id", None) if chat else None
+                        mid = getattr(call, "message_id", None)
+                        if mid is None:
+                            msg = getattr(call, "message", None)
+                            mid = getattr(msg, "message_id", None) or getattr(msg, "id", None)
+                        if chat_id is not None and mid is not None:
                             ok = await edit_rich_message(
                                 str(token),
                                 body,
                                 chat_id=chat_id,
                                 message_id=int(mid),
                             )
-                    await call.answer(f"{new_page + 1}/{len(pages)}" if ok else "…")
+                    if not ok:
+                        logger.warning(
+                            "rich nav edit failed unit=%s page=%s imid=%s",
+                            uid,
+                            new_page,
+                            imid,
+                        )
+                    else:
+                        # Refresh under-message keyboard page indicator
+                        try:
+                            import aiohttp
+                            from ..utils.rich_api import API
+                            nav_row = []
+                            if new_page > 0:
+                                nav_row.append({"text": "◀", "callback_data": f"hk|{uid}|p|{new_page - 1}"})
+                            nav_row.append({"text": f"{new_page + 1}/{len(pages)}", "callback_data": f"hk|{uid}|p|{new_page}"})
+                            if new_page < len(pages) - 1:
+                                nav_row.append({"text": "▶", "callback_data": f"hk|{uid}|p|{new_page + 1}"})
+                            rm = {"inline_keyboard": [nav_row]}
+                            payload = {"reply_markup": rm}
+                            if imid:
+                                payload["inline_message_id"] = str(imid)
+                            else:
+                                payload["chat_id"] = chat_id
+                                payload["message_id"] = int(mid)
+                            url = API.format(token=str(token), method="editMessageReplyMarkup")
+                            async with aiohttp.ClientSession() as session:
+                                async with session.post(url, json=payload) as resp:
+                                    await resp.json(content_type=None)
+                        except Exception:
+                            logger.debug("rich nav markup refresh failed", exc_info=True)
                     return
             except Exception:
                 logger.exception("rich nav callback failed")
-                try:
-                    await call.answer("Error", alert=True)
-                except Exception:
-                    pass
-                return
-
+                with contextlib.suppress(Exception):
+                    await call.answer("Error", show_alert=True)
 
         for func in self._allmodules.callback_handlers.values():
             if await self.check_inline_security(func=func, user=user_id):

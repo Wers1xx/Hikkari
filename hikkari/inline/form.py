@@ -491,12 +491,22 @@ class Form(InlineUnit):
                 page_list = [to_rich_compatible(p) for p in page_list]
                 cur = max(0, min(cur, len(page_list) - 1))
                 body = page_list[cur]
-                nav = nav_button_row(unit_id, cur, len(page_list))
-                if nav:
-                    body = body + "\n" + nav
-            btn_html = markup_to_tg_rows(markup, unit_id) if markup else ""
-            if btn_html:
-                body = body + "\n" + btn_html
+                # Reliable nav: classic InlineKeyboard under the message (not tg-button).
+                # Same hk|uid|p|N callbacks — events.py answers + editMessageText(rich).
+                nav_row = []
+                if cur > 0:
+                    nav_row.append({"text": "◀", "data": f"hk|{unit_id}|p|{cur - 1}"})
+                nav_row.append(
+                    {"text": f"{cur + 1}/{len(page_list)}", "data": f"hk|{unit_id}|p|{cur}"}
+                )
+                if cur < len(page_list) - 1:
+                    nav_row.append({"text": "▶", "data": f"hk|{unit_id}|p|{cur + 1}"})
+                markup = [nav_row] + (markup or [])
+            else:
+                # URL / custom buttons only → official in-body <tg-button-row>
+                btn_html = markup_to_tg_rows(markup, unit_id) if markup else ""
+                if btn_html:
+                    body = body + "\n" + btn_html
             html = body
         except Exception:
             logger.debug("rich button embed failed", exc_info=True)
