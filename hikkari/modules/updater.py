@@ -1176,6 +1176,18 @@ class UpdaterMod(loader.Module):
             msg = self.strings[
                 "secure_boot_fail" if secure_boot else "full_fail"
             ].format(utils.ascii_face(), took, fails)
+            # Append names of modules that failed to load (if tracked)
+            failed_names = getattr(self.allmodules, "_failed_module_names", None) or []
+            if failed_names:
+                short = []
+                for n in failed_names[:5]:
+                    n = str(n)
+                    # strip path noise
+                    n = n.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    short.append(f"<code>{utils.escape_html(n)}</code>")
+                msg += "\n" + ", ".join(short)
+                if len(failed_names) > 5:
+                    msg += f" (+{len(failed_names) - 5})"
 
         if ms is None:
             return

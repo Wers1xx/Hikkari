@@ -26,6 +26,7 @@ import os
 import platform as lib_platform
 import random
 import time
+import asyncio
 from io import BytesIO
 
 from hikkaritl.tl.types import Message
@@ -98,7 +99,7 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "custom_message",
-                '<blockquote><emoji document_id=5332773077094797849>⚛️</emoji> <code>Ping</code>: {ping}\n<emoji document_id=5285403427520679148>📹</emoji> <code>Uptime</code>: {uptime}\n<emoji document_id=5283080550293211714>⚜️</emoji> <code>Version</code>: {version} {build}</blockquote>\n<blockquote><emoji document_id=5280833127051199059>⚜️</emoji> <code>Me</code>: {me}\n<emoji document_id=5256216509109272955>⚜️</emoji> <code>RAM/CPU</code>: {ram_usage}, {cpu_usage}\n<emoji document_id=5280499068789887600>⚜️</emoji> Kernel/Host: {kernel}, {hostname}</blockquote>',
+                '<blockquote><emoji document_id=5325547803936572038>✨</emoji> <code>Ping</code>: {ping}</blockquote>\n<blockquote><emoji document_id=5255971360965930740>🕔</emoji> <code>Uptime</code>: {uptime}</blockquote>\n<blockquote><emoji document_id=5341715473882955310>⚙️</emoji> <code>Version</code>: {version} {build}</blockquote>',
                 lambda: (
                     self.strings["configping"]
                     + (
@@ -415,14 +416,21 @@ class TestMod(loader.Module):
             ):
                 burl = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
-                # Always prefer custom_message (classic blockquote or full Rich HTML)
-                if custom and str(custom).strip() and placeholders_msg:
+                # Keep full Rich HTML if user provided it; otherwise official table
+                use_raw = bool(
+                    custom
+                    and str(custom).strip()
+                    and (
+                        "<table" in str(custom).lower()
+                        or "<h2" in str(custom).lower()
+                        or "<details" in str(custom).lower()
+                        or "<tg-button" in str(custom).lower()
+                        or "<figure" in str(custom).lower()
+                    )
+                )
+                if use_raw:
                     html = to_rich_compatible(placeholders_msg)
-                    if burl and "<figure" not in html.lower() and (
-                        "<table" in html.lower()
-                        or "<h2" in html.lower()
-                        or "<details" in html.lower()
-                    ):
+                    if burl and "<figure" not in html.lower():
                         html = f'<figure><img src="{burl}"/></figure>\n' + html
                 else:
                     rows = [
@@ -433,10 +441,8 @@ class TestMod(loader.Module):
                             "Build",
                             re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
                         ),
-                        ("Me", re.sub(r"<[^>]+>", "", str(data.get("me", "")))[:64]),
-                        ("RAM/CPU", f"{data.get('ram_usage')}, {data.get('cpu_usage')}"),
-                        ("Kernel", str(data.get("kernel", ""))),
-                        ("Host", str(data.get("hostname", ""))),
+                        ("Platform", str(data.get("platform", ""))),
+                        ("Python", str(data.get("python_ver", ""))),
                     ]
                     html = build_info_html(
                         title="Hikkari Ping",
@@ -479,6 +485,132 @@ class TestMod(loader.Module):
             invert_media=self.config["invert_media"],
             skip_rich=True,
         )
+
+
+    @loader.command()
+    async def usinfo(self, message: Message):
+        """Detailed host / process resource usage"""
+        import os
+        import psutil
+        import platform as lib_platform
+        from ..utils.rich import can_use_rich
+        from ..utils.rich_api import build_info_html, to_rich_compatible, try_send_rich, pick_banner_url
+
+        proc = psutil.Process(os.getpid())
+        with contextlib.suppress(Exception):
+            proc.cpu_percent(interval=None)  # prime
+        await asyncio.sleep(0.15)
+
+        vm = psutil.virtual_memory()
+        sm = psutil.swap_memory()
+        disk = psutil.disk_usage("/")
+        try:
+            load1, load5, load15 = psutil.getloadavg()
+            load_s = f"{load1:.2f} / {load5:.2f} / {load15:.2f}"
+        except Exception:
+            load_s = "—"
+
+        try:
+            cpu_freq = psutil.cpu_freq()
+            freq_s = f"{cpu_freq.current:.0f} MHz" if cpu_freq else "—"
+        except Exception:
+            freq_s = "—"
+
+        rss = proc.memory_info().rss
+        pcpu = proc.cpu_percent(interval=0.2)
+        pmem = proc.memory_percent()
+        threads = proc.num_threads()
+        try:
+            open_files = len(proc.open_files())
+        except Exception:
+            open_files = "—"
+        try:
+            conns = len(proc.net_connections() if hasattr(proc, 'net_connections') else proc.connections())
+        except Exception:
+            conns = "—"
+
+        def _mb(n: float) -> str:
+            return f"{n / 1024 / 1024:.1f} MB"
+
+        def _gb(n: float) -> str:
+            return f"{n / 1024 / 1024 / 1024:.2f} GB"
+
+        rows = [
+            ("Host", lib_platform.node()),
+            ("OS", f"{lib_platform.system()} {lib_platform.release()}"),
+            ("Arch", lib_platform.machine()),
+            ("Python", lib_platform.python_version()),
+            ("CPU cores", f"{psutil.cpu_count(logical=False) or '?'} phys / {psutil.cpu_count() or '?'} log"),
+            ("CPU total", f"{psutil.cpu_percent(interval=0.2):.1f}%"),
+            ("CPU freq", freq_s),
+            ("Load avg", load_s),
+            ("RAM total", _gb(vm.total)),
+            ("RAM used", f"{_gb(vm.used)} ({vm.percent:.1f}%)"),
+            ("RAM free", _gb(vm.available)),
+            ("Swap", f"{_gb(sm.used)} / {_gb(sm.total)} ({sm.percent:.1f}%)"),
+            ("Disk /", f"{_gb(disk.used)} / {_gb(disk.total)} ({disk.percent:.1f}%)"),
+            ("UB PID", str(os.getpid())),
+            ("UB RAM (RSS)", f"{_mb(rss)} ({pmem:.1f}%)"),
+            ("UB CPU", f"{pcpu:.1f}%"),
+            ("UB threads", str(threads)),
+            ("UB open files", str(open_files)),
+            ("UB connections", str(conns)),
+            ("UB uptime", utils.formatted_uptime()),
+        ]
+
+        # Classic text
+        lines = [
+            f"<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Hikkari usinfo</b>",
+            "",
+            f"<b>Host</b>: <code>{utils.escape_html(lib_platform.node())}</code>",
+            f"<b>OS</b>: <code>{utils.escape_html(lib_platform.system() + ' ' + lib_platform.release())}</code>",
+            f"<b>CPU</b>: <code>{psutil.cpu_percent(interval=None):.1f}%</code> · cores <code>{psutil.cpu_count(logical=False)}/{psutil.cpu_count()}</code>",
+            f"<b>RAM</b>: <code>{_mb(vm.used)}</code> / <code>{_mb(vm.total)}</code> (<code>{vm.percent:.1f}%</code>)",
+            f"<b>Swap</b>: <code>{_mb(sm.used)}</code> / <code>{_mb(sm.total)}</code>",
+            f"<b>Disk</b>: <code>{_gb(disk.used)}</code> / <code>{_gb(disk.total)}</code> (<code>{disk.percent:.1f}%</code>)",
+            "",
+            f"<b>Userbot process</b>",
+            f"├ PID <code>{os.getpid()}</code>",
+            f"├ RAM <code>{_mb(rss)}</code> (<code>{pmem:.1f}%</code>)",
+            f"├ CPU <code>{pcpu:.1f}%</code>",
+            f"├ threads <code>{threads}</code>",
+            f"├ files <code>{open_files}</code> · conn <code>{conns}</code>",
+            f"└ uptime <code>{utils.formatted_uptime()}</code>",
+        ]
+        text = "\n".join(lines)
+
+        try:
+            if can_use_rich(self._client, self._db) and getattr(
+                self.inline, "init_complete", False
+            ):
+                burl = pick_banner_url(self.config.get("banner_url"))
+                html = build_info_html(
+                    title="Hikkari usinfo",
+                    rows=rows,
+                    footer="Process = this userbot instance",
+                    banner_url=burl,
+                )
+                html = to_rich_compatible(html)
+                m = await self.inline.rich(
+                    message,
+                    html,
+                    title="Hikkari usinfo",
+                    description=f"RAM {_mb(rss)} · CPU {pcpu:.1f}%",
+                    thumbnail_url=burl,
+                    silent=True,
+                )
+                if m:
+                    return
+                chat = utils.get_chat_id(message)
+                if await try_send_rich(self._client, chat, html):
+                    with contextlib.suppress(Exception):
+                        if getattr(message, "out", False):
+                            await message.delete()
+                    return
+        except Exception:
+            logger.warning("usinfo rich failed", exc_info=True)
+
+        await utils.answer(message, text, skip_rich=True)
 
     async def client_ready(self):
         self._content_channel_id = await utils.wait_for_content_channel(self._db)

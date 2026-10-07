@@ -209,6 +209,26 @@ def patched_import(name: str, *args, **kwargs):
 builtins.__import__ = patched_import
 
 
+# Compatibility: telethon.types → hikkaritl.tl.types for external modules
+try:
+    import hikkaritl as _hktl
+    if not hasattr(_hktl, "types"):
+        try:
+            from hikkaritl.tl import types as _hk_types
+            _hktl.types = _hk_types
+        except Exception:
+            pass
+    if not hasattr(_hktl, "utils"):
+        try:
+            from hikkaritl import utils as _hk_utils
+            _hktl.utils = _hk_utils
+        except Exception:
+            pass
+except Exception:
+    pass
+
+
+
 class InfiniteLoop:
     _task = None
     status = False
@@ -697,13 +717,26 @@ class Modules:
                 "<core {}>" if origin == "<core>" else "<file {}>"
             ).format(module_name)
             logger.debug("Loading %s from filesystem", module_name)
+            # Ensure parent packages exist for relative imports (from .. import loader)
+            parts = module_name.split(".")
+            for i in range(1, len(parts)):
+                pkg = ".".join(parts[:i])
+                if pkg not in sys.modules:
+                    pkg_mod = importlib.util.module_from_spec(
+                        importlib.machinery.ModuleSpec(pkg, None, is_package=True)
+                    )
+                    pkg_mod.__path__ = []
+                    sys.modules[pkg] = pkg_mod
+
+            source = Path(mod).read_text(encoding="utf-8")
+            # Soft rewrite: import telethon → already handled by patched_import
+            # Fix common broken defaults that crash Boolean validator edge-cases
             spec = importlib.machinery.ModuleSpec(
                 module_name,
-                StringLoader(
-                    Path(mod).read_text(encoding="utf-8"), user_friendly_origin
-                ),
+                StringLoader(source, user_friendly_origin),
                 origin=user_friendly_origin,
             )
+            spec.submodule_search_locations = []
             return await self.register_module(spec, module_name, origin)
 
         if parallel:
@@ -715,6 +748,14 @@ class Modules:
                         return await _load_one(mod)
                     except Exception as e:
                         logger.exception("Failed to load module %s due to %s:", mod, e)
+                        try:
+                            fails = getattr(self, "_failed_module_names", None)
+                            if fails is None:
+                                self._failed_module_names = []
+                                fails = self._failed_module_names
+                            fails.append(str(mod))
+                        except Exception:
+                            pass
                         return None
 
             results = await asyncio.gather(*(_guarded(m) for m in modules))
@@ -726,6 +767,14 @@ class Modules:
                     logger.debug("Successfully loaded from filesystem")
                 except Exception as e:
                     logger.exception("Failed to load module %s due to %s:", mod, e)
+                    try:
+                        fails = getattr(self, "_failed_module_names", None)
+                        if fails is None:
+                            self._failed_module_names = []
+                            fails = self._failed_module_names
+                        fails.append(str(mod))
+                    except Exception:
+                        pass
 
         return loaded
 
@@ -798,14 +847,22 @@ class Modules:
 
         ret = None
 
-        ret = next(
-            (
-                value()
-                for value in vars(module).values()
-                if inspect.isclass(value) and issubclass(value, Module)
-            ),
-            None,
-        )
+        ret = None
+        for value in vars(module).values():
+            if not inspect.isclass(value) or not issubclass(value, Module):
+                continue
+            if value is Module:
+                continue
+            try:
+                ret = value()
+                break
+            except Exception as e:
+                logger.exception(
+                    "Failed to instantiate module class %s: %s",
+                    getattr(value, "__name__", value),
+                    e,
+                )
+                raise
 
         if hasattr(module, "__version__"):
             ret.__version__ = module.__version__
@@ -917,10 +974,13 @@ class Modules:
                 and _command.lower() in self._core_commands
                 and not instance.__origin__.startswith("<core")
             ):
-                with contextlib.suppress(Exception):
-                    self.modules.remove(instance)
-
-                raise CoreOverwriteError(command=_command)
+                # Don't kill the whole module — skip only the conflicting command
+                logger.warning(
+                    "Module %s: command '%s' conflicts with core — skipped",
+                    instance.__class__.__name__,
+                    _command,
+                )
+                continue
 
             self.commands.update({_command.lower(): cmd})
 

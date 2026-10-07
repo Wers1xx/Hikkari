@@ -79,10 +79,10 @@ class Boolean(Validator):
     """
 
     _TRUE_VALUES = frozenset(
-        ("True", "true", "1", 1, True, "yes", "Yes", "on", "On", "y", "Y")
+        ("True", "true", "TRUE", "1", 1, True, "yes", "Yes", "YES", "on", "On", "ON", "y", "Y")
     )
     _FALSE_VALUES = frozenset(
-        ("False", "false", "0", 0, False, "no", "No", "off", "Off", "n", "N")
+        ("False", "false", "FALSE", "0", 0, False, "no", "No", "NO", "off", "Off", "OFF", "n", "N")
     )
     _ALL_VALUES = _TRUE_VALUES | _FALSE_VALUES
 
