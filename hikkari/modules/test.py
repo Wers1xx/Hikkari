@@ -98,7 +98,7 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "custom_message",
-                "<blockquote><emoji document_id=5325547803936572038>✨</emoji> <code>Ping</code>: {ping}</blockquote>\n<blockquote><emoji document_id=5255971360965930740>🕔</emoji> <code>Uptime</code>: {uptime}</blockquote>\n<blockquote><emoji document_id=5341715473882955310>⚙️</emoji> <code>Version</code>: {version} {build}</blockquote>",
+                '<blockquote><emoji document_id=5332773077094797849>⚛️</emoji> <code>Ping</code>: {ping}\n<emoji document_id=5285403427520679148>📹</emoji> <code>Uptime</code>: {uptime}\n<emoji document_id=5283080550293211714>⚜️</emoji> <code>Version</code>: {version} {build}</blockquote>\n<blockquote><emoji document_id=5280833127051199059>⚜️</emoji> <code>Me</code>: {me}\n<emoji document_id=5256216509109272955>⚜️</emoji> <code>RAM/CPU</code>: {ram_usage}, {cpu_usage}\n<emoji document_id=5280499068789887600>⚜️</emoji> Kernel/Host: {kernel}, {hostname}</blockquote>',
                 lambda: (
                     self.strings["configping"]
                     + (
@@ -110,7 +110,7 @@ class TestMod(loader.Module):
                         else ""
                     )
                 ),
-                validator=loader.validators.String(),
+                validator=loader.validators.String(max_len=32000),
             ),
             loader.ConfigValue(
                 "hint",
@@ -415,20 +415,14 @@ class TestMod(loader.Module):
             ):
                 burl = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
-                # Prefer proper Rich table; only keep raw custom if it already has Rich tags
-                use_raw = bool(
-                    custom
-                    and str(custom).strip()
-                    and (
-                        "<table" in str(custom).lower()
-                        or "<h2" in str(custom).lower()
-                        or "<details" in str(custom).lower()
-                        or "<tg-button" in str(custom).lower()
-                    )
-                )
-                if use_raw:
+                # Always prefer custom_message (classic blockquote or full Rich HTML)
+                if custom and str(custom).strip() and placeholders_msg:
                     html = to_rich_compatible(placeholders_msg)
-                    if burl and "<figure" not in html.lower():
+                    if burl and "<figure" not in html.lower() and (
+                        "<table" in html.lower()
+                        or "<h2" in html.lower()
+                        or "<details" in html.lower()
+                    ):
                         html = f'<figure><img src="{burl}"/></figure>\n' + html
                 else:
                     rows = [
@@ -439,8 +433,10 @@ class TestMod(loader.Module):
                             "Build",
                             re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
                         ),
-                        ("Platform", str(data.get("platform", ""))),
-                        ("Python", str(data.get("python_ver", ""))),
+                        ("Me", re.sub(r"<[^>]+>", "", str(data.get("me", "")))[:64]),
+                        ("RAM/CPU", f"{data.get('ram_usage')}, {data.get('cpu_usage')}"),
+                        ("Kernel", str(data.get("kernel", ""))),
+                        ("Host", str(data.get("hostname", ""))),
                     ]
                     html = build_info_html(
                         title="Hikkari Ping",
