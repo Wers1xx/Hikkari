@@ -717,26 +717,17 @@ class Modules:
                 "<core {}>" if origin == "<core>" else "<file {}>"
             ).format(module_name)
             logger.debug("Loading %s from filesystem", module_name)
-            # Ensure parent packages exist for relative imports (from .. import loader)
-            parts = module_name.split(".")
-            for i in range(1, len(parts)):
-                pkg = ".".join(parts[:i])
-                if pkg not in sys.modules:
-                    pkg_mod = importlib.util.module_from_spec(
-                        importlib.machinery.ModuleSpec(pkg, None, is_package=True)
-                    )
-                    pkg_mod.__path__ = []
-                    sys.modules[pkg] = pkg_mod
-
-            source = Path(mod).read_text(encoding="utf-8")
-            # Soft rewrite: import telethon → already handled by patched_import
-            # Fix common broken defaults that crash Boolean validator edge-cases
+            # Do NOT set submodule_search_locations — that marks the module as a
+            # package and breaks relative imports (from .. import loader → looks
+            # inside hikkari.modules instead of hikkari).
+            # Do NOT inject empty parent package stubs into sys.modules either.
             spec = importlib.machinery.ModuleSpec(
                 module_name,
-                StringLoader(source, user_friendly_origin),
+                StringLoader(
+                    Path(mod).read_text(encoding="utf-8"), user_friendly_origin
+                ),
                 origin=user_friendly_origin,
             )
-            spec.submodule_search_locations = []
             return await self.register_module(spec, module_name, origin)
 
         if parallel:
