@@ -611,7 +611,7 @@ class Help(loader.Module):
                     description=text_header[:80],
                     thumbnail_url=banner_url,
                     silent=True,
-                    pages=pages,
+                    pages=pages if len(pages) > 1 else None,
                     page=0,
                 )
                 return bool(m)
