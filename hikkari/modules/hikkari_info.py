@@ -242,38 +242,67 @@ class HikkariInfoMod(loader.Module):
         media = utils.resolve_banner_media(banner)
         # Rich mode → prefer quote/invert like Heroku info card
 
-        # Rich via @bot (Premium + rich_mode)
+
+        # Rich via @bot (Premium + rich_mode) — custom_message keeps full Rich HTML
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import build_info_html, pick_banner_url
+            from ..utils.rich_api import (
+                build_info_html,
+                pick_banner_url,
+                to_rich_compatible,
+                parse_rich_url_buttons,
+                try_send_rich,
+            )
             if can_use_rich(self._client, getattr(self, "_db", None)) and getattr(
                 self, "inline", None
-            ):
+            ) and getattr(self.inline, "init_complete", False):
                 banner_url = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
-                if custom:
-                    # User-authored Rich HTML (custom_message) + placeholders
+                if custom and str(custom).strip():
                     data = await self._info_placeholders(start)
+                    # Safe format: missing keys → empty
+                    class _Safe(dict):
+                        def __missing__(self, key):
+                            return "{" + key + "}"
                     try:
-                        html = str(custom).format(**data)
+                        html = str(custom).format_map(_Safe(**data))
                     except Exception:
                         logger.exception("custom_message format failed")
                         html = str(custom)
+                    html = to_rich_compatible(html)
                     if banner_url and "<figure" not in html.lower():
-                        html = (
-                            f'<figure><img src="{banner_url}"/></figure>\n'
-                            + html
-                        )
+                        html = f'<figure><img src="{banner_url}"/></figure>\n' + html
                 else:
                     rows = [
-                        ("Owner", utils.escape_html(get_display_name(self._client.hikkari_me))),
+                        (
+                            "Owner",
+                            utils.escape_html(
+                                get_display_name(self._client.hikkari_me)
+                            ),
+                        ),
                         ("Version", ".".join(map(str, version.__version__))),
-                        ("Build", str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "—"),
-                        ("Hikkari TL", str(getattr(hikkaritl, "__version__", "?"))),
+                        (
+                            "Build",
+                            str(utils.get_commit_url())
+                            if hasattr(utils, "get_commit_url")
+                            else "—",
+                        ),
+                        (
+                            "Hikkari TL",
+                            str(getattr(hikkaritl, "__version__", "?")),
+                        ),
                         ("Prefix", utils.escape_html(self.get_prefix())),
                         ("Uptime", utils.formatted_uptime()),
-                        ("Ping", f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms"),
-                        ("Platform", str(utils.get_named_platform()) if hasattr(utils, "get_named_platform") else "—"),
+                        (
+                            "Ping",
+                            f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms",
+                        ),
+                        (
+                            "Platform",
+                            str(utils.get_named_platform())
+                            if hasattr(utils, "get_named_platform")
+                            else "—",
+                        ),
                         ("Python", lib_platform.python_version()),
                         ("Developers", "@Wers1xx"),
                     ]
@@ -283,36 +312,34 @@ class HikkariInfoMod(loader.Module):
                         footer="You are a happy owner of Hikkari!",
                         banner_url=banner_url,
                     )
-                from ..utils.rich_api import parse_rich_url_buttons, to_rich_compatible
-                html = to_rich_compatible(html)
-                # Official Rich buttons (Bot API 10.3) inside message body
-                btn_html = parse_rich_url_buttons(
-                    str(self.config.get("rich_buttons") or "")
-                )
-                if btn_html:
-                    html = html + "\n" + btn_html
+                    html = to_rich_compatible(html)
+                    btn_html = parse_rich_url_buttons(
+                        str(self.config.get("rich_buttons") or "")
+                    )
+                    if btn_html:
+                        html = html + "\n" + btn_html
+
                 m = await self.inline.rich(
                     message,
                     html,
                     title="Hikkari Info",
                     description="Rich info",
                     thumbnail_url=banner_url,
+                    silent=True,
                 )
                 if m:
                     return
-                try:
-                    from ..utils.rich_api import try_send_rich
-                    chat = utils.get_chat_id(message)
-                    if await try_send_rich(self._client, chat, html):
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        return
-                except Exception:
-                    logger.debug("info sendRichMessage fallback failed", exc_info=True)
+                # Fallback: Bot API sendRichMessage (still real Rich, keeps table)
+                chat = utils.get_chat_id(message)
+                if await try_send_rich(self._client, chat, html):
+                    with contextlib.suppress(Exception):
+                        if message.out:
+                            await message.delete()
+                    return
                 logger.warning("inline.rich failed → classic tree")
         except Exception:
             logger.warning("rich via inline failed", exc_info=True)
+
 
         try:
             match True:

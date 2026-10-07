@@ -78,6 +78,13 @@ class UpdaterMod(loader.Module):
                 validator=loader.validators.Link(),
             ),
             loader.ConfigValue(
+                "beta_users",
+                [],
+                "User IDs allowed to use the beta branch (owners always can). "
+                "Example: [123456789, 987654321]",
+                validator=loader.validators.Series(validator=loader.validators.Integer()),
+            ),
+            loader.ConfigValue(
                 "disable_notifications",
                 doc=lambda: self.strings["_cfg_doc_disable_notifications"],
                 validator=loader.validators.Boolean(),
@@ -706,6 +713,147 @@ class UpdaterMod(loader.Module):
             logger.critical("Got update loop. Update manually via .terminal")
 
     @loader.command()
+
+    def _can_use_beta(self, uid: int) -> bool:
+        owners = list(getattr(self._client.dispatcher.security, "owner", []) or [])
+        if uid in owners:
+            return True
+        try:
+            allowed = self.config.get("beta_users") or []
+            return int(uid) in [int(x) for x in allowed]
+        except Exception:
+            return False
+
+    @loader.command(
+        ru_doc="<master|beta> — переключить ветку обновлений (beta только с доступом)",
+        en_doc="<master|beta> — switch update branch (beta requires access)",
+    )
+    async def branch(self, message: Message):
+        """Switch between master and beta branches"""
+        args = (utils.get_args_raw(message) or "").strip().lower()
+        try:
+            uid = message.sender_id if not message.out else self._client.tg_id
+        except Exception:
+            uid = getattr(self._client, "tg_id", 0)
+
+        if not args:
+            cur = getattr(version, "branch", "master")
+            await utils.answer(
+                message,
+                f"<b>Current branch:</b> <code>{cur}</code>\n"
+                f"<i>Usage:</i> <code>{utils.escape_html(self.get_prefix())}branch master</code> "
+                f"or <code>beta</code>",
+            )
+            return
+
+        if args not in ("master", "beta", "main"):
+            await utils.answer(message, "❌ Use <code>master</code> or <code>beta</code>")
+            return
+        if args == "main":
+            args = "master"
+
+        if args == "beta" and not self._can_use_beta(uid):
+            await utils.answer(
+                message,
+                "🚫 <b>Beta access denied</b>\n"
+                "Ask the owner to add your ID via "
+                f"<code>{utils.escape_html(self.get_prefix())}cfg Updater beta_users</code> "
+                "or <code>betagrant</code>.",
+            )
+            return
+
+        if NO_GIT:
+            await utils.answer(message, "❌ Git disabled")
+            return
+
+        try:
+            import git as gitmod
+            with gitmod.Repo() as repo:
+                origin = repo.remote("origin")
+                origin.fetch()
+                # Ensure remote branch exists
+                remote_ref = f"origin/{args}"
+                if remote_ref not in [r.name for r in repo.refs]:
+                    # try create local tracking if remote has it
+                    if not any(r.name.endswith(f"/{args}") for r in origin.refs):
+                        await utils.answer(
+                            message,
+                            f"❌ Remote branch <code>{args}</code> not found on origin",
+                        )
+                        return
+                if args in repo.heads:
+                    repo.heads[args].checkout()
+                else:
+                    repo.create_head(args, repo.refs[f"origin/{args}"]).set_tracking_branch(
+                        repo.refs[f"origin/{args}"]
+                    ).checkout()
+                # pull latest
+                origin.pull()
+            # Update version.branch for this process
+            version.branch = args
+            await utils.answer(
+                message,
+                f"✅ Switched to <code>{args}</code>\n"
+                f"Restarting to apply…",
+            )
+            try:
+                await self.invoke("restart", "-f", peer=utils.get_chat_id(message))
+            except Exception:
+                from .. import version as _v
+                _v.restart()
+        except Exception as e:
+            logger.exception("branch switch failed")
+            await utils.answer(message, f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>")
+
+    @loader.command(
+        ru_doc="<id|reply> — выдать доступ к beta-ветке",
+        en_doc="<id|reply> — grant beta branch access",
+    )
+    async def betagrant(self, message: Message):
+        """Grant beta branch access to a user"""
+        args = utils.get_args_raw(message)
+        uid = None
+        if args and args.isdigit():
+            uid = int(args)
+        elif message.is_reply:
+            reply = await message.get_reply_message()
+            uid = reply.sender_id if reply else None
+        if not uid:
+            await utils.answer(message, "❌ Reply to user or pass numeric ID")
+            return
+        cur = list(self.config.get("beta_users") or [])
+        if uid not in cur:
+            cur.append(uid)
+            self.config["beta_users"] = cur
+        await utils.answer(
+            message,
+            f"✅ Beta access granted to <code>{uid}</code>\n"
+            f"They can use <code>{utils.escape_html(self.get_prefix())}branch beta</code>",
+        )
+
+    @loader.command(
+        ru_doc="<id|reply> — забрать доступ к beta",
+        en_doc="<id|reply> — revoke beta branch access",
+    )
+    async def betarevoke(self, message: Message):
+        """Revoke beta branch access"""
+        args = utils.get_args_raw(message)
+        uid = None
+        if args and args.isdigit():
+            uid = int(args)
+        elif message.is_reply:
+            reply = await message.get_reply_message()
+            uid = reply.sender_id if reply else None
+        if not uid:
+            await utils.answer(message, "❌ Reply to user or pass numeric ID")
+            return
+        cur = [int(x) for x in (self.config.get("beta_users") or [])]
+        if uid in cur:
+            cur.remove(uid)
+            self.config["beta_users"] = cur
+        await utils.answer(message, f"✅ Beta access revoked for <code>{uid}</code>")
+
+
     async def source(self, message: Message):
         await utils.answer(
             message,

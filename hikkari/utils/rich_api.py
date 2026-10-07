@@ -165,7 +165,7 @@ def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
 
 
 def to_rich_compatible(html: str) -> str:
-    """Normalize classic userbot HTML to official Rich HTML tags."""
+    """Normalize classic / Heroku-style HTML to official Rich HTML tags."""
     if not html or not isinstance(html, str):
         return html or ""
     # <emoji document_id=ID>X</emoji> → <tg-emoji emoji-id="ID">X</tg-emoji>
@@ -175,14 +175,52 @@ def to_rich_compatible(html: str) -> str:
         html,
         flags=re.I,
     )
-    # already tg-emoji without quotes
     html = re.sub(
         r'<tg-emoji\s+emoji-id=(\d+)\s*>',
         r'<tg-emoji emoji-id="\1">',
         html,
         flags=re.I,
     )
+    # <button url="URL">text</button> → <tg-button type="url" ...>
+    def _btn_url(m: re.Match) -> str:
+        url = m.group(1)
+        text = (m.group(2) or "•").strip()
+        return (
+            f'<tg-button type="url" style="primary" url="{url}">{text}</tg-button>'
+        )
+    html = re.sub(
+        r'<button\s+url=["\']([^"\']+)["\']\s*>(.*?)</button>',
+        _btn_url,
+        html,
+        flags=re.I | re.S,
+    )
+    # <button switch="query">text</button>
+    def _btn_sw(m: re.Match) -> str:
+        q = m.group(1) or ""
+        text = (m.group(2) or "•").strip()
+        return (
+            f'<tg-button type="switch_inline_query_current_chat" '
+            f'style="primary" query="{q}">{text}</tg-button>'
+        )
+    html = re.sub(
+        r'<button\s+switch=["\']([^"\']*)["\']\s*>(.*?)</button>',
+        _btn_sw,
+        html,
+        flags=re.I | re.S,
+    )
+    # Group consecutive tg-buttons into one row if no row wrapper yet
+    if "<tg-button" in html and "tg-button-row" not in html.lower():
+        def _wrap_row(m: re.Match) -> str:
+            return f'<tg-button-row align="center">{m.group(0)}</tg-button-row>'
+        html = re.sub(
+            r'(?:<tg-button\b[^>]*>.*?</tg-button>\s*){1,8}',
+            _wrap_row,
+            html,
+            count=1,
+            flags=re.I | re.S,
+        )
     return html
+
 
 
 def parse_rich_url_buttons(spec: str) -> str:
