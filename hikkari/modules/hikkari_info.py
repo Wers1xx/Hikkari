@@ -46,7 +46,7 @@ class HikkariInfoMod(loader.Module):
                 "custom_message",
                 doc=lambda: self.strings["_cfg_cst_msg"]
                 + "\nPlaceholders: {ping}, {uptime}, {version}, {build}, {owner}, …",
-                validator=loader.validators.String(max_len=4096),
+                validator=loader.validators.String(max_len=32000),
             ),
             loader.ConfigValue(
                 "rich_buttons",
@@ -232,6 +232,63 @@ class HikkariInfoMod(loader.Module):
             )
 
 
+
+    async def _info_placeholders(self, start: float) -> dict:
+        """All placeholders for custom_message (classic + Rich)."""
+        try:
+            up_to_date = utils.is_up_to_date()
+            upd = (
+                self.strings["up-to-date"]
+                if up_to_date
+                else self.strings["update_required"].format(prefix=self.get_prefix())
+            )
+        except Exception:
+            upd = "—"
+        upd = re.sub(r"<[^>]+>", "", str(upd)).strip() or "—"
+        me_name = utils.escape_html(get_display_name(self._client.hikkari_me))
+        me = f'<a href="tg://user?id={self._client.hikkari_me.id}">{me_name}</a>'
+        build = utils.get_commit_url() if hasattr(utils, "get_commit_url") else "—"
+        build_plain = re.sub(r"<[^>]+>", "", str(build))[:48] or "—"
+        _version = ".".join(map(str, list(version.__version__)))
+        prefix = utils.escape_html(self.get_prefix())
+        data = {
+            "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
+            "uptime": utils.formatted_uptime(),
+            "version": _version,
+            "build": build,
+            "build_plain": build_plain,
+            "owner": me,
+            "me": me,
+            "me_plain": me_name,
+            "prefix": prefix,
+            "platform": (
+                utils.get_named_platform()
+                if hasattr(utils, "get_named_platform")
+                else utils.get_platform_name()
+            ),
+            "upd": upd,
+            "cpu_usage": utils.get_cpu_usage(),
+            "ram_usage": f"{utils.get_ram_usage()} MB",
+            "branch": getattr(version, "branch", "master"),
+            "hostname": lib_platform.node(),
+            "user": getpass.getuser(),
+            "os": self._get_os_name() or self.strings.get("non_detectable", "—"),
+            "kernel": lib_platform.release(),
+            "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) cores",
+            "python_ver": lib_platform.python_version(),
+            "htl_ver": getattr(hikkaritl, "__version__", "?"),
+            "git_status": (
+                utils.get_git_status() if hasattr(utils, "get_git_status") else ""
+            ),
+        }
+        try:
+            data = await utils.get_placeholders(
+                data, self.config.get("custom_message") or ""
+            )
+        except Exception:
+            pass
+        return data
+
     @loader.command()
     async def infocmd(self, message: Message):
         """Show userbot info (Heroku-compatible quote_media)"""
@@ -253,9 +310,7 @@ class HikkariInfoMod(loader.Module):
                 parse_rich_url_buttons,
                 try_send_rich,
             )
-            if can_use_rich(self._client, getattr(self, "_db", None)) and getattr(
-                self, "inline", None
-            ) and getattr(self.inline, "init_complete", False):
+            if can_use_rich(self._client, getattr(self, "_db", None)):
                 banner_url = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
                 if custom and str(custom).strip():
@@ -319,24 +374,32 @@ class HikkariInfoMod(loader.Module):
                     if btn_html:
                         html = html + "\n" + btn_html
 
-                m = await self.inline.rich(
-                    message,
-                    html,
-                    title="Hikkari Info",
-                    description="Rich info",
-                    thumbnail_url=banner_url,
-                    silent=True,
-                )
-                if m:
-                    return
-                # Fallback: Bot API sendRichMessage (still real Rich, keeps table)
+                logger.info("info rich html length=%s", len(html))
+                m = None
+                if getattr(self, "inline", None) and getattr(
+                    self.inline, "init_complete", False
+                ):
+                    m = await self.inline.rich(
+                        message,
+                        html,
+                        title="Hikkari Info",
+                        description="Rich info",
+                        thumbnail_url=banner_url,
+                        silent=True,
+                    )
+                    if m:
+                        return
+                # Bot API sendRichMessage — keeps <table> and <tg-button>
                 chat = utils.get_chat_id(message)
                 if await try_send_rich(self._client, chat, html):
                     with contextlib.suppress(Exception):
                         if message.out:
                             await message.delete()
                     return
-                logger.warning("inline.rich failed → classic tree")
+                logger.warning(
+                    "info rich failed (inline + sendRichMessage) → classic; "
+                    "check Premium, rich_mode, bot token"
+                )
         except Exception:
             logger.warning("rich via inline failed", exc_info=True)
 

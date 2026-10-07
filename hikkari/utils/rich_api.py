@@ -168,6 +168,8 @@ def to_rich_compatible(html: str) -> str:
     """Normalize classic / Heroku-style HTML to official Rich HTML tags."""
     if not html or not isinstance(html, str):
         return html or ""
+    # Strip HTML comments (break some parsers)
+    html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
     # <emoji document_id=ID>X</emoji> → <tg-emoji emoji-id="ID">X</tg-emoji>
     html = re.sub(
         r'<emoji\s+document_id=["\']?(\d+)["\']?\s*>\s*([^<]*)</emoji>',
@@ -181,13 +183,18 @@ def to_rich_compatible(html: str) -> str:
         html,
         flags=re.I,
     )
-    # <button url="URL">text</button> → <tg-button type="url" ...>
+    # Normalize <table ...> → bordered striped compact (drop unknown attrs like padding)
+    html = re.sub(
+        r"<table\b[^>]*>",
+        '<table bordered striped compact>',
+        html,
+        flags=re.I,
+    )
+    # <button url="URL">text</button>
     def _btn_url(m: re.Match) -> str:
         url = m.group(1)
         text = (m.group(2) or "•").strip()
-        return (
-            f'<tg-button type="url" style="primary" url="{url}">{text}</tg-button>'
-        )
+        return f'<tg-button type="url" style="primary" url="{url}">{text}</tg-button>'
     html = re.sub(
         r'<button\s+url=["\']([^"\']+)["\']\s*>(.*?)</button>',
         _btn_url,
@@ -208,15 +215,15 @@ def to_rich_compatible(html: str) -> str:
         html,
         flags=re.I | re.S,
     )
-    # Group consecutive tg-buttons into one row if no row wrapper yet
+    # Wrap loose tg-buttons into a row
     if "<tg-button" in html and "tg-button-row" not in html.lower():
         def _wrap_row(m: re.Match) -> str:
             return f'<tg-button-row align="center">{m.group(0)}</tg-button-row>'
         html = re.sub(
             r'(?:<tg-button\b[^>]*>.*?</tg-button>\s*){1,8}',
             _wrap_row,
-            html,
             count=1,
+            string=html,
             flags=re.I | re.S,
         )
     return html
