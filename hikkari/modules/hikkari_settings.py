@@ -530,3 +530,83 @@ class HikkariSettingsMod(loader.Module):
             for name in dir(self.lookup(module))
             if getattr(getattr(self.lookup(module), name), "is_debug_method", False)
         }
+
+    @loader.command()
+    async def setproxy(self, message: Message):
+        """<url|type host port [user] [pass]> — set proxy (restart required)"""
+        from ..proxy_util import parse_proxy_args, save_proxy, mask_proxy
+
+        args = utils.get_args_raw(message) or ""
+        if not args.strip():
+            await utils.answer(
+                message,
+                "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Proxy</b>\n\n"
+                "<b>URL:</b>\n"
+                "<code>.setproxy socks5://user:pass@1.2.3.4:1080</code>\n"
+                "<code>.setproxy http://1.2.3.4:8080</code>\n"
+                "<code>.setproxy socks4://1.2.3.4:1080</code>\n"
+                "<code>.setproxy mtproxy://1.2.3.4:443?secret=ee…</code>\n\n"
+                "<b>Args:</b>\n"
+                "<code>.setproxy socks5 host port [user] [pass]</code>\n"
+                "<code>.setproxy mtproxy host port secret</code>\n\n"
+                "Supported: <code>http https socks4 socks5 mtproxy</code>\n"
+                "After set — <code>.restart</code> to apply.",
+            )
+            return
+        try:
+            cfg = parse_proxy_args(args)
+            save_proxy(cfg)
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                f"<code>{utils.escape_html(str(e))}</code>",
+            )
+            return
+        await utils.answer(
+            message,
+            f"<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> "
+            f"<b>Proxy saved:</b> <code>{utils.escape_html(mask_proxy(cfg))}</code>\n"
+            f"Run <code>{utils.escape_html(self.get_prefix())}restart</code> to apply.",
+        )
+
+    @loader.command()
+    async def delproxy(self, message: Message):
+        """Remove saved proxy (restart required)"""
+        from ..proxy_util import clear_proxy
+
+        ok = clear_proxy()
+        await utils.answer(
+            message,
+            (
+                "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> Proxy removed. "
+                f"Run <code>{utils.escape_html(self.get_prefix())}restart</code>."
+                if ok
+                else "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> No proxy.json found."
+            ),
+        )
+
+    @loader.command()
+    async def proxy(self, message: Message):
+        """Show current proxy status"""
+        from ..proxy_util import load_proxy_file, mask_proxy
+        import os
+
+        file_cfg = load_proxy_file()
+        env = None
+        for k in ("HIKKARI_PROXY", "PROXY_URL"):
+            if os.environ.get(k):
+                env = f"{k}=***"
+                break
+        lines = [
+            "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Proxy status</b>",
+            f"📁 file: <code>{utils.escape_html(mask_proxy(file_cfg))}</code>",
+            f"🌐 env: <code>{utils.escape_html(env or 'off')}</code>",
+            "",
+            f"<code>{utils.escape_html(self.get_prefix())}setproxy</code> — set",
+            f"<code>{utils.escape_html(self.get_prefix())}delproxy</code> — clear",
+            "CLI: <code>--proxy-url socks5://host:port</code>",
+        ]
+        await utils.answer(message, "\n".join(lines))
+
+

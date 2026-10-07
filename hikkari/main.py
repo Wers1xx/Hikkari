@@ -407,14 +407,32 @@ def parse_arguments() -> dict:
         dest="proxy_type",
         action="store",
         default="mtproxy",
-        choices=("mtproxy", "socks5", "http"),
-        help="Proxy type: mtproxy, socks5 or http",
+        choices=("mtproxy", "socks5", "socks4", "http", "https"),
+        help="Proxy type: mtproxy, socks5, socks4, http, https",
     )
     parser.add_argument(
         "--proxy-secret",
         dest="proxy_secret",
         action="store",
         help="MTProto proxy secret; required for --type-proxy mtproxy",
+    )
+    parser.add_argument(
+        "--proxy-url",
+        dest="proxy_url",
+        action="store",
+        help="Proxy URL e.g. socks5://user:pass@host:1080 or http://host:8080",
+    )
+    parser.add_argument(
+        "--proxy-user",
+        dest="proxy_user",
+        action="store",
+        help="Proxy username (optional)",
+    )
+    parser.add_argument(
+        "--proxy-pass",
+        dest="proxy_pass",
+        action="store",
+        help="Proxy password (optional)",
     )
     parser.add_argument(
         "--root",
@@ -523,43 +541,51 @@ class Hikkari:
 
     def _get_proxy(self):
         """
-        Get proxy settings from --type-proxy, --proxy-host, --proxy-port
-        and --proxy-secret
-        and connection to use (depends on proxy - provided or not)
+        Resolve proxy from CLI / env / proxy.json.
+        Supports: http, https, socks4, socks5, mtproxy.
         """
-        host = self.arguments.proxy_host
-        port = self.arguments.proxy_port
-        secret = self.arguments.proxy_secret
-        proxy_type = (self.arguments.proxy_type or "mtproxy").lower()
+        from .proxy_util import (
+            resolve_proxy_config,
+            to_telethon_proxy,
+            mask_proxy,
+        )
 
-        if not host and not port and not secret:
-            self.proxy, self.conn = None, ConnectionTcpFull
-            return
-
-        if not host or not port:
-            raise ValueError("--proxy-host and --proxy-port must be passed together")
-
-        if proxy_type == "mtproxy":
-            if not secret:
-                raise ValueError("--proxy-secret is required for --type-proxy mtproxy")
-
-            logging.debug("Using MTProxy: %s:%s", host, port)
-            self.proxy = (host, port, secret)
-            self.conn = ConnectionTcpMTProxyRandomizedIntermediate
-            return
-
-        if secret:
-            raise ValueError(
-                "--proxy-secret can only be used with --type-proxy mtproxy"
+        args = self.arguments
+        try:
+            cfg = resolve_proxy_config(
+                cli_host=getattr(args, "proxy_host", None),
+                cli_port=getattr(args, "proxy_port", None),
+                cli_type=getattr(args, "proxy_type", None),
+                cli_secret=getattr(args, "proxy_secret", None),
+                cli_url=getattr(args, "proxy_url", None),
             )
+        except Exception as e:
+            raise ValueError(f"Proxy config error: {e}") from e
 
-        logging.debug("Using %s proxy: %s:%s", proxy_type, host, port)
-        self.proxy = {
-            "proxy_type": proxy_type,
-            "addr": host,
-            "port": port,
-        }
-        self.conn = ConnectionTcpFull
+        # Optional CLI user/pass override
+        if cfg and getattr(args, "proxy_user", None):
+            cfg = dict(cfg)
+            cfg["username"] = args.proxy_user
+            if getattr(args, "proxy_pass", None):
+                cfg["password"] = args.proxy_pass
+
+        if not cfg:
+            self.proxy, self.conn = None, ConnectionTcpFull
+            self._proxy_cfg = None
+            return
+
+        try:
+            proxy, conn_hint = to_telethon_proxy(cfg)
+        except Exception as e:
+            raise ValueError(f"Proxy config error: {e}") from e
+
+        self._proxy_cfg = cfg
+        self.proxy = proxy
+        if conn_hint == "mtproxy":
+            self.conn = ConnectionTcpMTProxyRandomizedIntermediate
+        else:
+            self.conn = ConnectionTcpFull
+        logging.info("Proxy enabled: %s", mask_proxy(cfg))
 
     def _migrate_sessions(self):
         os.makedirs(SESSIONS_DIR, exist_ok=True)
