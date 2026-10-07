@@ -103,9 +103,62 @@ class Help(loader.Module):
             self.config["desc_icon"] = "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
 
     def _get_banner_url(self, doc: str):
-
+        if not doc:
+            return None
         match = re.search(r"# ?meta banner: ?(.+)", doc)
         return match.group(1).strip() if match else None
+
+    def _get_module_developer(self, module) -> str | None:
+        """Extract developer/author from module source meta comments."""
+        source = getattr(module, "__source__", None) or ""
+        if not source:
+            with contextlib.suppress(Exception):
+                source = inspect.getsource(module.__class__)
+        if not source:
+            return None
+        for pattern in (
+            r"# ?meta developer: ?(.+)",
+            r"# ?Author: ?(.+)",
+            r"# ?author: ?(.+)",
+            r"# ?©️ ?(.+?)(?:,|\n)",
+        ):
+            m = re.search(pattern, source, flags=re.I)
+            if m:
+                dev = m.group(1).strip().strip('"').strip("'")
+                # drop trailing year ranges like 2025-2026 for ©️ lines
+                if pattern.startswith(r"# ?©️"):
+                    dev = re.sub(r",?\s*\d{4}.*$", "", dev).strip()
+                if dev:
+                    return dev
+        return None
+
+    @staticmethod
+    def _plain_doc(text: str | None, fallback: str = "") -> str:
+        """Strip HTML/emoji tags for Rich table cells; keep readable text."""
+        import html as html_mod
+
+        if not text:
+            return fallback or ""
+        s = str(text)
+        # <tg-emoji …>X</tg-emoji> / <emoji …>X</emoji> → X
+        s = re.sub(
+            r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
+            r"\1",
+            s,
+            flags=re.I | re.S,
+        )
+        s = re.sub(
+            r"<emoji\b[^>]*>(.*?)</emoji>",
+            r"\1",
+            s,
+            flags=re.I | re.S,
+        )
+        # drop remaining tags
+        s = re.sub(r"<[^>]+>", "", s)
+        s = html_mod.unescape(s)
+        # collapse whitespace
+        s = re.sub(r"[ \t]+", " ", s).strip()
+        return s or (fallback or "")
 
     @loader.command(
         ru_doc="[args] | Спрячет ваши модули",
@@ -262,9 +315,11 @@ class Help(loader.Module):
             )
         cmds = "\n".join(lines)
         developer = re.search(
-            r"# ?meta developer: ?(.+)", getattr(module, "__source__", None)
+            r"# ?meta developer: ?(.+)", getattr(module, "__source__", None) or ""
         )
-        dev_text = developer.group(1) if developer else None
+        dev_text = developer.group(1).strip() if developer else None
+        if not dev_text:
+            dev_text = self._get_module_developer(module)
         placeholders = "\n".join(
             utils.help_placeholders(module.__class__.__name__, self)
         )
@@ -284,61 +339,89 @@ class Help(loader.Module):
                 pass
 
 
+        # Prefer meta developer if regex missed
+        if not dev_text:
+            dev_text = self._get_module_developer(module)
+
         # Rich single-module help (commands in <details>)
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import html_table, pick_banner_url, inject_banner_html
+            import html as html_mod
+
             if can_use_rich(self._client, self._db) and getattr(
                 self.inline, "init_complete", False
             ):
+                undoc = self._plain_doc(self.strings.get("undoc"), "—")
                 rows = []
                 for name, fun in commands.items():
-                    doc = utils.escape_html(
-                        inspect.getdoc(fun) or self.strings["undoc"]
-                    )
+                    doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                     rows.append(
                         (
-                            f"{utils.escape_html(self.get_prefix())}{name}",
-                            doc[:100],
+                            html_mod.escape(
+                                f"{self.get_prefix()}{name}"
+                            ),
+                            html_mod.escape(doc),
                         )
                     )
                 if hasattr(module, "inline_handlers"):
                     for name, fun in module.inline_handlers.items():
-                        doc = utils.escape_html(
-                            inspect.getdoc(fun) or self.strings["undoc"]
-                        )
+                        doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                         rows.append(
-                            (f"@{self.inline.bot_username} {name}", doc[:100])
+                            (
+                                html_mod.escape(
+                                    f"@{self.inline.bot_username} {name}"
+                                ),
+                                html_mod.escape(doc),
+                            )
                         )
-                parts = [f"<h2>{utils.escape_html(str(_name))}</h2>"]
+                parts = [f"<h2>{html_mod.escape(str(_name))}</h2>"]
                 if module.__doc__:
-                    parts.append(
-                        f"<p><i>{utils.escape_html((inspect.getdoc(module) or '')[:400])}</i></p>"
-                    )
+                    mdoc = self._plain_doc(inspect.getdoc(module), "")[:400]
+                    if mdoc:
+                        parts.append(f"<p><i>{html_mod.escape(mdoc)}</i></p>")
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<details><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n</details>"
                     )
                 if placeholders:
-                    parts.append(
-                        f"<details><summary>Placeholders</summary><p>{placeholders}</p></details>"
-                    )
+                    ph = self._plain_doc(placeholders, "")
+                    if ph:
+                        parts.append(
+                            f"<details><summary>Placeholders</summary>"
+                            f"<p>{html_mod.escape(ph)}</p></details>"
+                        )
                 if dev_text:
+                    # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>{self.strings['developer'].format(dev_text)}</p>"
+                        f"<p>🧑‍💻 <b>Developer:</b> "
+                        f"<code>{html_mod.escape(str(dev_text))}</code></p>"
                     )
-                if module.__origin__.startswith("<core"):
-                    parts.append(f"<p>{self.strings['core_notice']}</p>")
-                burl = pick_banner_url(self.config.get("banner_url"))
+                if getattr(module, "__origin__", "").startswith("<core"):
+                    core_n = self._plain_doc(
+                        self.strings.get("core_notice"),
+                        "Built-in module",
+                    )
+                    parts.append(f"<p>🛡 {html_mod.escape(core_n)}</p>")
+
+                # Meta banner of THIS module first, then Help config banner
+                meta_b = None
+                with contextlib.suppress(Exception):
+                    meta_b = self._get_banner_url(
+                        getattr(module, "__source__", None) or ""
+                    )
+                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 html = "\n".join(parts)
                 html = inject_banner_html(html, burl, force=True)
                 m = await self.inline.rich(
                     message,
                     html,
                     title=str(_name)[:64],
-                    description="Module help",
+                    description=self._plain_doc(inspect.getdoc(module), "Module help")[
+                        :80
+                    ],
                     thumbnail_url=burl,
                     silent=True,
                 )
