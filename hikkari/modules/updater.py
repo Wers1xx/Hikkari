@@ -80,8 +80,9 @@ class UpdaterMod(loader.Module):
             loader.ConfigValue(
                 "beta_users",
                 [],
-                "User IDs allowed to use the beta branch (owners always can). "
-                "Example: [123456789, 987654321]",
+                "Optional LOCAL extra beta IDs. Main list is on GitHub: "
+                "assets/beta_users.txt (raw.githubusercontent.com/Wers1xx/Hikkari/master/...). "
+                "Owners + GitHub list + this list can use .branch beta",
                 validator=loader.validators.Series(validator=loader.validators.Integer()),
             ),
             loader.ConfigValue(
@@ -712,17 +713,76 @@ class UpdaterMod(loader.Module):
 
             logger.critical("Got update loop. Update manually via .terminal")
 
-    @loader.command()
+    # Official beta access list on GitHub (master branch = source of truth)
+    _BETA_LIST_URLS = (
+        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/beta_users.txt",
+        "https://cdn.jsdelivr.net/gh/Wers1xx/Hikkari@master/assets/beta_users.txt",
+    )
+    _BETA_CREATOR_ID = 8798148758
+    _beta_list_cache: set | None = None
+    _beta_list_cache_at: float = 0.0
+    _BETA_LIST_TTL = 300.0  # 5 min
 
-    def _can_use_beta(self, uid: int) -> bool:
+    async def _fetch_github_beta_ids(self) -> set[int]:
+        """Load beta user IDs from GitHub assets/beta_users.txt."""
+        import time as _time
+        import aiohttp
+
+        now = _time.time()
+        if (
+            self._beta_list_cache is not None
+            and now - self._beta_list_cache_at < self._BETA_LIST_TTL
+        ):
+            return self._beta_list_cache
+
+        ids: set[int] = {self._BETA_CREATOR_ID}
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for url in self._BETA_LIST_URLS:
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            continue
+                        text = await resp.text()
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            # allow "123456" or "123456  # comment"
+                            part = line.split("#", 1)[0].strip().split()[0]
+                            if part.isdigit():
+                                ids.add(int(part))
+                        self._beta_list_cache = ids
+                        self._beta_list_cache_at = now
+                        logger.info("beta_users list loaded from GitHub (%s ids)", len(ids))
+                        return ids
+                except Exception as e:
+                    logger.debug("beta list fetch %s failed: %s", url, e)
+        # fallback: cache empty-ish with creator only
+        self._beta_list_cache = ids
+        self._beta_list_cache_at = now
+        return ids
+
+    async def _can_use_beta(self, uid: int) -> bool:
+        uid = int(uid)
+        if uid == self._BETA_CREATOR_ID:
+            return True
         owners = list(getattr(self._client.dispatcher.security, "owner", []) or [])
         if uid in owners:
             return True
         try:
-            allowed = self.config.get("beta_users") or []
-            return int(uid) in [int(x) for x in allowed]
+            gh = await self._fetch_github_beta_ids()
+            if uid in gh:
+                return True
         except Exception:
-            return False
+            logger.debug("github beta check failed", exc_info=True)
+        try:
+            local = self.config.get("beta_users") or []
+            if uid in [int(x) for x in local]:
+                return True
+        except Exception:
+            pass
+        return False
 
     @loader.command(
         ru_doc="<master|beta> — переключить ветку обновлений (beta только с доступом)",
@@ -752,13 +812,13 @@ class UpdaterMod(loader.Module):
         if args == "main":
             args = "master"
 
-        if args == "beta" and not self._can_use_beta(uid):
+        if args == "beta" and not await self._can_use_beta(uid):
             await utils.answer(
                 message,
                 "🚫 <b>Beta access denied</b>\n"
-                "Ask the owner to add your ID via "
-                f"<code>{utils.escape_html(self.get_prefix())}cfg Updater beta_users</code> "
-                "or <code>betagrant</code>.",
+                "Your ID must be in the GitHub list:\n"
+                "<code>assets/beta_users.txt</code>\n"
+                "https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt",
             )
             return
 
@@ -806,41 +866,79 @@ class UpdaterMod(loader.Module):
             await utils.answer(message, f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>")
 
     @loader.command(
-        ru_doc="<id|reply> — выдать доступ к beta-ветке",
-        en_doc="<id|reply> — grant beta branch access",
+        ru_doc="— показать список beta-доступа (GitHub)",
+        en_doc="— show beta access list (GitHub)",
+    )
+    async def betalist(self, message: Message):
+        """Show who can use the beta branch (from GitHub)"""
+        ids = await self._fetch_github_beta_ids()
+        local = []
+        try:
+            local = [int(x) for x in (self.config.get("beta_users") or [])]
+        except Exception:
+            pass
+        lines = [
+            "<b>✨ Beta access</b>",
+            "",
+            "<b>GitHub</b> <code>assets/beta_users.txt</code>:",
+        ]
+        for i in sorted(ids):
+            mark = " (creator)" if i == self._BETA_CREATOR_ID else ""
+            lines.append(f"• <code>{i}</code>{mark}")
+        if local:
+            lines.append("")
+            lines.append("<b>Local extra</b> (cfg Updater beta_users):")
+            for i in local:
+                lines.append(f"• <code>{i}</code>")
+        lines.append("")
+        lines.append(
+            '<a href="https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt">'
+            "Edit list on GitHub</a>"
+        )
+        await utils.answer(message, "\n".join(lines))
+
+    @loader.command(
+        ru_doc="<id|reply> — локально добавить beta (основной список на GitHub)",
+        en_doc="<id|reply> — local beta grant (main list is on GitHub)",
     )
     async def betagrant(self, message: Message):
-        """Grant beta branch access to a user"""
+        """Local-only beta grant. Prefer editing GitHub assets/beta_users.txt"""
         args = utils.get_args_raw(message)
         uid = None
-        if args and args.isdigit():
-            uid = int(args)
+        if args and str(args).strip().isdigit():
+            uid = int(str(args).strip())
         elif message.is_reply:
             reply = await message.get_reply_message()
             uid = reply.sender_id if reply else None
         if not uid:
-            await utils.answer(message, "❌ Reply to user or pass numeric ID")
+            await utils.answer(
+                message,
+                "❌ Reply / ID\n\n"
+                "<b>Main list:</b> edit on GitHub\n"
+                "<code>assets/beta_users.txt</code>",
+            )
             return
         cur = list(self.config.get("beta_users") or [])
-        if uid not in cur:
-            cur.append(uid)
+        if uid not in [int(x) for x in cur]:
+            cur.append(int(uid))
             self.config["beta_users"] = cur
         await utils.answer(
             message,
-            f"✅ Beta access granted to <code>{uid}</code>\n"
-            f"They can use <code>{utils.escape_html(self.get_prefix())}branch beta</code>",
+            f"✅ Local beta for <code>{uid}</code>\n"
+            f"Prefer adding ID to GitHub <code>assets/beta_users.txt</code> "
+            f"so all installs see it.",
         )
 
     @loader.command(
-        ru_doc="<id|reply> — забрать доступ к beta",
-        en_doc="<id|reply> — revoke beta branch access",
+        ru_doc="<id|reply> — убрать локальный beta-доступ",
+        en_doc="<id|reply> — revoke local beta access",
     )
     async def betarevoke(self, message: Message):
-        """Revoke beta branch access"""
+        """Revoke local beta access (GitHub list unchanged)"""
         args = utils.get_args_raw(message)
         uid = None
-        if args and args.isdigit():
-            uid = int(args)
+        if args and str(args).strip().isdigit():
+            uid = int(str(args).strip())
         elif message.is_reply:
             reply = await message.get_reply_message()
             uid = reply.sender_id if reply else None
@@ -851,7 +949,11 @@ class UpdaterMod(loader.Module):
         if uid in cur:
             cur.remove(uid)
             self.config["beta_users"] = cur
-        await utils.answer(message, f"✅ Beta access revoked for <code>{uid}</code>")
+        await utils.answer(
+            message,
+            f"✅ Local beta revoked for <code>{uid}</code>\n"
+            f"GitHub list is separate — edit <code>assets/beta_users.txt</code> there.",
+        )
 
 
     async def source(self, message: Message):

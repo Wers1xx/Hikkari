@@ -1,0 +1,7 @@
+# Hikkari beta branch access list
+# One Telegram user ID per line. Lines starting with # are comments.
+# Users in this list can run: .branch beta
+# Source of truth: https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt
+#
+# Creator
+8798148758
