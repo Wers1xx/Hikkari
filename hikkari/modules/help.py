@@ -287,7 +287,7 @@ class Help(loader.Module):
         # Rich single-module help (commands in <details>)
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, pick_banner_url
+            from ..utils.rich_api import html_table, pick_banner_url, inject_banner_html
             if can_use_rich(self._client, self._db) and getattr(
                 self.inline, "init_complete", False
             ):
@@ -332,9 +332,8 @@ class Help(loader.Module):
                 if module.__origin__.startswith("<core"):
                     parts.append(f"<p>{self.strings['core_notice']}</p>")
                 burl = pick_banner_url(self.config.get("banner_url"))
-                if burl:
-                    parts.insert(0, f'<figure><img src="{burl}"/></figure>')
                 html = "\n".join(parts)
+                html = inject_banner_html(html, burl, force=True)
                 m = await self.inline.rich(
                     message,
                     html,
@@ -561,7 +560,7 @@ class Help(loader.Module):
             """
             try:
                 from ..utils.rich import can_use_rich
-                from ..utils.rich_api import pick_banner_url, html_table
+                from ..utils.rich_api import pick_banner_url, inject_banner_html, html_table
                 if not can_use_rich(self._client, self._db):
                     logger.info("help rich skipped: rich_mode off or no Premium")
                     return False
@@ -702,6 +701,12 @@ class Help(loader.Module):
                         for pi, html in enumerate(pages)
                     ]
 
+                # Always put config banner into first page (random local/http works)
+                if banner_url:
+                    pages[0] = inject_banner_html(pages[0], banner_url, force=True)
+                    if real_total > 1:
+                        pages = list(pages)
+                        pages[0] = inject_banner_html(pages[0], banner_url, force=True)
                 m = await self.inline.rich(
                     message,
                     pages[0],

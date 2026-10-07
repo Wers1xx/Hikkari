@@ -406,6 +406,7 @@ class TestMod(loader.Module):
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
                 pick_banner_url,
+                inject_banner_html,
                 build_info_html,
                 to_rich_compatible,
                 parse_rich_url_buttons,
@@ -430,8 +431,7 @@ class TestMod(loader.Module):
                 )
                 if use_raw:
                     html = to_rich_compatible(placeholders_msg)
-                    if burl and "<figure" not in html.lower():
-                        html = f'<figure><img src="{burl}"/></figure>\n' + html
+                    html = inject_banner_html(html, burl, force=True)
                 else:
                     rows = [
                         ("Ping", f"{data['ping']} ms"),
@@ -451,6 +451,7 @@ class TestMod(loader.Module):
                         banner_url=burl,
                     )
                 html = to_rich_compatible(html)
+                html = inject_banner_html(html, burl, force=True)
                 btn_html = parse_rich_url_buttons(
                     str(self.config.get("rich_buttons") or "")
                 )
@@ -591,6 +592,8 @@ class TestMod(loader.Module):
                     banner_url=burl,
                 )
                 html = to_rich_compatible(html)
+                from ..utils.rich_api import inject_banner_html as _inj
+                html = _inj(html, burl, force=True)
                 m = await self.inline.rich(
                     message,
                     html,

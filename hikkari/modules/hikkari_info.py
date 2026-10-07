@@ -306,6 +306,7 @@ class HikkariInfoMod(loader.Module):
             from ..utils.rich_api import (
                 build_info_html,
                 pick_banner_url,
+                inject_banner_html,
                 to_rich_compatible,
                 parse_rich_url_buttons,
                 try_send_rich,
@@ -325,8 +326,7 @@ class HikkariInfoMod(loader.Module):
                         logger.exception("custom_message format failed")
                         html = str(custom)
                     html = to_rich_compatible(html)
-                    if banner_url and "<figure" not in html.lower():
-                        html = f'<figure><img src="{banner_url}"/></figure>\n' + html
+                    html = inject_banner_html(html, banner_url, force=True)
                 else:
                     rows = [
                         (
@@ -368,6 +368,7 @@ class HikkariInfoMod(loader.Module):
                         banner_url=banner_url,
                     )
                     html = to_rich_compatible(html)
+                    html = inject_banner_html(html, banner_url, force=True)
                     btn_html = parse_rich_url_buttons(
                         str(self.config.get("rich_buttons") or "")
                     )

@@ -17,6 +17,8 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import ast
+import re
+import io
 import contextlib
 import difflib
 import functools
@@ -1918,3 +1920,97 @@ class HikkariConfigMod(loader.Module):
     @loader.command(alias="fcfg")
     async def cfgcmd(self, message: Message):
         await self._configcmd_impl(message)
+
+    @loader.command()
+    async def catcmd(self, message: Message):
+        """<module> <option> — show config value (or .txt if too long)"""
+        args = utils.get_args_raw(message) or ""
+        parts = args.split(None, 1)
+        if len(parts) < 2:
+            await utils.answer(
+                message,
+                "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                "<b>Usage:</b> <code>.cat &lt;module&gt; &lt;option&gt;</code>\n"
+                "Example: <code>.cat hikkariinfo custom_message</code>",
+            )
+            return
+
+        mod_name, option = parts[0].strip(), parts[1].strip()
+        mod = self.lookup(mod_name)
+        if not mod:
+            low = mod_name.lower().replace(" ", "")
+            for m in self.allmodules.modules:
+                names = {
+                    getattr(m, "name", "") or "",
+                    m.__class__.__name__,
+                    m.__class__.__name__.replace("Mod", ""),
+                }
+                if any(low == (n or "").lower().replace(" ", "") for n in names):
+                    mod = m
+                    break
+                if any(low in (n or "").lower().replace(" ", "") for n in names if n):
+                    mod = m
+                    break
+        if not mod or not hasattr(mod, "config") or mod.config is None:
+            await utils.answer(
+                message,
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                f"Module <code>{utils.escape_html(mod_name)}</code> not found or has no config",
+            )
+            return
+
+        keys = list(mod.config)
+        key = next((k for k in keys if str(k).lower() == option.lower()), None)
+        if key is None:
+            key = next((k for k in keys if option.lower() in str(k).lower()), None)
+        if key is None:
+            opts = ", ".join(
+                f"<code>{utils.escape_html(str(k))}</code>" for k in keys[:25]
+            )
+            await utils.answer(
+                message,
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                f"Option <code>{utils.escape_html(option)}</code> not found.\n"
+                f"Available: {opts or '—'}",
+            )
+            return
+
+        try:
+            val = mod.config[key]
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                f"Read error: <code>{utils.escape_html(str(e))}</code>",
+            )
+            return
+
+        if val is None:
+            text = "None"
+        elif isinstance(val, (list, tuple)):
+            text = "\n".join(str(x) for x in val)
+        else:
+            text = str(val)
+
+        header = (
+            f"<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> "
+            f"<b>{utils.escape_html(str(getattr(mod, 'name', mod.__class__.__name__)))}</b> · "
+            f"<code>{utils.escape_html(str(key))}</code>\n\n"
+        )
+        LIMIT = 3500
+        if len(text) <= LIMIT:
+            await utils.answer(
+                message, header + f"<pre>{utils.escape_html(text)}</pre>"
+            )
+            return
+
+        file = io.BytesIO(text.encode("utf-8"))
+        safe_mod = re.sub(r"[^\w.-]+", "_", str(getattr(mod, "name", "mod")))[:40]
+        safe_opt = re.sub(r"[^\w.-]+", "_", str(key))[:40]
+        file.name = f"{safe_mod}_{safe_opt}.txt"
+        await utils.answer(
+            message,
+            header + f"<i>Value is too long ({len(text)} chars) — sent as file.</i>",
+            file=file,
+        )
+

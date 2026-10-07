@@ -16,23 +16,82 @@ logger = logging.getLogger(__name__)
 API = "https://api.telegram.org/bot{token}/{method}"
 
 def pick_banner_url(banner) -> str | None:
-    """RandomLinkList / list / str → first http(s) URL."""
+    """RandomLinkList / list / str → one http(s) URL (random from list).
+
+    Supports:
+      - https://… URLs
+      - local:filename.jpg  (mapped to GitHub raw / ensure_builtin)
+      - bare builtin asset names
+    Always returns a public http(s) URL suitable for Rich <figure> / thumbnail.
+    """
     if banner is None:
         return None
-    if isinstance(banner, str):
-        s = banner.strip()
-        # "[https://...]" style
-        if s.startswith("[") and s.endswith("]"):
-            s = s[1:-1].strip()
-        if s.startswith(("http://", "https://")):
-            return s.split()[0].strip("[],")
-        return None
-    if isinstance(banner, (list, tuple)):
-        for item in banner:
+
+    # Random choice for lists / RandomLinkList
+    if isinstance(banner, (list, tuple)) and banner:
+        import random
+        # Prefer items that can resolve; try a few random picks
+        items = list(banner)
+        random.shuffle(items)
+        for item in items:
             u = pick_banner_url(item)
             if u:
                 return u
+        return None
+
+    s = str(banner).strip()
+    if not s:
+        return None
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1].strip()
+
+    # Builtin asset map (same names as utils.other._ASSET_URLS)
+    _ASSET = {
+        "hikkari-info.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg",
+        "hikkari-started.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+        "hikkari-config.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg",
+        "hikkari-cmd.jpg": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-cmd.jpg",
+        "hikkari-ava.png": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
+        "bot_avatar.png": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
+    }
+
+    if s.startswith("local:"):
+        name = s[6:].strip().lstrip("/")
+        if name in _ASSET:
+            return _ASSET[name]
+        # unknown local — try github raw path by name
+        return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
+
+    if s.startswith(("http://", "https://")):
+        return s.split()[0].strip("[],")
+
+    # bare filename
+    if ("/" not in s) and ("." in s) and s in _ASSET:
+        return _ASSET[s]
+    if ("/" not in s) and ("." in s):
+        return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{s}"
+
     return None
+
+
+def inject_banner_html(html: str, banner_url: str | None, *, force: bool = True) -> str:
+    """Ensure Rich HTML starts with <figure> banner from config."""
+    if not banner_url or not str(banner_url).startswith(("http://", "https://")):
+        return html or ""
+    html = html or ""
+    if not force and "<figure" in html.lower():
+        return html
+    # strip existing figure so config banner wins
+    if force and "<figure" in html.lower():
+        html = re.sub(
+            r"<figure\b[^>]*>.*?</figure>",
+            "",
+            html,
+            count=1,
+            flags=re.I | re.S,
+        ).lstrip()
+    fig = f'<figure><img src="{banner_url}"/></figure>\n'
+    return fig + html
 
 
 def tg_button(
