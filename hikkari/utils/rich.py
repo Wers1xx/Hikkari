@@ -29,13 +29,18 @@ _KV_RE = re.compile(
 
 
 def is_rich_enabled(db: Any = None) -> bool:
-    """DB flag only. Prefer can_use_rich() for Premium gate."""
+    """DB flag only. Prefer can_use_rich() for Premium gate. Live without restart."""
     if db is None:
         return False
     try:
         val = db.get(RICH_DB_MOD, RICH_DB_KEY, None)
         if val is None:
             val = db.get("Settings", "rich_mode", None)
+        if val is None:
+            # ModuleConfig storage
+            conf = db.get("Settings", "config", None) or db.get("CoreMod", "config", None)
+            if isinstance(conf, dict) and "rich_mode" in conf:
+                val = conf.get("rich_mode")
         if val is None:
             return False
         return bool(val)
@@ -171,12 +176,19 @@ def enhance_rich_html(text: str) -> str:
 
 
 def apply_rich(text: str, db: Any = None) -> str:
+    """
+    Classic path only. Never strip premium <tg-emoji> / <emoji document_id>.
+    When rich_mode is OFF → return text unchanged (keeps premium emoji).
+    When ON → optional template wrap; still keep emoji tags intact.
+    Native Rich (Help/Info/Tester/Loader) goes through inline.rich, not here.
+    """
     if not text or not isinstance(text, str):
         return text
     if not is_rich_enabled(db):
-        return strip_rich(text)
-    text = enhance_rich_html(text)
+        return text  # do NOT strip_rich — that killed premium emoji
     tpl = get_rich_template(db)
+    if not tpl or tpl.strip() == "{text}":
+        return text
     try:
         return tpl.format(text=text, star=STAR)
     except Exception:

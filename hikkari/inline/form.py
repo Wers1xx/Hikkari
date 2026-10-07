@@ -484,7 +484,7 @@ class Form(InlineUnit):
                 parse_rich_url_buttons,
             )
             html = to_rich_compatible(html)
-            page_list = list(pages) if pages else None
+            page_list = list(pages) if pages and len(list(pages)) > 1 else None
             cur = int(page or 0)
             body = html
             if page_list:

@@ -346,10 +346,16 @@ class TestMod(loader.Module):
     async def ping(self, message: Message):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
-        # Measure latency with a lightweight classic edit (not Rich)
-        message = await utils.answer(
-            message, self.config["ping_emoji"], skip_rich=True
+        from ..utils.rich import can_use_rich
+        _rich = can_use_rich(self._client, self._db) and getattr(
+            self.inline, "init_complete", False
         )
+        # Rich mode: no intermediate emoji (message goes via @bot as Rich)
+        # Classic: one timing emoji then edit to result
+        if not _rich:
+            message = await utils.answer(
+                message, self.config["ping_emoji"], skip_rich=True
+            )
         banner = utils.resolve_banner_media(self.config["banner_url"])
         if banner and self.config.get("quote_media") is True and isinstance(banner, str) and banner.startswith(("http://", "https://")):
             banner = InputMediaWebPage(banner, optional=True)

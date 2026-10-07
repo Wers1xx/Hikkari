@@ -258,10 +258,19 @@ def html_table(
     *,
     header: tuple[str, str] = ("Component", "Current release"),
 ) -> str:
+    import html as html_mod
     h0, h1 = header
-    body = [f"<tr><th>{h0}</th><th>{h1}</th></tr>"]
+    body = [
+        f"<tr><th>{html_mod.escape(str(h0))}</th>"
+        f"<th>{html_mod.escape(str(h1))}</th></tr>"
+    ]
     for k, v in rows:
-        body.append(f"<tr><td>{k}</td><td>{v}</td></tr>")
+        ks = html_mod.escape(str(k))
+        vs = str(v)
+        # keep intentional HTML (code, links, emoji) if already tagged
+        if not ("<" in vs and ">" in vs):
+            vs = html_mod.escape(vs)
+        body.append(f"<tr><td>{ks}</td><td>{vs}</td></tr>")
     return f"<table bordered striped>{''.join(body)}</table>"
 
 

@@ -297,7 +297,7 @@ class CoreMod(loader.Module):
         en_doc="Hikkari developers table",
     )
     async def devs(self, message: Message):
-        """Таблица разработчиков / моделлеров / багхантеров"""
+        """Таблица разработчиков / дизайнеров / искателей багов"""
         text = (
             "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari Team</b>\n\n"
             "<blockquote>"
@@ -305,14 +305,15 @@ class CoreMod(loader.Module):
             "• @Wers1xx — founder / core\n"
             "</blockquote>\n"
             "<blockquote>"
-            "<b>Моделлеры</b>\n"
+            "<b>Дизайнеры</b>\n"
             "• —\n"
             "</blockquote>\n"
             "<blockquote>"
             "<b>Искатели багов</b>\n"
-            "• —\n"
+            "• @minhthu\n"
             "</blockquote>\n\n"
-            "<i>Based on Hikka / Heroku · AGPLv3</i>"
+            "<i>Based on Hikka · Heroku · built as Hikkari</i>"
+
         )
         await utils.answer(message, text)
 
@@ -882,23 +883,33 @@ class CoreMod(loader.Module):
         await utils.answer(message, text)
 
     async def on_config_change(self, option=None, value=None):
+        """Apply rich_mode immediately — no restart required."""
         try:
-            # Rich Messages only for Telegram Premium owners
-            if self.config.get("rich_mode"):
-                me = getattr(getattr(self, "_client", None), "hikkari_me", None)
-                if me is not None and not getattr(me, "premium", False):
-                    self.config["rich_mode"] = False
-                    self._db.set("hikkari.rich", "enabled", False)
-                    logger.warning(
-                        "rich_mode disabled: Telegram Premium required for Rich Messages"
-                    )
-                    return
-            self._db.set("hikkari.rich", "enabled", bool(self.config["rich_mode"]))
+            enabled = bool(self.config.get("rich_mode"))
+            me = getattr(getattr(self, "_client", None), "hikkari_me", None)
+            if enabled and me is not None and not getattr(me, "premium", False):
+                self.config["rich_mode"] = False
+                enabled = False
+                logger.warning(
+                    "rich_mode disabled: Telegram Premium required for Rich Messages"
+                )
+            # Write both namespaces so can_use_rich() sees it without restart
+            self._db.set("hikkari.rich", "enabled", enabled)
+            self._db.set("Settings", "rich_mode", enabled)
             self._db.set(
                 "hikkari.rich",
                 "template",
                 str(self.config.get("rich_template") or "{text}"),
             )
+            # Persist config dict used by ModuleConfig
+            try:
+                conf = self._db.get(self.__class__.__name__, "config", {}) or {}
+                if isinstance(conf, dict):
+                    conf["rich_mode"] = enabled
+                    self._db.set(self.__class__.__name__, "config", conf)
+            except Exception:
+                pass
+            logger.info("rich_mode live → %s", enabled)
         except Exception:
-            pass
+            logger.debug("on_config_change rich_mode failed", exc_info=True)
 

@@ -354,41 +354,8 @@ async def answer(
             )
             return result
 
-    # --- Rich mode (Premium + rich_mode): via @bot native Rich Message ---
-    # skip_rich=True → classic (restart, internal status, config stays on form)
-    _skip_rich = bool(kwargs.pop("skip_rich", False))
-    try:
-        client = getattr(message, "client", None)
-        db = getattr(getattr(client, "loader", None), "_db", None) or getattr(
-            client, "hikkari_db", None
-        )
-        if (
-            not _skip_rich
-            and client is not None
-            and can_use_rich(client, db)
-            and isinstance(response, str)
-            and len(response.strip()) >= 8
-            and not isinstance(message, (InlineMessage, InlineCall, BotInlineCall))
-        ):
-            inline = getattr(getattr(client, "loader", None), "inline", None)
-            if inline is not None and getattr(inline, "init_complete", False):
-                from .rich_api import pick_banner_url
-                banner_url = pick_banner_url(kwargs.get("file"))
-                html = to_rich_html(response, banner_url=banner_url)
-                # Attach buttons if reply_markup was requested — form handles buttons;
-                # for pure text use rich
-                if reply_markup is None:
-                    m = await inline.rich(
-                        message,
-                        html,
-                        title="Hikkari",
-                        description="Rich",
-                        silent=kwargs.get("silent", True),
-                    )
-                    if m:
-                        return m
-    except Exception:
-        logger.debug("rich via answer() failed, classic path", exc_info=True)
+    # Rich (via/@bot) only from Help / Info / Tester / Loader — not global answer()
+    kwargs.pop("skip_rich", None)
 
     if isinstance(message, (InlineMessage, InlineCall, BotInlineCall)):
         await message.edit(response)
