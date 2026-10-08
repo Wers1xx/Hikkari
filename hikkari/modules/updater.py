@@ -82,7 +82,7 @@ class UpdaterMod(loader.Module):
                 [],
                 "Optional LOCAL extra beta IDs. Main list is on GitHub: "
                 "assets/beta_users.txt (raw.githubusercontent.com/Wers1xx/Hikkari/master/...). "
-                "Owners + GitHub list + this list can use .branch beta",
+                "Does NOT grant .branch beta. Access is ONLY via GitHub assets/beta_users.txt",
                 validator=loader.validators.Series(validator=loader.validators.Integer()),
             ),
             loader.ConfigValue(
@@ -757,32 +757,55 @@ class UpdaterMod(loader.Module):
                         logger.info("beta_users list loaded from GitHub (%s ids)", len(ids))
                         return ids
                 except Exception as e:
-                    logger.debug("beta list fetch %s failed: %s", url, e)
-        # fallback: cache empty-ish with creator only
+                    logger.warning("beta list fetch %s failed: %s", url, e)
+        if len(ids) <= 1:
+            try:
+                import requests as _req
+                for url in self._BETA_LIST_URLS:
+                    try:
+                        r = await utils.run_sync(_req.get, url, timeout=12)
+                        if getattr(r, "status_code", 0) != 200:
+                            continue
+                        for line in r.text.splitlines():
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            part = line.split("#", 1)[0].strip().split()[0]
+                            if part.isdigit():
+                                ids.add(int(part))
+                        if len(ids) > 1:
+                            break
+                    except Exception as e:
+                        logger.warning("beta list requests %s failed: %s", url, e)
+            except Exception:
+                logger.debug("beta list requests fallback failed", exc_info=True)
         self._beta_list_cache = ids
         self._beta_list_cache_at = now
+        logger.info("beta_users final list size=%s", len(ids))
         return ids
 
-    async def _can_use_beta(self, uid: int) -> bool:
+    async def _can_use_beta(self, uid: int, *, force_refresh: bool = False) -> bool:
+        """Beta only if Telegram ID is in GitHub assets/beta_users.txt (or creator)."""
         uid = int(uid)
         if uid == self._BETA_CREATOR_ID:
             return True
-        owners = list(getattr(self._client.dispatcher.security, "owner", []) or [])
-        if uid in owners:
-            return True
+        # Owners / local cfg do NOT grant beta — only the GitHub list.
         try:
+            if force_refresh:
+                self._beta_list_cache = None
+                self._beta_list_cache_at = 0.0
             gh = await self._fetch_github_beta_ids()
             if uid in gh:
                 return True
+            logger.info(
+                "beta access denied for %s (github list has %s ids)",
+                uid,
+                len(gh) if gh else 0,
+            )
         except Exception:
-            logger.debug("github beta check failed", exc_info=True)
-        try:
-            local = self.config.get("beta_users") or []
-            if uid in [int(x) for x in local]:
-                return True
-        except Exception:
-            pass
+            logger.exception("github beta check failed — deny by default")
         return False
+
 
     @loader.command(
         ru_doc="<master|beta> — переключить ветку обновлений (beta только с доступом)",
@@ -812,15 +835,20 @@ class UpdaterMod(loader.Module):
         if args == "main":
             args = "master"
 
-        if args == "beta" and not await self._can_use_beta(uid):
-            await utils.answer(
-                message,
-                "🚫 <b>Beta access denied</b>\n"
-                "Your ID must be in the GitHub list:\n"
-                "<code>assets/beta_users.txt</code>\n"
-                "https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt",
-            )
-            return
+        if args == "beta":
+            allowed = await self._can_use_beta(uid, force_refresh=True)
+            if not allowed:
+                await utils.answer(
+                    message,
+                    "🚫 <b>Нет доступа к ветке beta</b>\n\n"
+                    f"ID: <code>{uid}</code>\n"
+                    "Переход на beta разрешён только ID из списка на GitHub:\n"
+                    "<code>assets/beta_users.txt</code>\n"
+                    '<a href="https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt">'
+                    "Открыть список</a>\n\n"
+                    "<i>Если тебя нет в файле — beta недоступна.</i>",
+                )
+                return
 
         if NO_GIT:
             await utils.answer(message, "❌ Git disabled")
