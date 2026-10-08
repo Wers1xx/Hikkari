@@ -467,13 +467,23 @@ async def answer(
                 if edit:
                     with contextlib.suppress(Exception):
                         await message.edit("✨", link_preview=False)
-                    result = await message.edit(
-                        text,
-                        file=file,
-                        parse_mode=lambda t: (t, entities),
-                        invert_media=True,
-                        **extra,
-                    )
+                    try:
+                        result = await message.edit(
+                            text,
+                            file=file,
+                            parse_mode=lambda t: (t, entities),
+                            invert_media=True,
+                            **extra,
+                        )
+                    except Exception as e:
+                        # FilePartsInvalid / media edit failures — text-only fallback
+                        logger.debug("invert edit with file failed: %s", e)
+                        result = await message.edit(
+                            text,
+                            parse_mode=lambda t: (t, entities),
+                            link_preview=False,
+                            **{k: v for k, v in extra.items() if k not in ("file", "invert_media")},
+                        )
                 else:
                     sent = await message.respond(
                         "✨",
@@ -540,13 +550,22 @@ async def answer(
                         )
         elif file is not None:
             if edit:
-                # Edit existing outbound message with media (InputMediaWebPage works here)
-                result = await message.edit(
-                    text,
-                    file=file,
-                    parse_mode=lambda t: (t, entities),
-                    **kwargs,
-                )
+                # Edit with media; on FilePartsInvalid / bad media fall back to text
+                try:
+                    result = await message.edit(
+                        text,
+                        file=file,
+                        parse_mode=lambda t: (t, entities),
+                        **kwargs,
+                    )
+                except Exception as e:
+                    logger.debug("edit with file failed (%s), text-only", e)
+                    result = await message.edit(
+                        text,
+                        parse_mode=lambda t: (t, entities),
+                        link_preview=False,
+                        **{k: v for k, v in kwargs.items() if k not in ("file", "invert_media")},
+                    )
             else:
                 reply_to = kwargs.pop(
                     "reply_to",

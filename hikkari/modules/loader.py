@@ -1783,26 +1783,10 @@ class LoaderMod(loader.Module):
             developer_raw = ""
             developer = ""
 
+        # Do NOT attach banner via EditMessage on the progress message:
+        # multi-edit install flow + InputMediaWebPage often causes
+        # FilePartsInvalidError (RPC). Banner is shown via Rich thumbnail instead.
         banner_kwargs = {}
-        _is_msg = hasattr(message, "document") or hasattr(message, "web_preview")
-        if (
-            self.config["show_banner"]
-            and not subscribe_markup
-            and _is_msg
-            and (
-                not getattr(message, "document", None)
-                or getattr(message, "web_preview", None)
-            )
-        ):
-            try:
-                banner_url = self._get_banner_url(doc)
-                if banner_url:
-                    banner_kwargs = {
-                        "file": InputMediaWebPage(banner_url, optional=True),
-                        "invert_media": True,
-                    }
-            except Exception:
-                pass
 
         if any(
             line.replace(" ", "") == "#scope:disable_onload_docs"
@@ -1840,7 +1824,6 @@ class LoaderMod(loader.Module):
                 loaded_msg(),
                 reply_markup=subscribe_markup,
                 skip_rich=True,
-                **banner_kwargs,
             )
             return True
 
@@ -1924,7 +1907,6 @@ class LoaderMod(loader.Module):
                 loaded_msg(),
                 reply_markup=subscribe_markup,
                 skip_rich=True,
-                **banner_kwargs,
             )
         except MediaCaptionTooLongError:
             await message.reply(loaded_msg(False))
