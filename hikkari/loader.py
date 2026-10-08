@@ -781,62 +781,38 @@ class Modules:
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
-        """Load modules from filesystem — Heroku-compatible sequential load.
-
-        Relative imports (`from .. import loader, utils`) work because modules
-        live under the real package `hikkari.modules` (see modules/__init__.py).
-        """
+        """Load modules from filesystem — same algorithm as Heroku."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
-        loaded: list[Module] = []
-        self._failed_module_names = getattr(self, "_failed_module_names", None) or []
-
-        # Ensure parent package exists (real package, not a stub)
-        pkg_parent = f"{__package__}.{MODULES_NAME}"
-        if pkg_parent not in sys.modules:
-            with contextlib.suppress(Exception):
-                importlib.import_module(pkg_parent)
+        loaded = []
 
         for mod in modules:
-            mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
-            module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
-            user_friendly_origin = (
-                "<core {}>" if origin == "<core>" else "<file {}>"
-            ).format(module_name)
-
             try:
-                logger.debug("Loading %s from filesystem", module_name)
-                try:
-                    src = Path(mod).read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    src = Path(mod).read_text(encoding="utf-8", errors="replace")
+                mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
+                module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
+                user_friendly_origin = (
+                    "<core {}>" if origin == "<core>" else "<file {}>"
+                ).format(module_name)
 
-                # Drop previous failed attempt from cache
-                sys.modules.pop(module_name, None)
+                logger.debug("Loading %s from filesystem", module_name)
 
                 spec = importlib.machinery.ModuleSpec(
                     module_name,
-                    StringLoader(src, user_friendly_origin),
+                    StringLoader(
+                        Path(mod).read_text(encoding="utf-8"),
+                        user_friendly_origin,
+                    ),
                     origin=user_friendly_origin,
                 )
-                instance = await self.register_module(spec, module_name, origin)
-                loaded.append(instance)
+
+                loaded += [await self.register_module(spec, module_name, origin)]
+
                 logger.debug("Successfully loaded %s from filesystem", module_name)
             except Exception as e:
                 logger.exception("Failed to load module %s due to %s:", mod, e)
-                sys.modules.pop(module_name, None)
-                with contextlib.suppress(Exception):
-                    short = os.path.basename(str(mod))
-                    err = f"{type(e).__name__}: {e}"
-                    self._failed_module_names.append(f"{short} ({err[:120]})")
-            finally:
-                if origin == "<file>":
-                    with contextlib.suppress(Exception):
-                        _release_memory()
 
         return loaded
-
 
     async def register_module(
         self,
@@ -845,18 +821,11 @@ class Modules:
         origin: str = "<core>",
         save_fs: bool = False,
     ) -> Module:
-        """Register single module from importlib spec"""
+        """Register single module from importlib spec — Heroku-compatible."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
-        # Heroku-style: __package__ must be parent package for `from .. import ...`
-        # ModuleSpec.parent is a read-only property derived from name.
-        parent_pkg = ".".join(module_name.split(".")[:-1]) if "." in module_name else ""
-        if parent_pkg:
-            module.__package__ = parent_pkg
-        if not getattr(module, "__name__", None):
-            module.__name__ = module_name
         sys.modules[module_name] = module
 
         source_data = (
@@ -872,7 +841,7 @@ class Modules:
                     spec.loader.exec_module(module)
                     break
                 except ImportError as e:
-                    if not spec.loader.data or attempted:
+                    if not getattr(spec.loader, "data", None) or attempted:
                         raise
 
                     data = spec.loader.data
@@ -886,23 +855,20 @@ class Modules:
                     requirements = list(
                         filter(
                             lambda x: not x.startswith(("-", "_", ".")),
-                            map(
-                                str.strip,
-                                match.group(1).split(),
-                            ),
+                            map(str.strip, match.group(1).split()),
                         )
                     )
 
                     exc_name = (getattr(e, "name", None) or "").lower()
-
                     requirements.extend(
                         [IMPORT_PIP_ALIASES.get(exc_name, exc_name or e.name or "")]
                     )
 
-                    result = await self.lookup("LoaderMod").install_requirements(
-                        requirements
-                    )
+                    loader_mod = self.lookup("LoaderMod")
+                    if not loader_mod:
+                        raise
 
+                    result = await loader_mod.install_requirements(requirements)
                     importlib.invalidate_caches()
 
                     if not result:
@@ -912,26 +878,18 @@ class Modules:
 
         await _exec_module()
 
-        ret = None
+        ret = next(
+            (
+                value()
+                for value in vars(module).values()
+                if inspect.isclass(value)
+                and issubclass(value, Module)
+                and value is not Module
+            ),
+            None,
+        )
 
-        ret = None
-        for value in vars(module).values():
-            if not inspect.isclass(value) or not issubclass(value, Module):
-                continue
-            if value is Module:
-                continue
-            try:
-                ret = value()
-                break
-            except Exception as e:
-                logger.exception(
-                    "Failed to instantiate module class %s: %s",
-                    getattr(value, "__name__", value),
-                    e,
-                )
-                raise
-
-        if hasattr(module, "__version__"):
+        if ret is not None and hasattr(module, "__version__"):
             ret.__version__ = module.__version__
 
         if ret is None:
@@ -942,32 +900,15 @@ class Modules:
         ret.__origin__ = origin
 
         try:
-            raw_src = source_data if source_data else inspect.getsource(ret.__class__)
+            ret.__source__ = (
+                source_data if source_data else inspect.getsource(ret.__class__)
+            )
         except Exception:
-            raw_src = source_data or ""
-        ret.__source__ = _meta_source_only(raw_src)
-        # Keep StringLoader.data for .ml export, but drop huge sources from RAM:
-        # if source is on disk (loaded_modules / core path), clear in-memory copy.
-        with contextlib.suppress(Exception):
-            if hasattr(spec.loader, "data") and spec.loader.data:
-                data_len = len(spec.loader.data)
-                on_disk = False
-                if origin == "<file>" or str(origin).startswith("<file"):
-                    # external modules are saved under LOADED_MODULES_DIR
-                    cls_name = ret.__class__.__name__
-                    disk = Path(LOADED_MODULES_DIR) / f"{cls_name}_{self.client.tg_id}.py"
-                    if disk.is_file() and disk.stat().st_size > 0:
-                        on_disk = True
-                        ret.__source_path__ = str(disk)
-                if on_disk and data_len > 8192:
-                    spec.loader.data = b""
-                elif data_len > 200_000:
-                    # huge module without disk copy — keep only meta in __source__
-                    # but leave data so .ml still works (user asked for RAM, not break .ml)
-                    pass
+            ret.__source__ = source_data or ""
 
         if not hasattr(ret, "name"):
-            ret.name = ret.strings["name"]
+            with contextlib.suppress(Exception):
+                ret.name = ret.strings["name"]
 
         await self.complete_registration(ret)
 
@@ -980,11 +921,16 @@ class Modules:
             )
 
             if origin == "<string>":
-                Path(path).write_text(spec.loader.data.decode(), encoding="utf-8")
-
+                Path(path).write_text(
+                    spec.loader.data.decode()
+                    if isinstance(spec.loader.data, bytes)
+                    else spec.loader.data,
+                    encoding="utf-8",
+                )
                 logger.debug("Saved class %s to path %s", cls_name, path)
 
         return ret
+
 
     def add_aliases(self, aliases: dict):
         """Saves aliases and applies them to <core>/<file> modules"""
