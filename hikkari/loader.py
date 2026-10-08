@@ -759,9 +759,7 @@ class Modules:
                 StringLoader(src, user_friendly_origin),
                 origin=user_friendly_origin,
             )
-            # Critical: mark as belonging to hikkari.modules package so
-            # relative imports (from .. import loader) resolve to hikkari.*
-            spec.parent = pkg_parent
+            # package is set on the module object in register_module via module_name
             try:
                 return await self.register_module(spec, module_name, origin)
             except Exception:
