@@ -745,8 +745,9 @@ class Modules:
         mods: list[str] | None = None,
         no_external: bool = False,
     ) -> list[Module]:
-        """Load all modules in the module directory"""
+        """Load all modules — Heroku algorithm."""
         external_mods = []
+        self._failed_module_names = []
 
         if not mods:
             mods = _iter_module_files(os.path.join(utils.get_base_dir(), MODULES_NAME))
@@ -771,46 +772,54 @@ class Modules:
         if not no_external:
             loaded += await self._register_modules(external_mods, "<file>")
 
-        _release_memory()
-        logger.info("Modules loaded: %s core/file (RSS≈%.0fMB)", len(loaded), _rss_mb())
-
         return loaded
+
 
     async def _register_modules(
         self,
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
-        """Load modules from filesystem — same algorithm as Heroku."""
+        """Filesystem load — exact Heroku flow + failure tracking."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         loaded = []
+        if not hasattr(self, "_failed_module_names") or self._failed_module_names is None:
+            self._failed_module_names = []
 
         for mod in modules:
+            mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
+            module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
+            user_friendly_origin = (
+                "<core {}>" if origin == "<core>" else "<file {}>"
+            ).format(module_name)
             try:
-                mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
-                module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
-                user_friendly_origin = (
-                    "<core {}>" if origin == "<core>" else "<file {}>"
-                ).format(module_name)
-
                 logger.debug("Loading %s from filesystem", module_name)
+
+                # Drop stale entry so re-exec is clean
+                sys.modules.pop(module_name, None)
+
+                try:
+                    text = Path(mod).read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    text = Path(mod).read_text(encoding="utf-8", errors="replace")
 
                 spec = importlib.machinery.ModuleSpec(
                     module_name,
-                    StringLoader(
-                        Path(mod).read_text(encoding="utf-8"),
-                        user_friendly_origin,
-                    ),
+                    StringLoader(text, user_friendly_origin),
                     origin=user_friendly_origin,
                 )
 
                 loaded += [await self.register_module(spec, module_name, origin)]
-
                 logger.debug("Successfully loaded %s from filesystem", module_name)
             except Exception as e:
                 logger.exception("Failed to load module %s due to %s:", mod, e)
+                sys.modules.pop(module_name, None)
+                with contextlib.suppress(Exception):
+                    self._failed_module_names.append(
+                        f"{mod_shortname} ({type(e).__name__}: {str(e)[:100]})"
+                    )
 
         return loaded
 
@@ -821,11 +830,16 @@ class Modules:
         origin: str = "<core>",
         save_fs: bool = False,
     ) -> Module:
-        """Register single module from importlib spec — Heroku-compatible."""
+        """Register single module — Heroku-compatible."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
+        # Parent package for relative imports (from .. import loader)
+        parent_pkg = ".".join(module_name.split(".")[:-1]) if "." in module_name else ""
+        if parent_pkg:
+            module.__package__ = parent_pkg
+        module.__name__ = module_name
         sys.modules[module_name] = module
 
         source_data = (
@@ -870,35 +884,38 @@ class Modules:
 
                     result = await loader_mod.install_requirements(requirements)
                     importlib.invalidate_caches()
-
                     if not result:
                         raise
-
                     attempted = True
 
         await _exec_module()
 
-        ret = next(
-            (
-                value()
-                for value in vars(module).values()
-                if inspect.isclass(value)
-                and issubclass(value, Module)
-                and value is not Module
-            ),
-            None,
-        )
+        ret = None
+        for value in vars(module).values():
+            try:
+                if (
+                    inspect.isclass(value)
+                    and issubclass(value, Module)
+                    and value is not Module
+                ):
+                    ret = value()
+                    break
+            except TypeError:
+                continue
 
         if ret is not None and hasattr(module, "__version__"):
             ret.__version__ = module.__version__
 
         if ret is None:
+            if not hasattr(module, "register"):
+                raise TypeError(
+                    f"No Module subclass found in {module_name}"
+                )
             ret = module.register(module_name)
             if not isinstance(ret, Module):
                 raise TypeError(f"Instance is not a Module, it is {type(ret)}")
 
         ret.__origin__ = origin
-
         try:
             ret.__source__ = (
                 source_data if source_data else inspect.getsource(ret.__class__)
@@ -913,21 +930,17 @@ class Modules:
         await self.complete_registration(ret)
 
         cls_name = ret.__class__.__name__
-
-        if save_fs:
+        if save_fs and origin == "<string>":
             path = os.path.join(
                 LOADED_MODULES_DIR,
                 f"{cls_name}_{self.client.tg_id}.py",
             )
-
-            if origin == "<string>":
-                Path(path).write_text(
-                    spec.loader.data.decode()
-                    if isinstance(spec.loader.data, bytes)
-                    else spec.loader.data,
-                    encoding="utf-8",
-                )
-                logger.debug("Saved class %s to path %s", cls_name, path)
+            data = spec.loader.data
+            Path(path).write_text(
+                data.decode() if isinstance(data, bytes) else data,
+                encoding="utf-8",
+            )
+            logger.debug("Saved class %s to path %s", cls_name, path)
 
         return ret
 
@@ -1158,23 +1171,17 @@ class Modules:
         return set(prefixes)
 
     async def complete_registration(self, instance: Module):
-        """Complete registration of instance"""
+        """Complete registration of instance — Heroku flow."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         instance.allmodules = self
         instance.internal_init()
 
-        for module in self.modules:
+        for module in list(self.modules):
             if module.__class__.__name__ == instance.__class__.__name__:
-                if not self._remove_core_protection and str(
-                    getattr(module, "__origin__", "")
-                ).startswith("<core"):
-                    # Soft: do not kill the bot — refuse external overwrite of core
-                    logger.warning(
-                        "External module %s conflicts with core — not loaded",
-                        instance.__class__.__name__,
-                    )
+                origin = str(getattr(module, "__origin__", "") or "")
+                if not self._remove_core_protection and origin.startswith("<core"):
                     raise CoreOverwriteError(
                         module=(
                             module.__class__.__name__[:-3]
@@ -1186,7 +1193,6 @@ class Modules:
                 logger.debug("Removing module %s for update", module)
                 with contextlib.suppress(Exception):
                     await module.on_unload()
-
                 with contextlib.suppress(ValueError):
                     self.modules.remove(module)
                 for _, method in utils.iter_attrs(module):
@@ -1200,6 +1206,7 @@ class Modules:
                         )
 
         self.modules += [instance]
+
 
     def find_alias(
         self,
@@ -1387,8 +1394,18 @@ class Modules:
                 mod,
                 e,
             )
-            self.modules.remove(mod)
-            raise
+            with contextlib.suppress(ValueError, AttributeError):
+                self.modules.remove(mod)
+            with contextlib.suppress(Exception):
+                if not hasattr(self, "_failed_module_names") or self._failed_module_names is None:
+                    self._failed_module_names = []
+                self._failed_module_names.append(
+                    f"{getattr(mod, 'name', mod.__class__.__name__)} "
+                    f"(client_ready: {type(e).__name__})"
+                )
+            # Do NOT re-raise — keep other modules running (Heroku wrapper already
+            # catches; re-raise only hurts gather). Match stable boot.
+            return
 
         # Check for pack_url and load translations
         if hasattr(mod, "__source__"):
