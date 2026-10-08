@@ -781,148 +781,62 @@ class Modules:
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
+        """Load modules from filesystem — Heroku-compatible sequential load.
+
+        Relative imports (`from .. import loader, utils`) work because modules
+        live under the real package `hikkari.modules` (see modules/__init__.py).
+        """
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
-        loaded = []
+        loaded: list[Module] = []
+        self._failed_module_names = getattr(self, "_failed_module_names", None) or []
 
-        # Sequential load is more reliable on restart (no import races).
-        # Parallel only for large external batches when origin is <file> and count is high.
-        parallel = False  # sequential always — reliable restart load
+        # Ensure parent package exists (real package, not a stub)
+        pkg_parent = f"{__package__}.{MODULES_NAME}"
+        if pkg_parent not in sys.modules:
+            with contextlib.suppress(Exception):
+                importlib.import_module(pkg_parent)
 
-        async def _load_one(mod):
-            mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
+        for mod in modules:
+            mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
             module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
             user_friendly_origin = (
                 "<core {}>" if origin == "<core>" else "<file {}>"
             ).format(module_name)
-            logger.debug("Loading %s from filesystem", module_name)
-            # Read source once
-            try:
-                src = Path(mod).read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                src = Path(mod).read_text(encoding="utf-8", errors="replace")
-            # Ensure parent package is importable for relative imports
-            # (from .. import loader / utils). Real package only — no empty stubs.
-            pkg_parent = f"{__package__}.{MODULES_NAME}"
-            if pkg_parent not in sys.modules:
-                try:
-                    importlib.import_module(pkg_parent)
-                except Exception:
-                    # namespace package is fine; ensure entry exists
-                    if pkg_parent not in sys.modules:
-                        import types as _types
-                        _p = _types.ModuleType(pkg_parent)
-                        _p.__path__ = [
-                            str(Path(utils.get_base_dir()) / MODULES_NAME)
-                        ]
-                        _p.__package__ = pkg_parent
-                        sys.modules[pkg_parent] = _p
-            # Pre-bind common relative targets so `from .. import loader` works
-            # even if submodule was not yet attributed on the package object.
-            try:
-                _pkg = sys.modules.get(__package__)
-                if _pkg is not None:
-                    if not hasattr(_pkg, "loader"):
-                        _pkg.loader = sys.modules.get(f"{__package__}.loader") or importlib.import_module(f"{__package__}.loader")
-                    if not hasattr(_pkg, "utils"):
-                        _pkg.utils = sys.modules.get(f"{__package__}.utils") or importlib.import_module(f"{__package__}.utils")
-                    if not hasattr(_pkg, "main"):
-                        with contextlib.suppress(Exception):
-                            _pkg.main = sys.modules.get(f"{__package__}.main") or importlib.import_module(f"{__package__}.main")
-            except Exception:
-                logger.debug("pre-bind package attrs failed", exc_info=True)
 
-            spec = importlib.machinery.ModuleSpec(
-                module_name,
-                StringLoader(src, user_friendly_origin),
-                origin=user_friendly_origin,
-            )
-            # package is set on the module object in register_module via module_name
             try:
-                return await self.register_module(spec, module_name, origin)
-            except Exception:
-                # Drop broken module from sys.modules so retries are clean
+                logger.debug("Loading %s from filesystem", module_name)
+                try:
+                    src = Path(mod).read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    src = Path(mod).read_text(encoding="utf-8", errors="replace")
+
+                # Drop previous failed attempt from cache
                 sys.modules.pop(module_name, None)
-                raise
 
-        if parallel:
-            sem = asyncio.Semaphore(16)
-
-            async def _guarded(mod):
-                async with sem:
-                    try:
-                        return await _load_one(mod)
-                    except Exception as e:
-                        logger.exception("Failed to load module %s due to %s:", mod, e)
-                        try:
-                            fails = getattr(self, "_failed_module_names", None)
-                            if fails is None:
-                                self._failed_module_names = []
-                                fails = self._failed_module_names
-                            short = os.path.basename(str(mod))
-                            err = f"{type(e).__name__}: {e}"
-                            fails.append(f"{short} ({err[:120]})")
-                        except Exception:
-                            pass
-                        return None
-
-            results = await asyncio.gather(*(_guarded(m) for m in modules))
-            loaded = [r for r in results if r is not None]
-        else:
-            for i, mod in enumerate(modules):
-                # Under memory pressure: free RAM before next heavy module
-                if origin == "<file>" and _memory_pressure():
-                    logger.warning(
-                        "Memory pressure (RSS≈%.0fMB) before loading %s — trimming caches",
-                        _rss_mb(),
-                        os.path.basename(str(mod)),
-                    )
-                    _release_memory()
-                    # purge entity caches on all clients if available
+                spec = importlib.machinery.ModuleSpec(
+                    module_name,
+                    StringLoader(src, user_friendly_origin),
+                    origin=user_friendly_origin,
+                )
+                instance = await self.register_module(spec, module_name, origin)
+                loaded.append(instance)
+                logger.debug("Successfully loaded %s from filesystem", module_name)
+            except Exception as e:
+                logger.exception("Failed to load module %s due to %s:", mod, e)
+                sys.modules.pop(module_name, None)
+                with contextlib.suppress(Exception):
+                    short = os.path.basename(str(mod))
+                    err = f"{type(e).__name__}: {e}"
+                    self._failed_module_names.append(f"{short} ({err[:120]})")
+            finally:
+                if origin == "<file>":
                     with contextlib.suppress(Exception):
-                        for cl in getattr(self, "allclients", None) or [self.client]:
-                            if hasattr(cl, "_purge_entity_caches"):
-                                cl._purge_entity_caches(force=True)
-                    _release_memory()
-                    # still too high: skip remaining external modules to avoid OOM kill
-                    if _memory_pressure():
-                        logger.error(
-                            "RSS still high (≈%.0fMB) — skipping remaining %s external module(s) to prevent OOM",
-                            _rss_mb(),
-                            len(modules) - i,
-                        )
-                        fails = getattr(self, "_failed_module_names", None)
-                        if fails is None:
-                            self._failed_module_names = []
-                            fails = self._failed_module_names
-                        for skipped in modules[i:]:
-                            fails.append(
-                                f"{os.path.basename(str(skipped))} (skipped: memory pressure)"
-                            )
-                        break
-
-                try:
-                    loaded += [await _load_one(mod)]
-                    logger.debug("Successfully loaded from filesystem")
-                except Exception as e:
-                    logger.exception("Failed to load module %s due to %s:", mod, e)
-                    try:
-                        fails = getattr(self, "_failed_module_names", None)
-                        if fails is None:
-                            self._failed_module_names = []
-                            fails = self._failed_module_names
-                        short = os.path.basename(str(mod))
-                        err = f"{type(e).__name__}: {e}"
-                        fails.append(f"{short} ({err[:120]})")
-                    except Exception:
-                        pass
-                finally:
-                    # free transient allocs after each external module
-                    if origin == "<file>":
                         _release_memory()
 
         return loaded
+
 
     async def register_module(
         self,
@@ -936,10 +850,13 @@ class Modules:
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
-        # Relative imports (from .. import loader) need correct __package__
-        pkg = getattr(spec, "parent", None) or ".".join(module_name.split(".")[:-1])
-        if pkg:
-            module.__package__ = pkg
+        # Heroku-style: __package__ must be parent package for `from .. import ...`
+        # ModuleSpec.parent is a read-only property derived from name.
+        parent_pkg = ".".join(module_name.split(".")[:-1]) if "." in module_name else ""
+        if parent_pkg:
+            module.__package__ = parent_pkg
+        if not getattr(module, "__name__", None):
+            module.__name__ = module_name
         sys.modules[module_name] = module
 
         source_data = (
