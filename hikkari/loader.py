@@ -145,6 +145,51 @@ def _meta_source_only(src, limit=120):
     return chr(10).join(lines)
 
 
+
+def _rss_mb() -> float:
+    """Current process RSS in megabytes (0 if unavailable)."""
+    try:
+        import resource
+        # ru_maxrss is KB on Linux, bytes on macOS — normalize roughly
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if rss > 10_000_000:  # bytes (mac-like)
+            return rss / (1024 * 1024)
+        return rss / 1024.0  # KB → MB (Linux)
+    except Exception:
+        pass
+    try:
+        import psutil, os as _os
+        return psutil.Process(_os.getpid()).memory_info().rss / (1024 * 1024)
+    except Exception:
+        return 0.0
+
+
+def _memory_pressure(limit_mb: float | None = None) -> bool:
+    """True if process is using too much RAM for this host."""
+    rss = _rss_mb()
+    if rss <= 0:
+        return False
+    if limit_mb is None:
+        # soft defaults: docker/small VPS
+        try:
+            import psutil
+            total = psutil.virtual_memory().total / (1024 * 1024)
+            # leave headroom: pressure if process > 55% of host or > 700MB
+            limit_mb = min(700.0, total * 0.55)
+        except Exception:
+            limit_mb = 700.0
+    return rss >= float(limit_mb)
+
+
+def _release_memory() -> None:
+    with contextlib.suppress(Exception):
+        import gc
+        gc.collect()
+    with contextlib.suppress(Exception):
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+
 owner = security.owner
 
 # deprecated
@@ -726,9 +771,8 @@ class Modules:
         if not no_external:
             loaded += await self._register_modules(external_mods, "<file>")
 
-        with contextlib.suppress(Exception):
-            import gc
-            gc.collect()
+        _release_memory()
+        logger.info("Modules loaded: %s core/file (RSS≈%.0fMB)", len(loaded), _rss_mb())
 
         return loaded
 
@@ -826,7 +870,38 @@ class Modules:
             results = await asyncio.gather(*(_guarded(m) for m in modules))
             loaded = [r for r in results if r is not None]
         else:
-            for mod in modules:
+            for i, mod in enumerate(modules):
+                # Under memory pressure: free RAM before next heavy module
+                if origin == "<file>" and _memory_pressure():
+                    logger.warning(
+                        "Memory pressure (RSS≈%.0fMB) before loading %s — trimming caches",
+                        _rss_mb(),
+                        os.path.basename(str(mod)),
+                    )
+                    _release_memory()
+                    # purge entity caches on all clients if available
+                    with contextlib.suppress(Exception):
+                        for cl in getattr(self, "allclients", None) or [self.client]:
+                            if hasattr(cl, "_purge_entity_caches"):
+                                cl._purge_entity_caches(force=True)
+                    _release_memory()
+                    # still too high: skip remaining external modules to avoid OOM kill
+                    if _memory_pressure():
+                        logger.error(
+                            "RSS still high (≈%.0fMB) — skipping remaining %s external module(s) to prevent OOM",
+                            _rss_mb(),
+                            len(modules) - i,
+                        )
+                        fails = getattr(self, "_failed_module_names", None)
+                        if fails is None:
+                            self._failed_module_names = []
+                            fails = self._failed_module_names
+                        for skipped in modules[i:]:
+                            fails.append(
+                                f"{os.path.basename(str(skipped))} (skipped: memory pressure)"
+                            )
+                        break
+
                 try:
                     loaded += [await _load_one(mod)]
                     logger.debug("Successfully loaded from filesystem")
@@ -842,6 +917,10 @@ class Modules:
                         fails.append(f"{short} ({err[:120]})")
                     except Exception:
                         pass
+                finally:
+                    # free transient allocs after each external module
+                    if origin == "<file>":
+                        _release_memory()
 
         return loaded
 

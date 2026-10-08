@@ -860,22 +860,35 @@ class LoaderMod(loader.Module):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=256 * 1024,  # cap pipe buffers — heavy wheels spam logs
             )
 
             out, err = await pip.communicate()
         except Exception:
             logger.exception("Pip requirements install failed to start: %s", cmd)
             return False
+        finally:
+            with contextlib.suppress(Exception):
+                import gc
+                gc.collect()
 
         if pip.returncode != 0:
+            tail = ((err or out) or b"").decode(errors="ignore").strip()
+            if len(tail) > 800:
+                tail = tail[-800:]
             logger.error(
                 "Pip requirements install failed (%s) with exit code %s: %s",
                 " ".join(cmd),
                 pip.returncode,
-                (err or out).decode(errors="ignore").strip() or "<no output>",
+                tail or "<no output>",
             )
             return False
 
+        # free pip log buffers
+        del out, err
+        with contextlib.suppress(Exception):
+            import gc
+            gc.collect()
         return True
 
     async def install_packages(self, packages: list):
