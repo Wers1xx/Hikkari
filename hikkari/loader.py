@@ -1029,9 +1029,25 @@ class Modules:
         except Exception:
             raw_src = source_data or ""
         ret.__source__ = _meta_source_only(raw_src)
+        # Keep StringLoader.data for .ml export, but drop huge sources from RAM:
+        # if source is on disk (loaded_modules / core path), clear in-memory copy.
         with contextlib.suppress(Exception):
-            if hasattr(spec.loader, "data"):
-                spec.loader.data = b""
+            if hasattr(spec.loader, "data") and spec.loader.data:
+                data_len = len(spec.loader.data)
+                on_disk = False
+                if origin == "<file>" or str(origin).startswith("<file"):
+                    # external modules are saved under LOADED_MODULES_DIR
+                    cls_name = ret.__class__.__name__
+                    disk = Path(LOADED_MODULES_DIR) / f"{cls_name}_{self.client.tg_id}.py"
+                    if disk.is_file() and disk.stat().st_size > 0:
+                        on_disk = True
+                        ret.__source_path__ = str(disk)
+                if on_disk and data_len > 8192:
+                    spec.loader.data = b""
+                elif data_len > 200_000:
+                    # huge module without disk copy — keep only meta in __source__
+                    # but leave data so .ml still works (user asked for RAM, not break .ml)
+                    pass
 
         if not hasattr(ret, "name"):
             ret.name = ret.strings["name"]

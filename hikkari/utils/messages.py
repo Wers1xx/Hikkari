@@ -476,14 +476,19 @@ async def answer(
                             **extra,
                         )
                     except Exception as e:
-                        # FilePartsInvalid / media edit failures — text-only fallback
                         logger.debug("invert edit with file failed: %s", e)
-                        result = await message.edit(
-                            text,
-                            parse_mode=lambda t: (t, entities),
-                            link_preview=False,
-                            **{k: v for k, v in extra.items() if k not in ("file", "invert_media")},
-                        )
+                        try:
+                            result = await message.edit(
+                                text,
+                                parse_mode=lambda t: (t, entities),
+                                link_preview=False,
+                            )
+                        except Exception:
+                            result = await message.respond(
+                                text,
+                                parse_mode=lambda t: (t, entities),
+                                link_preview=False,
+                            )
                 else:
                     sent = await message.respond(
                         "✨",
@@ -559,13 +564,23 @@ async def answer(
                         **kwargs,
                     )
                 except Exception as e:
-                    logger.debug("edit with file failed (%s), text-only", e)
-                    result = await message.edit(
-                        text,
-                        parse_mode=lambda t: (t, entities),
-                        link_preview=False,
-                        **{k: v for k, v in kwargs.items() if k not in ("file", "invert_media")},
-                    )
+                    logger.debug("edit with file failed (%s), text-only / resend", e)
+                    try:
+                        result = await message.edit(
+                            text,
+                            parse_mode=lambda t: (t, entities),
+                            link_preview=False,
+                        )
+                    except Exception:
+                        # last resort: new message
+                        result = await message.respond(
+                            text,
+                            parse_mode=lambda t: (t, entities),
+                            link_preview=False,
+                        )
+                        if getattr(message, "out", False):
+                            with contextlib.suppress(Exception):
+                                await message.delete()
             else:
                 reply_to = kwargs.pop(
                     "reply_to",

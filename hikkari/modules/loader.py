@@ -34,6 +34,7 @@ import sys
 import time
 import typing
 import uuid
+from pathlib import Path
 from collections import ChainMap
 from importlib.machinery import ModuleSpec
 from urllib.parse import urlparse
@@ -2335,15 +2336,45 @@ class LoaderMod(loader.Module):
             await utils.answer(message, self.strings["404"])
             return
 
-        module_data = sys_module.__loader__.data
-        if isinstance(module_data, str):
-            module_data = module_data.encode("utf-8")
+        # Recover source: loader.data → disk path → inspect.getsource
+        module_data = b""
+        with contextlib.suppress(Exception):
+            raw = getattr(getattr(sys_module, "__loader__", None), "data", None)
+            if isinstance(raw, str):
+                module_data = raw.encode("utf-8")
+            elif isinstance(raw, (bytes, bytearray)) and raw:
+                module_data = bytes(raw)
 
-        module_doc = (
-            module_data.decode("utf-8", errors="ignore")
-            if isinstance(module_data, (bytes, bytearray))
-            else str(module_data)
-        )
+        if not module_data:
+            with contextlib.suppress(Exception):
+                sp = getattr(module, "__source_path__", None)
+                if sp and Path(sp).is_file():
+                    module_data = Path(sp).read_bytes()
+
+        if not module_data:
+            with contextlib.suppress(Exception):
+                from ..loader import LOADED_MODULES_DIR
+                disk = Path(LOADED_MODULES_DIR) / f"{module.__class__.__name__}_{self.client.tg_id}.py"
+                if disk.is_file():
+                    module_data = disk.read_bytes()
+
+        if not module_data:
+            with contextlib.suppress(Exception):
+                module_data = inspect.getsource(sys_module).encode("utf-8")
+
+        if not module_data:
+            with contextlib.suppress(Exception):
+                module_data = inspect.getsource(module.__class__).encode("utf-8")
+
+        if not module_data:
+            await utils.answer(
+                message,
+                "🚫 <b>Source not available for this module</b>\n"
+                "<i>Module was loaded without retained source.</i>",
+            )
+            return
+
+        module_doc = module_data.decode("utf-8", errors="ignore")
 
         if any(
             line.replace(" ", "") == "#scope:no_ml" for line in module_doc.splitlines()
@@ -2385,12 +2416,27 @@ class LoaderMod(loader.Module):
         file.name = f"{class_name}.py"
         file.seek(0)
 
-        await utils.answer(
-            message,
-            text,
-            file=file,
-            reply_to=getattr(message, "reply_to_msg_id", None),
-        )
+        # Always send as NEW message with document — EditMessage+file parts is unreliable
+        try:
+            await message.client.send_file(
+                message.peer_id,
+                file,
+                caption=text,
+                reply_to=getattr(message, "reply_to_msg_id", None) or message.id,
+                parse_mode="HTML",
+            )
+            if getattr(message, "out", False):
+                with contextlib.suppress(Exception):
+                    await message.delete()
+        except Exception:
+            logger.exception("mlcmd send_file failed")
+            file.seek(0)
+            await utils.answer(
+                message,
+                text,
+                file=file,
+                reply_to=getattr(message, "reply_to_msg_id", None),
+            )
 
     def _format_result(
         self,
