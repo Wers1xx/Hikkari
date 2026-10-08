@@ -306,7 +306,7 @@ class LoaderMod(loader.Module):
         developer: str = "",
         meta_banner: str | None = None,
     ) -> bool:
-        """Announce single module install as Rich (details + subscribe buttons)."""
+        """Clean Rich announce after module install."""
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import html_table, inject_banner_html
@@ -317,35 +317,82 @@ class LoaderMod(loader.Module):
             if not getattr(self.inline, "init_complete", False):
                 return False
 
+            # --- sanitize everything for Rich (no raw tags as text) ---
+            name = self._plain_cmd_doc(modname, str(modname))[:64]
+            desc = self._plain_cmd_doc(mod_doc, "")[:300]
+            # developer may already be formatted with <tg-emoji>… — strip to plain
+            dev_plain = self._plain_cmd_doc(developer, "")
+            # keep only @user or short id/url
+            dev_plain = re.sub(r"\s+", " ", dev_plain).strip()
+            for junk in (
+                "Developer:",
+                "Developers:",
+                "Разработчик:",
+                "Разработчики:",
+                "Entwickler:",
+                "開発者:",
+                "Dev:",
+                "D3v:",
+            ):
+                if dev_plain.lower().startswith(junk.lower()):
+                    dev_plain = dev_plain[len(junk) :].strip()
+            # origin: short display
+            origin_disp = ""
+            origin_url = ""
+            if origin and origin not in ("<string>", "<core>"):
+                o = str(origin).strip()
+                if o.startswith("http://") or o.startswith("https://"):
+                    origin_url = o
+                    origin_disp = o.rsplit("/", 1)[-1][:80] or o[:80]
+                elif not o.startswith("<"):
+                    origin_disp = o[:80]
+
             clean_rows = []
             for cmd, doc in rows or []:
                 clean_rows.append(
                     (
-                        html_mod.escape(self._plain_cmd_doc(cmd, str(cmd))[:80]),
-                        html_mod.escape(self._plain_cmd_doc(doc)[:120]),
+                        html_mod.escape(self._plain_cmd_doc(cmd, str(cmd))[:64]),
+                        html_mod.escape(self._plain_cmd_doc(doc)[:100]),
                     )
                 )
 
-            parts = [f"<h2>{html_mod.escape(str(modname))}</h2>"]
-            if mod_doc:
-                plain = self._plain_cmd_doc(mod_doc, "")
-                if plain:
-                    parts.append(f"<p><i>{html_mod.escape(plain[:400])}</i></p>")
+            parts = [f"<h2>{html_mod.escape(name)}</h2>"]
+            if desc:
+                parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
             if clean_rows:
                 table = html_table(clean_rows, header=("Command", "Description"))
                 parts.append(
                     f"<details open><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
                     f"{table}\n</details>"
                 )
-            if developer:
-                parts.append(
-                    f"<p>🧑‍💻 <b>Developer:</b> "
-                    f"<code>{html_mod.escape(str(developer)[:80])}</code></p>"
+            # footer table: Developer / Source
+            footer_rows = []
+            if dev_plain:
+                footer_rows.append(
+                    ("Developer", html_mod.escape(dev_plain[:80]))
                 )
-            if origin and origin not in ("<string>",):
-                parts.append(
-                    f"<p><code>{html_mod.escape(str(origin)[:120])}</code></p>"
+            if origin_url:
+                footer_rows.append(
+                    (
+                        "Source",
+                        f'<a href="{html_mod.escape(origin_url)}">{html_mod.escape(origin_disp)}</a>',
+                    )
                 )
+            elif origin_disp:
+                footer_rows.append(("Source", html_mod.escape(origin_disp)))
+            if footer_rows:
+                # html_table escapes cells — so for Source with <a> we build manually
+                foot = [
+                    '<table bordered="1" striped="1">',
+                    "<tr><th>Info</th><th>Value</th></tr>",
+                ]
+                for k, v in footer_rows:
+                    foot.append(
+                        f"<tr><td><b>{html_mod.escape(k)}</b></td><td>{v}</td></tr>"
+                    )
+                foot.append("</table>")
+                parts.append("\n".join(foot))
+
             html = "\n".join(parts)
             if meta_banner and str(meta_banner).startswith(("http://", "https://")):
                 html = inject_banner_html(html, meta_banner, force=True)
@@ -353,8 +400,8 @@ class LoaderMod(loader.Module):
             m = await self.inline.rich(
                 message,
                 html,
-                title=f"✓ {modname}"[:64],
-                description="Module loaded",
+                title=f"✓ {name}"[:64],
+                description=(desc[:80] if desc else "Module loaded"),
                 silent=True,
                 reply_markup=subscribe_markup,
                 thumbnail_url=meta_banner if meta_banner else None,
@@ -1207,6 +1254,7 @@ class LoaderMod(loader.Module):
 
         developer = re.search(r"# ?meta developer: ?(.+)", doc)
         developer = developer.group(1) if developer else False
+        developer_raw = (str(developer).strip() if developer else "")
 
         if not did_requires:
             requirements = []
@@ -1729,8 +1777,10 @@ class LoaderMod(loader.Module):
                         },
                     ]
 
+            developer_raw = developer  # plain @user / url for Rich
             developer = self.strings["developer"].format(utils.escape_html(developer))
         else:
+            developer_raw = ""
             developer = ""
 
         banner_kwargs = {}
@@ -1781,7 +1831,7 @@ class LoaderMod(loader.Module):
                 rows=self._last_loaded.get("rows") or [],
                 subscribe_markup=subscribe_markup,
                 origin=origin,
-                developer=str(developer or "") if developer else "",
+                developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_b,
             ):
                 return True
@@ -1861,7 +1911,7 @@ class LoaderMod(loader.Module):
                 rows=self._last_loaded.get("rows") or [],
                 subscribe_markup=subscribe_markup,  # buttons inside Rich unit
                 origin=origin,
-                developer=str(developer or "") if developer else "",
+                developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_banner,
             ):
                 return True
