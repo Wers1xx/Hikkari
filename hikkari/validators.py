@@ -381,6 +381,8 @@ class Series(Validator):
             )
 
         value = [item.strip() if isinstance(item, str) else item for item in value]
+        # Drop empty placeholders before per-item validation ([''] is common default)
+        value = [x for x in value if x not in (None, "", [])]
 
         if isinstance(validator, Validator):
             for i, item in enumerate(value):
@@ -391,8 +393,6 @@ class Series(Validator):
                         f"Passed value ({value}) contains invalid item"
                         f" ({str(item).strip()}), which must be {validator.doc['en']}"
                     )
-
-        value = list(filter(lambda x: x, value))
 
         return value
 

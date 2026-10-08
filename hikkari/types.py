@@ -948,16 +948,39 @@ class ConfigValue:
                     try:
                         value = self.validator.validate(value)
                     except validators.ValidationError as e:
-                        if not ignore_validation:
-                            raise e
-
-                        logger.debug(
-                            "Config value was broken (%s), so it was reset to %s",
+                        # Soft default: never crash module load on bad default/db value
+                        if not ignore_validation and value != self.default:
+                            # User-set value — still raise so .cfg can show error
+                            # But if default itself is invalid, fall through
+                            if self.default is not None and value is not self.default:
+                                # Compare loosely for lists
+                                try:
+                                    same_as_default = value == self.default
+                                except Exception:
+                                    same_as_default = False
+                                if not same_as_default:
+                                    raise e
+                        logger.warning(
+                            "Config value broken (%s), reset to safe empty (%s)",
                             value,
-                            self.default,
+                            e,
                         )
-
-                        value = self.default
+                        # Prefer empty/typed fallback over invalid default
+                        match getattr(self.validator, "internal_id", None):
+                            case "String":
+                                value = ""
+                            case "Integer":
+                                value = 0
+                            case "Boolean":
+                                value = False
+                            case "Series":
+                                value = []
+                            case "Float":
+                                value = 0.0
+                            case "Link":
+                                value = None
+                            case _:
+                                value = None
                 else:
                     match self.validator.internal_id:
                         case "String":

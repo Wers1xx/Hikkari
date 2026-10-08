@@ -709,7 +709,7 @@ class Modules:
 
         # Sequential load is more reliable on restart (no import races).
         # Parallel only for large external batches when origin is <file> and count is high.
-        parallel = origin == "<file>" and len(modules) > 8
+        parallel = False  # sequential always — reliable restart load
 
         async def _load_one(mod):
             mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
@@ -718,18 +718,56 @@ class Modules:
                 "<core {}>" if origin == "<core>" else "<file {}>"
             ).format(module_name)
             logger.debug("Loading %s from filesystem", module_name)
-            # Do NOT set submodule_search_locations — that marks the module as a
-            # package and breaks relative imports (from .. import loader → looks
-            # inside hikkari.modules instead of hikkari).
-            # Do NOT inject empty parent package stubs into sys.modules either.
+            # Read source once
+            try:
+                src = Path(mod).read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                src = Path(mod).read_text(encoding="utf-8", errors="replace")
+            # Ensure parent package is importable for relative imports
+            # (from .. import loader / utils). Real package only — no empty stubs.
+            pkg_parent = f"{__package__}.{MODULES_NAME}"
+            if pkg_parent not in sys.modules:
+                try:
+                    importlib.import_module(pkg_parent)
+                except Exception:
+                    # namespace package is fine; ensure entry exists
+                    if pkg_parent not in sys.modules:
+                        import types as _types
+                        _p = _types.ModuleType(pkg_parent)
+                        _p.__path__ = [
+                            str(Path(utils.get_base_dir()) / MODULES_NAME)
+                        ]
+                        _p.__package__ = pkg_parent
+                        sys.modules[pkg_parent] = _p
+            # Pre-bind common relative targets so `from .. import loader` works
+            # even if submodule was not yet attributed on the package object.
+            try:
+                _pkg = sys.modules.get(__package__)
+                if _pkg is not None:
+                    if not hasattr(_pkg, "loader"):
+                        _pkg.loader = sys.modules.get(f"{__package__}.loader") or importlib.import_module(f"{__package__}.loader")
+                    if not hasattr(_pkg, "utils"):
+                        _pkg.utils = sys.modules.get(f"{__package__}.utils") or importlib.import_module(f"{__package__}.utils")
+                    if not hasattr(_pkg, "main"):
+                        with contextlib.suppress(Exception):
+                            _pkg.main = sys.modules.get(f"{__package__}.main") or importlib.import_module(f"{__package__}.main")
+            except Exception:
+                logger.debug("pre-bind package attrs failed", exc_info=True)
+
             spec = importlib.machinery.ModuleSpec(
                 module_name,
-                StringLoader(
-                    Path(mod).read_text(encoding="utf-8"), user_friendly_origin
-                ),
+                StringLoader(src, user_friendly_origin),
                 origin=user_friendly_origin,
             )
-            return await self.register_module(spec, module_name, origin)
+            # Critical: mark as belonging to hikkari.modules package so
+            # relative imports (from .. import loader) resolve to hikkari.*
+            spec.parent = pkg_parent
+            try:
+                return await self.register_module(spec, module_name, origin)
+            except Exception:
+                # Drop broken module from sys.modules so retries are clean
+                sys.modules.pop(module_name, None)
+                raise
 
         if parallel:
             sem = asyncio.Semaphore(16)
@@ -745,7 +783,9 @@ class Modules:
                             if fails is None:
                                 self._failed_module_names = []
                                 fails = self._failed_module_names
-                            fails.append(str(mod))
+                            short = os.path.basename(str(mod))
+                            err = f"{type(e).__name__}: {e}"
+                            fails.append(f"{short} ({err[:120]})")
                         except Exception:
                             pass
                         return None
@@ -764,7 +804,9 @@ class Modules:
                         if fails is None:
                             self._failed_module_names = []
                             fails = self._failed_module_names
-                        fails.append(str(mod))
+                        short = os.path.basename(str(mod))
+                        err = f"{type(e).__name__}: {e}"
+                        fails.append(f"{short} ({err[:120]})")
                     except Exception:
                         pass
 
@@ -782,6 +824,10 @@ class Modules:
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
+        # Relative imports (from .. import loader) need correct __package__
+        pkg = getattr(spec, "parent", None) or ".".join(module_name.split(".")[:-1])
+        if pkg:
+            module.__package__ = pkg
         sys.modules[module_name] = module
 
         source_data = (
@@ -1125,9 +1171,14 @@ class Modules:
 
         for module in self.modules:
             if module.__class__.__name__ == instance.__class__.__name__:
-                if not self._remove_core_protection and module.__origin__.startswith(
-                    "<core"
-                ):
+                if not self._remove_core_protection and str(
+                    getattr(module, "__origin__", "")
+                ).startswith("<core"):
+                    # Soft: do not kill the bot — refuse external overwrite of core
+                    logger.warning(
+                        "External module %s conflicts with core — not loaded",
+                        instance.__class__.__name__,
+                    )
                     raise CoreOverwriteError(
                         module=(
                             module.__class__.__name__[:-3]
@@ -1137,12 +1188,15 @@ class Modules:
                     )
 
                 logger.debug("Removing module %s for update", module)
-                await module.on_unload()
+                with contextlib.suppress(Exception):
+                    await module.on_unload()
 
-                self.modules.remove(module)
+                with contextlib.suppress(ValueError):
+                    self.modules.remove(module)
                 for _, method in utils.iter_attrs(module):
                     if isinstance(method, InfiniteLoop):
-                        method.stop()
+                        with contextlib.suppress(Exception):
+                            method.stop()
                         logger.debug(
                             "Stopped loop in module %s, method %s",
                             module,
