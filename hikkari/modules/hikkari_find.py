@@ -100,7 +100,7 @@ class HikkariFindMod(loader.Module):
         self._install_lock = asyncio.Lock()
 
     async def _load_index(self, force: bool = False) -> list[dict]:
-        if self._index and not force and time.time() - self._index_ts < 600:
+        if self._index and not force and time.time() - self._index_ts < 300:
             return self._index
 
         entries: list[dict] = []

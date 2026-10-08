@@ -102,6 +102,8 @@ class CustomTelegramClient(TelegramClient):
         ] = {}
 
         self._forbidden_constructors: list[int] = []
+        self._entity_cache_max = 400
+        self._last_cache_purge = 0.0
 
         self._raw_updates_processor: None | (
             typing.Callable[
@@ -236,6 +238,45 @@ class CustomTelegramClient(TelegramClient):
     def hikkari_fulluser_cache(self) -> dict[int, CacheRecordFullUser]:
         return self._hikkari_fulluser_cache
 
+    def _purge_entity_caches(self, force: bool = False) -> None:
+        """Bound in-memory entity caches to avoid OOM on long uptime."""
+        import time as _t
+        now = _t.time()
+        if not force and now - getattr(self, "_last_cache_purge", 0) < 60:
+            return
+        self._last_cache_purge = now
+        max_n = int(getattr(self, "_entity_cache_max", 400) or 400)
+
+        def _trim(d):
+            if not d:
+                return
+            for k in list(d.keys()):
+                rec = d.get(k)
+                if rec is not None and getattr(rec, "expired", False):
+                    d.pop(k, None)
+            if len(d) <= max_n:
+                return
+            try:
+                items = sorted(
+                    ((k, getattr(v, "ts", 0) or 0) for k, v in d.items()),
+                    key=lambda x: x[1],
+                )
+                overflow = max(0, len(d) - max_n)
+                for k, _ in items[:overflow]:
+                    d.pop(k, None)
+            except Exception:
+                for k in list(d.keys())[: max(1, len(d) // 2)]:
+                    d.pop(k, None)
+
+        for name in (
+            "_hikkari_entity_cache",
+            "_hikkari_perms_cache",
+            "_hikkari_fullchannel_cache",
+            "_hikkari_fulluser_cache",
+        ):
+            _trim(getattr(self, name, None) or {})
+
+
     @property
     def forbidden_constructors(self) -> list[str]:
         return self._forbidden_constructors
@@ -305,6 +346,7 @@ class CustomTelegramClient(TelegramClient):
             cache_record = CacheRecordEntity(hashable_entity, resolved_entity, exp)
             self._hikkari_entity_cache[hashable_entity] = cache_record
             logger.debug("Saved hashable_entity %s to cache", hashable_entity)
+            self._purge_entity_caches()
 
             if getattr(resolved_entity, "id", None):
                 logger.debug("Saved resolved_entity id %s to cache", resolved_entity.id)

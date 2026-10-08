@@ -114,6 +114,37 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+def _meta_source_only(src, limit=120):
+    """Keep only header comments/docstring for meta tags — saves RAM."""
+    if not src:
+        return ""
+    lines = []
+    in_doc = False
+    for i, line in enumerate(src.splitlines()):
+        if i >= limit:
+            break
+        s = line.strip()
+        triple_d = chr(34) * 3
+        triple_s = chr(39) * 3
+        if not in_doc and (s.startswith(triple_d) or s.startswith(triple_s)):
+            in_doc = True
+            lines.append(line)
+            if s.count(triple_d) >= 2 or s.count(triple_s) >= 2:
+                in_doc = False
+            continue
+        if in_doc:
+            lines.append(line)
+            if triple_d in s or triple_s in s:
+                in_doc = False
+            continue
+        if s.startswith("#") or s == "":
+            lines.append(line)
+            continue
+        if lines:
+            break
+    return chr(10).join(lines)
+
+
 owner = security.owner
 
 # deprecated
@@ -695,6 +726,10 @@ class Modules:
         if not no_external:
             loaded += await self._register_modules(external_mods, "<file>")
 
+        with contextlib.suppress(Exception):
+            import gc
+            gc.collect()
+
         return loaded
 
     async def _register_modules(
@@ -910,9 +945,14 @@ class Modules:
 
         ret.__origin__ = origin
 
-        ret.__source__ = (
-            source_data if source_data else inspect.getsource(ret.__class__)
-        )
+        try:
+            raw_src = source_data if source_data else inspect.getsource(ret.__class__)
+        except Exception:
+            raw_src = source_data or ""
+        ret.__source__ = _meta_source_only(raw_src)
+        with contextlib.suppress(Exception):
+            if hasattr(spec.loader, "data"):
+                spec.loader.data = b""
 
         if not hasattr(ret, "name"):
             ret.name = ret.strings["name"]
