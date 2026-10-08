@@ -814,11 +814,26 @@ class Modules:
                 loaded += [await self.register_module(spec, module_name, origin)]
                 logger.debug("Successfully loaded %s from filesystem", module_name)
             except Exception as e:
-                logger.exception("Failed to load module %s due to %s:", mod, e)
+                logger.exception(
+                    "Failed to load module %s (%s) due to %s: %s",
+                    mod,
+                    module_name,
+                    type(e).__name__,
+                    e,
+                )
                 sys.modules.pop(module_name, None)
                 with contextlib.suppress(Exception):
+                    if not hasattr(self, "_failed_module_names") or self._failed_module_names is None:
+                        self._failed_module_names = []
+                    detail = f"{type(e).__name__}: {e}"
                     self._failed_module_names.append(
-                        f"{mod_shortname} ({type(e).__name__}: {str(e)[:100]})"
+                        f"{mod_shortname} ({detail[:200]})"
+                    )
+                    # Also surface in root logger so docker logs show the reason
+                    logger.error(
+                        "MODULE LOAD FAIL: %s — %s",
+                        mod_shortname,
+                        detail[:500],
                     )
 
         return loaded
@@ -930,17 +945,23 @@ class Modules:
         await self.complete_registration(ret)
 
         cls_name = ret.__class__.__name__
-        if save_fs and origin == "<string>":
+        # Always persist external modules to disk when save_fs is set.
+        # Previously only origin=="<string>" was saved, so URL installs
+        # (HikkariFind / .dlm) vanished or broke after restart.
+        if save_fs:
             path = os.path.join(
                 LOADED_MODULES_DIR,
                 f"{cls_name}_{self.client.tg_id}.py",
             )
-            data = spec.loader.data
-            Path(path).write_text(
-                data.decode() if isinstance(data, bytes) else data,
-                encoding="utf-8",
-            )
-            logger.debug("Saved class %s to path %s", cls_name, path)
+            data = getattr(spec.loader, "data", None)
+            if data is not None:
+                text = data.decode("utf-8") if isinstance(data, bytes) else str(data)
+                Path(path).write_text(text, encoding="utf-8")
+                logger.info("Saved module %s → %s", cls_name, path)
+                ret.__source_path__ = path
+                # Keep http(s) origin for DB re-download; only mark local installs as file
+                if not str(origin).startswith(("http://", "https://", "ftp://", "<core")):
+                    ret.__origin__ = f"<file {path}>"
 
         return ret
 

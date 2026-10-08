@@ -776,21 +776,31 @@ class LoaderMod(loader.Module):
 
                 return MODULE_LOADING_FAILED
 
+            # Keep URL as origin (DB / re-download). save_fs=True writes disk copy.
             installed = await self.load_module(
                 r,
                 message,
                 module_name,
                 url,
                 blob_link=blob_link,
+                save_fs=True,
                 _raise_install_errors=True,
             )
 
             if not installed:
                 raise ModuleInstallError(f"Module {module_name} was not installed")
 
+            # Keep URL in DB for _update_modules re-download
+            with contextlib.suppress(Exception):
+                self.update_modules_in_db()
+
             return MODULE_LOADING_SUCCESS
-        except Exception:
-            logger.exception("Failed to install external module %s", module_name)
+        except Exception as e:
+            logger.exception(
+                "Failed to install external module %s: %s",
+                module_name,
+                e,
+            )
             return MODULE_LOADING_FAILED
 
     async def _inline__load(
@@ -1128,6 +1138,38 @@ class LoaderMod(loader.Module):
                 await call.edit(self.strings["load_failed"])
 
 
+
+    def _validate_module_source(self, doc: str) -> str | None:
+        """Return error string if source is not a loadable Hikkari/Hikka-style module."""
+        if not doc or not str(doc).strip():
+            return "empty source"
+        text = doc if isinstance(doc, str) else (
+            doc.decode("utf-8", errors="ignore") if isinstance(doc, (bytes, bytearray)) else str(doc)
+        )
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as e:
+            return f"syntax error: {e.msg} (line {e.lineno})"
+        # Must define a class that looks like a Module (name ends with Mod or inherits something)
+        has_class = any(isinstance(n, ast.ClassDef) for n in tree.body)
+        if not has_class:
+            return "no class definition in file"
+        # Heuristic: mention of loader.Module / Module / @loader
+        lowered = text.lower()
+        markers = (
+            "loader.module",
+            "loader.tds",
+            "@loader.command",
+            "from .. import loader",
+            "from hikka import loader",
+            "from heroku import loader",
+            "from hikkari import loader",
+            "class ",
+        )
+        if not any(m in lowered for m in markers) and "module" not in lowered:
+            return "file does not look like a userbot module"
+        return None
+
     async def load_module(
         self,
         doc: str,
@@ -1150,6 +1192,17 @@ class LoaderMod(loader.Module):
                 doc = doc.decode("utf-8")
             except Exception:
                 doc = doc.decode("utf-8", errors="ignore")
+
+        verr = self._validate_module_source(doc)
+        if verr:
+            logger.error("Module %s rejected: %s", module_label, verr)
+            if isinstance(message, Message):
+                with contextlib.suppress(Exception):
+                    await utils.answer(
+                        message,
+                        f"❌ <b>Модуль невалиден:</b> <code>{utils.escape_html(verr)}</code>",
+                    )
+            return False
 
         if isinstance(doc, str) and not _safety_confirmed:
             blocked, warns = self._scan_module_safety(doc)
@@ -2226,8 +2279,46 @@ class LoaderMod(loader.Module):
             self._db.set(loader.__name__, "secure_boot", False)
             self._secure_boot = True
         else:
-            for mod in todo.values():
-                await self.download_and_install(mod)
+            for cls_name, origin in list(todo.items()):
+                # Prefer already-saved file (reliable after .lm / HikkariFind)
+                disk = Path(loader.LOADED_MODULES_DIR) / f"{cls_name}_{self._client.tg_id}.py"
+                if disk.is_file() and disk.stat().st_size > 0:
+                    try:
+                        src = disk.read_text(encoding="utf-8")
+                        ok = await self.load_module(
+                            src,
+                            None,
+                            name=cls_name,
+                            origin=str(disk),
+                            save_fs=False,
+                            quiet=True,
+                        )
+                        if ok:
+                            logger.info("Loaded %s from disk %s", cls_name, disk.name)
+                            continue
+                        logger.warning(
+                            "Disk load failed for %s, re-downloading from %s",
+                            cls_name,
+                            origin,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Disk load error for %s — fallback to download",
+                            cls_name,
+                        )
+                # URL / remote origin
+                if isinstance(origin, str) and (
+                    origin.startswith("http://")
+                    or origin.startswith("https://")
+                    or origin.startswith("ftp://")
+                ):
+                    await self.download_and_install(origin)
+                else:
+                    logger.warning(
+                        "Skip reload of %s: origin is not a URL (%s)",
+                        cls_name,
+                        origin,
+                    )
 
             self.update_modules_in_db()
 

@@ -342,7 +342,7 @@ class HikkariFindMod(loader.Module):
         if isinstance(urls, str):
             urls = [urls]
 
-        loader_mod = self.lookup("Loader")
+        loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
         if not loader_mod:
             with contextlib.suppress(Exception):
                 await call.edit(
@@ -373,7 +373,14 @@ class HikkariFindMod(loader.Module):
                     timeout=90,
                 )
                 ok = result == 1 or result is True
-                err = "" if ok else f"code={result}"
+                err = "" if ok else f"install failed (code={result})"
+                if not ok:
+                    logger.error(
+                        "HikkariFind: download_and_install(%s) → %s url=%s",
+                        name,
+                        result,
+                        url,
+                    )
             except asyncio.TimeoutError:
                 with contextlib.suppress(Exception):
                     await call.edit(
@@ -381,9 +388,9 @@ class HikkariFindMod(loader.Module):
                     )
                 return
             except Exception as e:
-                logger.exception("HikkariFind install %s", name)
+                logger.exception("HikkariFind install %s url=%s", name, url)
                 ok = False
-                err = type(e).__name__
+                err = f"{type(e).__name__}: {e}"
 
         with contextlib.suppress(Exception):
             if ok:
