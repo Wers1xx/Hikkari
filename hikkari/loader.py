@@ -707,8 +707,9 @@ class Modules:
 
         loaded = []
 
-        # Core: sequential (order / deps). External files: parallel batches.
-        parallel = len(modules) > 1
+        # Sequential load is more reliable on restart (no import races).
+        # Parallel only for large external batches when origin is <file> and count is high.
+        parallel = origin == "<file>" and len(modules) > 8
 
         async def _load_one(mod):
             mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]

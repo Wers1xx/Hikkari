@@ -441,7 +441,7 @@ class TestMod(loader.Module):
                             "Build",
                             re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
                         ),
-                        ("Platform", str(data.get("platform", ""))),
+                        ("Host", str(data.get("hostname") or "—")),
                         ("Python", str(data.get("python_ver", ""))),
                     ]
                     html = build_info_html(

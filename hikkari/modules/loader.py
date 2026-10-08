@@ -266,18 +266,32 @@ class LoaderMod(loader.Module):
                 uniq.append(m)
         return uniq
 
+    @staticmethod
+    def _plain_cmd_doc(text, fallback="—"):
+        import html as html_mod
+        if not text:
+            return fallback
+        s = str(text)
+        s = re.sub(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", r"\1", s, flags=re.I | re.S)
+        s = re.sub(r"<emoji\b[^>]*>(.*?)</emoji>", r"\1", s, flags=re.I | re.S)
+        s = re.sub(r"<[^>]+>", "", s)
+        s = html_mod.unescape(s)
+        s = re.sub(r"[ \t]+", " ", s).strip()
+        return s or fallback
+
     def _module_cmds_rows(self, instance) -> list[tuple[str, str]]:
         rows = []
-        prefix = utils.escape_html(self.get_prefix())
+        prefix = self.get_prefix()
+        undoc = self.strings.get("undoc", "—")
         for name, fun in sorted(getattr(instance, "commands", {}).items(), key=lambda x: x[0]):
-            doc = utils.escape_html(inspect.getdoc(fun) or self.strings.get("undoc", ""))
-            rows.append((f"{prefix}{name}", doc[:120]))
-        if self.inline.init_complete:
+            doc = self._plain_cmd_doc(inspect.getdoc(fun), undoc)[:120]
+            rows.append((f"{prefix}{name}", doc))
+        if getattr(self.inline, "init_complete", False):
             for name, fun in sorted(
                 getattr(instance, "inline_handlers", {}).items(), key=lambda x: x[0]
             ):
-                doc = utils.escape_html(inspect.getdoc(fun) or self.strings.get("undoc", ""))
-                rows.append((f"@{self.inline.bot_username} {name}", doc[:120]))
+                doc = self._plain_cmd_doc(inspect.getdoc(fun), undoc)[:120]
+                rows.append((f"@{self.inline.bot_username} {name}", doc))
         return rows
 
     async def _rich_module_loaded(
@@ -286,32 +300,56 @@ class LoaderMod(loader.Module):
         *,
         modname: str,
         mod_doc: str,
-        rows: list[tuple[str, str]],
+        rows: list,
         subscribe_markup=None,
         origin: str = "",
+        developer: str = "",
+        meta_banner: str | None = None,
     ) -> bool:
-        """Announce single module install as Rich (details + buttons)."""
+        """Announce single module install as Rich (details + subscribe buttons)."""
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table
+            from ..utils.rich_api import html_table, inject_banner_html
+            import html as html_mod
+
             if not can_use_rich(self._client, self._db):
                 return False
             if not getattr(self.inline, "init_complete", False):
                 return False
-            parts = [f"<h2>{utils.escape_html(modname)}</h2>"]
+
+            clean_rows = []
+            for cmd, doc in rows or []:
+                clean_rows.append(
+                    (
+                        html_mod.escape(self._plain_cmd_doc(cmd, str(cmd))[:80]),
+                        html_mod.escape(self._plain_cmd_doc(doc)[:120]),
+                    )
+                )
+
+            parts = [f"<h2>{html_mod.escape(str(modname))}</h2>"]
             if mod_doc:
-                plain = re.sub(r"<[^>]+>", "", mod_doc).strip()
+                plain = self._plain_cmd_doc(mod_doc, "")
                 if plain:
-                    parts.append(f"<p><i>{utils.escape_html(plain)[:400]}</i></p>")
-            if rows:
-                table = html_table(rows, header=("Command", "Description"))
+                    parts.append(f"<p><i>{html_mod.escape(plain[:400])}</i></p>")
+            if clean_rows:
+                table = html_table(clean_rows, header=("Command", "Description"))
                 parts.append(
-                    f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                    f"<details open><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
                     f"{table}\n</details>"
                 )
+            if developer:
+                parts.append(
+                    f"<p>🧑‍💻 <b>Developer:</b> "
+                    f"<code>{html_mod.escape(str(developer)[:80])}</code></p>"
+                )
             if origin and origin not in ("<string>",):
-                parts.append(f"<p><code>{utils.escape_html(str(origin)[:120])}</code></p>")
+                parts.append(
+                    f"<p><code>{html_mod.escape(str(origin)[:120])}</code></p>"
+                )
             html = "\n".join(parts)
+            if meta_banner and str(meta_banner).startswith(("http://", "https://")):
+                html = inject_banner_html(html, meta_banner, force=True)
+
             m = await self.inline.rich(
                 message,
                 html,
@@ -319,11 +357,13 @@ class LoaderMod(loader.Module):
                 description="Module loaded",
                 silent=True,
                 reply_markup=subscribe_markup,
+                thumbnail_url=meta_banner if meta_banner else None,
             )
             return bool(m)
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
             return False
+
 
     async def _rich_batch_loaded(
         self,
@@ -1718,6 +1758,9 @@ class LoaderMod(loader.Module):
                 self._last_loaded = {"name": str(modname), "rows": [], "doc": "", "ok": True}
             if quiet:
                 return True
+            meta_b = None
+            with contextlib.suppress(Exception):
+                meta_b = self._get_banner_url(doc) if doc else None
             if await self._rich_module_loaded(
                 message,
                 modname=str(modname),
@@ -1725,6 +1768,8 @@ class LoaderMod(loader.Module):
                 rows=self._last_loaded.get("rows") or [],
                 subscribe_markup=subscribe_markup,
                 origin=origin,
+                developer=str(developer or "") if developer else "",
+                meta_banner=meta_b,
             ):
                 return True
             await utils.answer(
@@ -1791,30 +1836,21 @@ class LoaderMod(loader.Module):
         # Rich announcement (commands in <details>)
         # Subscribe callbacks need form units → keep classic form if markup set
         try:
-            if not subscribe_markup and await self._rich_module_loaded(
+            meta_banner = None
+            with contextlib.suppress(Exception):
+                meta_banner = self._get_banner_url(doc) if doc else None
+            if await self._rich_module_loaded(
                 message,
                 modname=str(modname),
-                mod_doc=mod_doc or "",
+                mod_doc=(self._last_loaded.get("doc") if self._last_loaded else None)
+                or mod_doc
+                or "",
                 rows=self._last_loaded.get("rows") or [],
-                subscribe_markup=None,
+                subscribe_markup=subscribe_markup,  # buttons inside Rich unit
                 origin=origin,
+                developer=str(developer or "") if developer else "",
+                meta_banner=meta_banner,
             ):
-                return True
-            if subscribe_markup and await self._rich_module_loaded(
-                message,
-                modname=str(modname),
-                mod_doc=mod_doc or "",
-                rows=self._last_loaded.get("rows") or [],
-                subscribe_markup=None,
-                origin=origin,
-            ):
-                # Still show subscribe via separate form under rich
-                await self.inline.form(
-                    self.strings.get("suggest_subscribe", "Subscribe to developer channel?"),
-                    message=message if message.out else utils.get_chat_id(message),
-                    reply_markup=subscribe_markup,
-                    silent=True,
-                )
                 return True
         except Exception:
             logger.debug("rich announce failed", exc_info=True)
