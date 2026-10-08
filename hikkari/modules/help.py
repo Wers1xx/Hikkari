@@ -109,28 +109,25 @@ class Help(loader.Module):
         return match.group(1).strip() if match else None
 
     def _get_module_developer(self, module) -> str | None:
-        """Extract developer/author from module source meta comments."""
+        """Extract developer only from explicit # meta developer (never from license ©️)."""
+        # Built-in / core modules: never show a developer line
+        origin = str(getattr(module, "__origin__", "") or "")
+        if origin.startswith("<core"):
+            return None
         source = getattr(module, "__source__", None) or ""
         if not source:
             with contextlib.suppress(Exception):
                 source = inspect.getsource(module.__class__)
         if not source:
             return None
-        for pattern in (
-            r"# ?meta developer: ?(.+)",
-            r"# ?Author: ?(.+)",
-            r"# ?author: ?(.+)",
-            r"# ?©️ ?(.+?)(?:,|\n)",
-        ):
-            m = re.search(pattern, source, flags=re.I)
-            if m:
-                dev = m.group(1).strip().strip('"').strip("'")
-                # drop trailing year ranges like 2025-2026 for ©️ lines
-                if pattern.startswith(r"# ?©️"):
-                    dev = re.sub(r",?\s*\d{4}.*$", "", dev).strip()
-                if dev:
-                    return dev
+        # Only official module meta — license headers (# ©️ ...) are NOT developers
+        m = re.search(r"# ?meta developer: ?(.+)", source, flags=re.I)
+        if m:
+            dev = m.group(1).strip().strip('"').strip("'")
+            if dev:
+                return dev
         return None
+
 
     @staticmethod
     def _plain_doc(text: str | None, fallback: str = "") -> str:
@@ -314,12 +311,17 @@ class Help(loader.Module):
                 )
             )
         cmds = "\n".join(lines)
-        developer = re.search(
-            r"# ?meta developer: ?(.+)", getattr(module, "__source__", None) or ""
-        )
-        dev_text = developer.group(1).strip() if developer else None
-        if not dev_text:
-            dev_text = self._get_module_developer(module)
+        # Core modules: no Developer at all (license is not author meta)
+        is_core = str(getattr(module, "__origin__", "") or "").startswith("<core")
+        dev_text = None
+        if not is_core:
+            developer = re.search(
+                r"# ?meta developer: ?(.+)",
+                getattr(module, "__source__", None) or "",
+            )
+            dev_text = developer.group(1).strip() if developer else None
+            if not dev_text:
+                dev_text = self._get_module_developer(module)
         placeholders = "\n".join(
             utils.help_placeholders(module.__class__.__name__, self)
         )
@@ -339,8 +341,8 @@ class Help(loader.Module):
                 pass
 
 
-        # Prefer meta developer if regex missed
-        if not dev_text:
+        # Prefer meta developer if regex missed (external modules only)
+        if not is_core and not dev_text:
             dev_text = self._get_module_developer(module)
 
         # Rich single-module help (commands in <details>)
