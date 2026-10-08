@@ -857,27 +857,90 @@ class UpdaterMod(loader.Module):
         try:
             import git as gitmod
             with gitmod.Repo() as repo:
-                origin = repo.remote("origin")
-                origin.fetch()
-                # Ensure remote branch exists
-                remote_ref = f"origin/{args}"
-                if remote_ref not in [r.name for r in repo.refs]:
-                    # try create local tracking if remote has it
-                    if not any(r.name.endswith(f"/{args}") for r in origin.refs):
-                        await utils.answer(
-                            message,
-                            f"❌ Remote branch <code>{args}</code> not found on origin",
+                try:
+                    origin = repo.remote("origin")
+                except Exception:
+                    origin = repo.create_remote(
+                        "origin",
+                        self.config.get("GIT_ORIGIN_URL")
+                        or "https://github.com/Wers1xx/Hikkari",
+                    )
+                # Single-branch clones never have origin/beta — fetch it explicitly
+                for attempt in (
+                    lambda: origin.fetch(
+                        refspec=f"+refs/heads/{args}:refs/remotes/origin/{args}"
+                    ),
+                    lambda: repo.git.fetch(
+                        "origin",
+                        f"+refs/heads/{args}:refs/remotes/origin/{args}",
+                    ),
+                    lambda: repo.git.fetch("origin", args),
+                    lambda: origin.fetch(),
+                ):
+                    try:
+                        attempt()
+                        break
+                    except Exception as fe:
+                        logger.debug("branch fetch attempt failed: %s", fe)
+
+                remote_has = False
+                try:
+                    for ref in list(origin.refs):
+                        name = str(
+                            getattr(ref, "remote_head", None)
+                            or getattr(ref, "name", "")
+                            or ""
                         )
-                        return
-                if args in repo.heads:
-                    repo.heads[args].checkout()
-                else:
-                    repo.create_head(args, repo.refs[f"origin/{args}"]).set_tracking_branch(
-                        repo.refs[f"origin/{args}"]
-                    ).checkout()
-                # pull latest
-                origin.pull()
-            # Update version.branch for this process
+                        if name == args or name.endswith("/" + args):
+                            remote_has = True
+                            break
+                except Exception:
+                    pass
+                if not remote_has:
+                    try:
+                        for r in repo.refs:
+                            n = str(getattr(r, "name", "") or "")
+                            if n.endswith("/" + args) or n == "origin/" + args:
+                                remote_has = True
+                                break
+                    except Exception:
+                        pass
+                if not remote_has:
+                    try:
+                        out = repo.git.ls_remote("--heads", "origin", args)
+                        remote_has = bool(out and args in out)
+                    except Exception as e:
+                        logger.warning("ls-remote failed: %s", e)
+                if not remote_has:
+                    await utils.answer(
+                        message,
+                        f"❌ Remote branch <code>{args}</code> not found on origin\n"
+                        f"<i>Проверь:</i> <code>git ls-remote --heads origin</code>",
+                    )
+                    return
+
+                try:
+                    repo.git.checkout("-B", args, f"origin/{args}")
+                except Exception:
+                    if args in repo.heads:
+                        repo.heads[args].checkout()
+                    else:
+                        target = None
+                        for r in repo.refs:
+                            n = str(getattr(r, "name", "") or "")
+                            if n.endswith("/" + args):
+                                target = r
+                                break
+                        if target is None:
+                            raise RuntimeError(
+                                f"no local ref for {args} after fetch"
+                            )
+                        repo.create_head(args, target).checkout()
+                try:
+                    repo.git.pull("origin", args)
+                except Exception as pe:
+                    logger.debug("pull after branch switch: %s", pe)
+
             version.branch = args
             await utils.answer(
                 message,
@@ -891,7 +954,11 @@ class UpdaterMod(loader.Module):
                 _v.restart()
         except Exception as e:
             logger.exception("branch switch failed")
-            await utils.answer(message, f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>")
+            await utils.answer(
+                message,
+                f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
+            )
+
 
     @loader.command(
         ru_doc="— показать список beta-доступа (GitHub)",
