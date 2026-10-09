@@ -24,6 +24,7 @@ import functools
 import logging
 import random
 import signal
+import os
 import sys
 import typing
 import warnings
@@ -46,22 +47,75 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_child_watcher():
-    """Ensure the active asyncio policy can spawn subprocesses."""
-    if sys.platform == "win32" or sys.version_info >= (3, 14):
+    """Ensure the active asyncio policy can spawn subprocesses (no zombies)."""
+    if sys.platform == "win32":
         return
 
     with warnings.catch_warnings():
-        # get_child_watcher() is deprecated on 3.12/3.13; we use it knowingly.
         warnings.simplefilter("ignore", DeprecationWarning)
         try:
-            asyncio.get_event_loop_policy().get_child_watcher()
-            return
-        except NotImplementedError:
-            pass
+            policy = asyncio.get_event_loop_policy()
+            # Prefer threaded watcher — reaps children even when loop is busy
+            if hasattr(asyncio, "ThreadedChildWatcher"):
+                try:
+                    watcher = policy.get_child_watcher()
+                    if type(watcher).__name__ not in (
+                        "ThreadedChildWatcher",
+                        "PidfdChildWatcher",
+                    ):
+                        with contextlib.suppress(Exception):
+                            policy.set_child_watcher(asyncio.ThreadedChildWatcher())
+                except NotImplementedError:
+                    with contextlib.suppress(Exception):
+                        policy.set_child_watcher(asyncio.ThreadedChildWatcher())
+            else:
+                with contextlib.suppress(Exception):
+                    policy.get_child_watcher()
+        except Exception:
+            with contextlib.suppress(Exception):
+                asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
-        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
-        with contextlib.suppress(RuntimeError):
-            asyncio.set_event_loop(asyncio.get_running_loop())
+
+def reap_zombies() -> int:
+    """Non-blocking waitpid on all exited children. Returns number reaped."""
+    if sys.platform == "win32":
+        return 0
+    n = 0
+    try:
+        while True:
+            try:
+                pid, _status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                break
+            except OSError:
+                break
+            if pid <= 0:
+                break
+            n += 1
+    except Exception:
+        pass
+    return n
+
+
+_sigchld_installed = False
+
+
+def install_sigchld_reaper() -> None:
+    """Install SIGCHLD handler that reaps zombies (Linux/Unix)."""
+    global _sigchld_installed
+    if _sigchld_installed or sys.platform == "win32":
+        return
+    try:
+        import signal
+
+        def _handler(signum, frame):  # noqa: ARG001
+            reap_zombies()
+
+        # SA_NOCLDSTOP would be ideal but pure Python signal.signal is enough
+        signal.signal(signal.SIGCHLD, _handler)
+        _sigchld_installed = True
+    except Exception:
+        pass
 
 custom_placeholders = {}
 

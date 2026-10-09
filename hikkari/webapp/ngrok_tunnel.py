@@ -27,6 +27,26 @@ _URL_RE = re.compile(
 )
 
 
+
+def _safe_kill(proc: Optional[subprocess.Popen]) -> None:
+    """Terminate ngrok child and wait so it never becomes a zombie."""
+    if proc is None:
+        return
+    with contextlib.suppress(Exception):
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=2)
+    with contextlib.suppress(Exception):
+        if proc.poll() is None:
+            proc.wait(timeout=1)
+
+
 def ensure_ngrok() -> Optional[str]:
     found = shutil.which("ngrok")
     if found and os.access(found, os.X_OK):
@@ -228,7 +248,7 @@ def _run_once(binary: str, port: int, token: str, cfg: Path) -> tuple[Optional[s
             except Exception:
                 pass
             with contextlib.suppress(Exception):
-                proc.terminate()
+                _safe_kill(proc)
             last = "timeout"
             continue
 
