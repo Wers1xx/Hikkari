@@ -1088,38 +1088,6 @@ class UpdaterMod(loader.Module):
         await utils.answer(message, "\n".join(lines))
 
     @loader.command(
-        ru_doc="<id|reply> — локально добавить beta (основной список на GitHub)",
-        en_doc="<id|reply> — local beta grant (main list is on GitHub)",
-    )
-    async def betagrant(self, message: Message):
-        """Local-only beta grant. Prefer editing GitHub assets/beta_users.txt"""
-        args = utils.get_args_raw(message)
-        uid = None
-        if args and str(args).strip().isdigit():
-            uid = int(str(args).strip())
-        elif message.is_reply:
-            reply = await message.get_reply_message()
-            uid = reply.sender_id if reply else None
-        if not uid:
-            await utils.answer(
-                message,
-                "<emoji document_id=5237898864433837164>👎</emoji> Reply / ID\n\n"
-                "<b>Main list:</b> edit on GitHub\n"
-                "<code>assets/beta_users.txt</code>",
-            )
-            return
-        cur = list(self.config.get("beta_users") or [])
-        if uid not in [int(x) for x in cur]:
-            cur.append(int(uid))
-            self.config["beta_users"] = cur
-        await utils.answer(
-            message,
-            f"<emoji document_id=5256182535917940722>⤵️</emoji> Local beta for <code>{uid}</code>\n"
-            f"Prefer adding ID to GitHub <code>assets/beta_users.txt</code> "
-            f"so all installs see it.",
-        )
-
-    @loader.command(
         ru_doc="<id|reply> — убрать локальный beta-доступ",
         en_doc="<id|reply> — revoke local beta access",
     )
