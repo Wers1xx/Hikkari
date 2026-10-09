@@ -697,7 +697,7 @@ class CustomTelegramClient(TelegramClient):
         :return: The result of the request
         """
 
-        # ⚠️⚠️  WARNING!  ⚠️⚠️
+        # <emoji document_id=5447644880824181073>⚠️</emoji><emoji document_id=5447644880824181073>⚠️</emoji>  WARNING!  <emoji document_id=5447644880824181073>⚠️</emoji><emoji document_id=5447644880824181073>⚠️</emoji>
         # If you are a module developer, and you'll try to bypass this protection to
         # force user join your channel, you will be added to SCAM modules
         # list and you will be banned from Hikkari federation.

@@ -225,7 +225,7 @@ else:
         from . import main
     except ImportError as e:
         print(
-            f"{str(e)}\n\U0001f504 Attempting dependencies installation... Just wait ⏱"
+            f"{str(e)}\n\U0001f504 Attempting dependencies installation... Just wait <emoji document_id=5382194935057372936>⏱</emoji>"
         )
         deps()
         restart()

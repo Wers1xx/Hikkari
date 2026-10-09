@@ -19,6 +19,7 @@
 # Utilites
 
 from .messages import *
+from .emoji_prem import prem, prem_btn, prem_text, prem_btn_text, button_icon_id, PREMIUM_MAP
 from .other import *
 from .entity import *
 from .hikkari import *

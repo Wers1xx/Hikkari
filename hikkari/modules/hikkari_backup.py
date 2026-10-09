@@ -231,9 +231,9 @@ class HikkariBackupMod(loader.Module):
         if call.data == "hikkari/backupall/restore/confirm":
             await utils.answer(
                 call,
-                "❓ <b>Are you sure?</b>",
+                "<emoji document_id=5436113877181941026>❓</emoji> <b>Are you sure?</b>",
                 reply_markup={
-                    "text": "✅ Yes",
+                    "text": "⤵️ Yes",
                     "data": "hikkari/backupall/restore",
                 },
             )
@@ -324,7 +324,7 @@ class HikkariBackupMod(loader.Module):
                 await utils.answer(
                     call,
                     self.strings["advice_converting"],
-                    reply_markup=[[{"text": "🔻 Close", "action": "close"}]],
+                    reply_markup=[[{"text": "⬇️ Close", "action": "close"}]],
                 )
 
     @loader.command()
@@ -393,7 +393,7 @@ class HikkariBackupMod(loader.Module):
                 self.strings["db_warning"],
                 reply_markup=[
                     {
-                        "text": "❌",
+                        "text": "👎",
                         "callback": self.convert,
                         "args": (
                             "n",
@@ -401,7 +401,7 @@ class HikkariBackupMod(loader.Module):
                         ),
                     },
                     {
-                        "text": "✅",
+                        "text": "⤵️",
                         "callback": self.convert,
                         "args": (
                             "y",

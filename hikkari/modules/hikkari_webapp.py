@@ -32,11 +32,11 @@ class HikkariWebAppMod(loader.Module):
             "Подтверди, чтобы получить ссылку.\n"
             "Полный доступ — только owner / co-owner."
         ),
-        "btn_open": "✅ Открыть",
-        "btn_cancel": "🚫 Отмена",
+        "btn_open": "<emoji document_id=5256182535917940722>⤵️</emoji> Открыть",
+        "btn_cancel": "<emoji document_id=5240241223632954241>🚫</emoji> Отмена",
         "cancelled": "<emoji document_id=5872829476143894491>🚫</emoji> Отменено",
-        "denied": "🚫 Нет доступа к управлению WebApp.",
-        "stopped": "🛑 WebApp остановлен",
+        "denied": "<emoji document_id=5240241223632954241>🚫</emoji> Нет доступа к управлению WebApp.",
+        "stopped": "<emoji document_id=5980953710157632545>❌</emoji> WebApp остановлен",
         "not_running": "WebApp не запущен",
         "error": "WebApp error: <code>{}</code>",
         "info": (

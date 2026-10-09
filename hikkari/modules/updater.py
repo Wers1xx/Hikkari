@@ -483,7 +483,7 @@ class UpdaterMod(loader.Module):
                 message,
                 self.strings.get(
                     "changelog_empty",
-                    "✨ <b>Changelog is empty</b>",
+                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Changelog is empty</b>",
                 ),
             )
             return
@@ -499,7 +499,7 @@ class UpdaterMod(loader.Module):
 
         body = self.strings["changelog"].format(changelog)
         if build or ver:
-            prefix = f"✨ <b>Hikkari</b> <code>v{ver}</code>"
+            prefix = f"<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari</b> <code>v{ver}</code>"
             if build:
                 prefix += f" · {build}"
             body = prefix + "\n" + body
@@ -925,7 +925,7 @@ class UpdaterMod(loader.Module):
             return
 
         if args not in ("master", "beta", "main"):
-            await utils.answer(message, "❌ Use <code>master</code> or <code>beta</code>")
+            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Use <code>master</code> or <code>beta</code>")
             return
         if args == "main":
             args = "master"
@@ -935,7 +935,7 @@ class UpdaterMod(loader.Module):
             if not allowed:
                 await utils.answer(
                     message,
-                    "🚫 <b>Нет доступа к ветке beta</b>\n\n"
+                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>Нет доступа к ветке beta</b>\n\n"
                     f"ID: <code>{uid}</code>\n"
                     "Переход на beta разрешён только ID из списка на GitHub:\n"
                     "<code>assets/beta_users.txt</code>\n"
@@ -946,7 +946,7 @@ class UpdaterMod(loader.Module):
                 return
 
         if NO_GIT:
-            await utils.answer(message, "❌ Git disabled")
+            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Git disabled")
             return
 
         try:
@@ -1009,7 +1009,7 @@ class UpdaterMod(loader.Module):
                 if not remote_has:
                     await utils.answer(
                         message,
-                        f"❌ Remote branch <code>{args}</code> not found on origin\n"
+                        f"<emoji document_id=5237898864433837164>👎</emoji> Remote branch <code>{args}</code> not found on origin\n"
                         f"<i>Проверь:</i> <code>git ls-remote --heads origin</code>",
                     )
                     return
@@ -1039,7 +1039,7 @@ class UpdaterMod(loader.Module):
             version.branch = args
             await utils.answer(
                 message,
-                f"✅ Switched to <code>{args}</code>\n"
+                f"<emoji document_id=5256182535917940722>⤵️</emoji> Switched to <code>{args}</code>\n"
                 f"Restarting to apply…",
             )
             try:
@@ -1051,7 +1051,7 @@ class UpdaterMod(loader.Module):
             logger.exception("branch switch failed")
             await utils.answer(
                 message,
-                f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
+                f"<emoji document_id=5237898864433837164>👎</emoji> Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
             )
 
 
@@ -1068,7 +1068,7 @@ class UpdaterMod(loader.Module):
         except Exception:
             pass
         lines = [
-            "<b>✨ Beta access</b>",
+            "<b><emoji document_id=5283176512747507510>✨</emoji> Beta access</b>",
             "",
             "<b>GitHub</b> <code>assets/beta_users.txt</code>:",
         ]
@@ -1103,7 +1103,7 @@ class UpdaterMod(loader.Module):
         if not uid:
             await utils.answer(
                 message,
-                "❌ Reply / ID\n\n"
+                "<emoji document_id=5237898864433837164>👎</emoji> Reply / ID\n\n"
                 "<b>Main list:</b> edit on GitHub\n"
                 "<code>assets/beta_users.txt</code>",
             )
@@ -1114,7 +1114,7 @@ class UpdaterMod(loader.Module):
             self.config["beta_users"] = cur
         await utils.answer(
             message,
-            f"✅ Local beta for <code>{uid}</code>\n"
+            f"<emoji document_id=5256182535917940722>⤵️</emoji> Local beta for <code>{uid}</code>\n"
             f"Prefer adding ID to GitHub <code>assets/beta_users.txt</code> "
             f"so all installs see it.",
         )
@@ -1133,7 +1133,7 @@ class UpdaterMod(loader.Module):
             reply = await message.get_reply_message()
             uid = reply.sender_id if reply else None
         if not uid:
-            await utils.answer(message, "❌ Reply to user or pass numeric ID")
+            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Reply to user or pass numeric ID")
             return
         cur = [int(x) for x in (self.config.get("beta_users") or [])]
         if uid in cur:
@@ -1141,7 +1141,7 @@ class UpdaterMod(loader.Module):
             self.config["beta_users"] = cur
         await utils.answer(
             message,
-            f"✅ Local beta revoked for <code>{uid}</code>\n"
+            f"<emoji document_id=5256182535917940722>⤵️</emoji> Local beta revoked for <code>{uid}</code>\n"
             f"GitHub list is separate — edit <code>assets/beta_users.txt</code> there.",
         )
 
@@ -1209,7 +1209,7 @@ class UpdaterMod(loader.Module):
                     self.tg_id,
                     self.strings.get(
                         "update_auto_rollback",
-                        "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
+                        "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
                     ).format(sha=(old or "?")[:7]),
                 )
         else:
@@ -1496,14 +1496,14 @@ class UpdaterMod(loader.Module):
                     message,
                     self.strings.get(
                         "rollback_version_not_found",
-                        f"🚫 <b>Version</b> <code>{args}</code> <b>not found in git history</b>",
+                        f"<emoji document_id=5240241223632954241>🚫</emoji> <b>Version</b> <code>{args}</code> <b>not found in git history</b>",
                     ),
                 )
                 return
             target = ("sha", sha, args)
             confirm = self.strings.get(
                 "rollback_confirm_ver",
-                "⚠️ <b>Rollback to version</b> <code>{ver}</code> (<code>{sha}</code>)?",
+                "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Rollback to version</b> <code>{ver}</code> (<code>{sha}</code>)?",
             ).format(ver=args, sha=sha[:7])
         elif args.isdigit():
             n = int(args)
@@ -1522,20 +1522,20 @@ class UpdaterMod(loader.Module):
             reply_markup=[
                 [
                     {
-                        "text": "✅",
+                        "text": "⤵️",
                         "callback": self.rollback_confirm,
                         "args": [target[0], target[1], target[2]],
                         "style": "success",
                     }
                 ],
-                [{"text": "❌", "action": "close", "style": "danger"}],
+                [{"text": "👎", "action": "close", "style": "danger"}],
             ],
         )
 
     async def rollback_confirm(self, call: InlineCall, mode: str, value, label: str):
         await utils.answer(
             call,
-            self.strings.get("rollback_process", "⏳ Rollback…").format(num=label),
+            self.strings.get("rollback_process", "<emoji document_id=5386367538735104399>⌛</emoji> Rollback…").format(num=label),
         )
         utils.ensure_child_watcher()
         if mode == "commits":
@@ -1577,12 +1577,12 @@ class UpdaterMod(loader.Module):
             reply_markup=[
                 [
                     {
-                        "text": "✅",
+                        "text": "⤵️",
                         "callback": self.ubstop_func,
                         "style": "primary",
                     },
                 ],
-                [{"text": "❌", "action": "close", "style": "primary"}],
+                [{"text": "👎", "action": "close", "style": "primary"}],
             ],
             silent=True,
         )

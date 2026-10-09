@@ -202,7 +202,7 @@ class List(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.hikkari_me.premium
-                        else "✨"
+                        else "<emoji document_id=5283176512747507510>✨</emoji>"
                     )
                     + self.translator.getkey("inline.opening_list"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -330,7 +330,7 @@ class List(InlineUnit):
                 unit_id=unit_id,
             )
             + [[{
-                "text": "🔻 Close",
+                "text": "⬇️ Close",
                 "callback": callback,
                 "args": ("close",),
                 "disable_security": True,
@@ -346,7 +346,7 @@ class List(InlineUnit):
             ):
                 try:
                     caption = (
-                        "✨"
+                        "<emoji document_id=5283176512747507510>✨</emoji>"
                         if unit.get("premium_emoji_pre_edit")
                         else self.sanitise_text(unit["strings"][0])
                     )

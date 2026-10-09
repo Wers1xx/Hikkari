@@ -196,7 +196,7 @@ class Translations(loader.Module):
             "🇪🇸": "<tg-emoji emoji-id=6323315062379382237>🇪🇸</tg-emoji>",
             "🇹🇷": "<tg-emoji emoji-id=6321003171678259486>🇹🇷</tg-emoji>",
             "🇰🇿": "<tg-emoji emoji-id=5228718354658769982>🇰🇿</tg-emoji>",
-            "🥟": "<tg-emoji emoji-id=5382337996123020810>🥟</tg-emoji>",
+            "<emoji document_id=5381973718471828203>😄</emoji>": "<tg-emoji emoji-id=5382337996123020810>🥟</tg-emoji>",
             "🇯🇵": "<tg-emoji emoji-id=5456261908069885892>🇯🇵</tg-emoji>",
             "🇫🇷": "<tg-emoji emoji-id=5202132623060640759>🇫🇷</tg-emoji>",
             "🏴‍☠️": "<tg-emoji emoji-id=5386372293263892965>🏴‍☠️</tg-emoji>",
@@ -204,7 +204,7 @@ class Translations(loader.Module):
 
         lang2country = {
             "en": "🇬🇧",
-            "tt": "🥟",
+            "tt": "<emoji document_id=5381973718471828203>😄</emoji>",
             "kz": "🇰🇿",
             "uk": "🇺🇦",
             "ua": "🇺🇦",

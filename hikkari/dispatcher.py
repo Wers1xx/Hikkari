@@ -238,9 +238,9 @@ class CommandDispatcher:
             )
 
             if res:
-                text = f"<i>💬 Lines that {cont}:</i>\n" + "\n".join(res)
+                text = f"<i><emoji document_id=5891243564309942507>💬</emoji> Lines that {cont}:</i>\n" + "\n".join(res)
             else:
-                text = f"💬 <i>No lines that {cont}</i>"
+                text = f"<emoji document_id=5891243564309942507>💬</emoji> <i>No lines that {cont}</i>"
 
             return text
 

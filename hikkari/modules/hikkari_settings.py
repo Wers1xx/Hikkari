@@ -414,7 +414,7 @@ class HikkariSettingsMod(loader.Module):
             [
                 (
                     {
-                        "text": "✅ NoNick",
+                        "text": "⤵️ NoNick",
                         "callback": self.inline__setting,
                         "args": (
                             "no_nickname",
@@ -433,7 +433,7 @@ class HikkariSettingsMod(loader.Module):
                 ),
                 (
                     {
-                        "text": "✅ Grep",
+                        "text": "⤵️ Grep",
                         "callback": self.inline__setting,
                         "args": (
                             "grep",
@@ -452,7 +452,7 @@ class HikkariSettingsMod(loader.Module):
                 ),
                 (
                     {
-                        "text": "✅ InlineLogs",
+                        "text": "⤵️ InlineLogs",
                         "callback": self.inline__setting,
                         "args": (
                             "inlinelogs",
@@ -600,7 +600,7 @@ class HikkariSettingsMod(loader.Module):
                 break
         lines = [
             "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> <b>Proxy status</b>",
-            f"📁 file: <code>{utils.escape_html(mask_proxy(file_cfg))}</code>",
+            f"<emoji document_id=5877332341331857066>📁</emoji> file: <code>{utils.escape_html(mask_proxy(file_cfg))}</code>",
             f"🌐 env: <code>{utils.escape_html(env or 'off')}</code>",
             "",
             f"<code>{utils.escape_html(self.get_prefix())}setproxy</code> — set",

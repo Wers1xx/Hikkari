@@ -61,7 +61,7 @@ class TestMod(loader.Module):
                 "force_send_all",
                 False,
                 (
-                    "⚠️ Do not touch, if you don't know what it does!\nBy default, "
+                    "<emoji document_id=5447644880824181073>⚠️</emoji> Do not touch, if you don't know what it does!\nBy default, "
                     " Hikkari will try to determine, which client caused logs. E.g. there"
                     " is a module TestModule installed on Client1 and TestModule2 on"
                     " Client2. By default, Client2 will get logs from TestModule2, and"
@@ -76,7 +76,7 @@ class TestMod(loader.Module):
                 "tglog_level",
                 "ERROR",
                 (
-                    "⚠️ Do not touch, if you don't know what it does!\n"
+                    "<emoji document_id=5447644880824181073>⚠️</emoji> Do not touch, if you don't know what it does!\n"
                     "Minimal loglevel for records to be sent in Telegram."
                 ),
                 validator=loader.validators.Choice(
@@ -121,7 +121,7 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "ping_emoji",
-                "✨",
+                "<emoji document_id=5283176512747507510>✨</emoji>",
                 lambda: self.strings["ping_emoji"],
                 validator=loader.validators.String(),
             ),
@@ -213,12 +213,12 @@ class TestMod(loader.Module):
                                     "args": (False, level),
                                 }
                                 for name, level in [
-                                    ("🚫 Critical", 60),
-                                    ("🚫 Error", 40),
-                                    ("⚠️ Warning", 30),
-                                    ("ℹ️ Info", 20),
-                                    ("⚠️ Debug", 10),
-                                    ("🧑‍💻 All", 0),
+                                    ("<emoji document_id=5240241223632954241>🚫</emoji> Critical", 60),
+                                    ("<emoji document_id=5240241223632954241>🚫</emoji> Error", 40),
+                                    ("<emoji document_id=5447644880824181073>⚠️</emoji> Warning", 30),
+                                    ("<emoji document_id=5334544901428229844>ℹ️</emoji> Info", 20),
+                                    ("<emoji document_id=5447644880824181073>⚠️</emoji> Debug", 10),
+                                    ("<emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍<emoji document_id=5282843764451195532>🖥</emoji> All", 0),
                                 ]
                             ],
                             2,

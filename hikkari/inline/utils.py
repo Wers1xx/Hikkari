@@ -277,7 +277,7 @@ class Utils(InlineUnit):
             with contextlib.suppress(Exception):
                 await self._bot_client.edit_message(
                     inline_msg_id,
-                    "✖️",
+                    "<emoji document_id=5985346521103604145>❌</emoji>️",
                     parse_mode="HTML",
                     buttons=None,
                     link_preview=False,
@@ -286,7 +286,7 @@ class Utils(InlineUnit):
         if not cleared:
             with contextlib.suppress(Exception):
                 if hasattr(call, "edit"):
-                    await call.edit("✖️", reply_markup=None)
+                    await call.edit("<emoji document_id=5985346521103604145>❌</emoji>️", reply_markup=None)
                     cleared = True
 
         # B) Delete message via bot

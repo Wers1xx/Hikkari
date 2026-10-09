@@ -89,35 +89,35 @@ def get_named_platform_emoji() -> str:
             with open("/proc/device-tree/model") as f:
                 model = f.read()
                 if "Orange" in model:
-                    return "🍊 "
+                    return "<emoji document_id=5242197817459494910>🍊</emoji> "
 
                 if "Raspberry" in model:
-                    return "🍇 "
+                    return "<emoji document_id=5346099823743346885>🍇</emoji> "
                 else:
                     return "?"
 
     match True:
 
         case _ if IS_WSL:
-            return "🍀 "
+            return "<emoji document_id=5794422138031055619>🍀</emoji> "
 
         case _ if IS_WINDOWS:
-            return "💻 "
+            return "<emoji document_id=5282843764451195532>🖥</emoji> "
 
         case _ if IS_MACOS:
-            return "🍏 "
+            return "<emoji document_id=5935989710420709120>🍎</emoji> "
 
         case _ if IS_USERLAND:
-            return "🐧 "
+            return "<emoji document_id=5361541227604878624>🐧</emoji> "
 
         case _ if IS_HIKKAHOST:
-            return "🌼 "
+            return "<emoji document_id=5370731117588523522>🌼</emoji> "
 
         case _ if IS_DOCKER:
-            return "🐳 "
+            return "<emoji document_id=5431815452437257407>🐳</emoji> "
 
         case _:
-            return "💎 "
+            return "<emoji document_id=5427168083074628963>💎</emoji> "
 
 
 def get_platform_emoji() -> str:
@@ -125,7 +125,7 @@ def get_platform_emoji() -> str:
     Returns Hikkari brand custom emoji row (start / restart / banners).
     :return: Emoji entity in string
     """
-    # Fixed ✨ set (replaces old 🪐 quartet)
+    # Fixed <emoji document_id=5283176512747507510>✨</emoji> set (replaces old 🪐 quartet)
     return (
         "<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji>"
         "<tg-emoji emoji-id=5344055625468914277>✨</tg-emoji>"

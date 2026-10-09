@@ -486,7 +486,7 @@ class LoaderMod(loader.Module):
                     batch: list[dict] = []
                     await utils.answer(
                         message,
-                        f"⏳ Installing <b>{len(args)}</b> modules…",
+                        f"<emoji document_id=5386367538735104399>⌛</emoji> Installing <b>{len(args)}</b> modules…",
                         skip_rich=True,
                     )
                     for arg in args:
@@ -514,12 +514,12 @@ class LoaderMod(loader.Module):
                             )
                     if not await self._rich_batch_loaded(message, batch):
                         text = (
-                            f"✅ Installed <b>{len(args) - len(not_installed)}"
+                            f"<emoji document_id=5256182535917940722>⤵️</emoji> Installed <b>{len(args) - len(not_installed)}"
                             f"/{len(args)}</b>"
                         )
                         if not_installed:
                             text += (
-                                "\n\n❌ <code>"
+                                "\n\n<emoji document_id=5237898864433837164>👎</emoji> <code>"
                                 + "</code>, <code>".join(
                                     utils.escape_html(str(x)) for x in not_installed
                                 )
@@ -578,7 +578,7 @@ class LoaderMod(loader.Module):
         buttons.append(
             [
                 {
-                    "text": "🔻 Close",
+                    "text": "⬇️ Close",
                     "action": "close",
                 }
             ]
@@ -829,7 +829,7 @@ class LoaderMod(loader.Module):
             message,
             self.strings["loading_module_via_file"]
             if len(files) == 1
-            else f"⏳ Installing <b>{len(files)}</b> modules…",
+            else f"<emoji document_id=5386367538735104399>⌛</emoji> Installing <b>{len(files)}</b> modules…",
             skip_rich=True,
         )
 
@@ -868,7 +868,7 @@ class LoaderMod(loader.Module):
                 ok_n = sum(1 for r in batch if r.get("ok"))
                 await utils.answer(
                     message,
-                    f"✅ Installed <b>{ok_n}/{len(batch)}</b> modules",
+                    f"<emoji document_id=5256182535917940722>⤵️</emoji> Installed <b>{ok_n}/{len(batch)}</b> modules",
                     skip_rich=True,
                 )
 
@@ -887,7 +887,7 @@ class LoaderMod(loader.Module):
 
         await call.edit(
             (
-                "💫 <b>Joined <a"
+                "<emoji document_id=5294430452344434288>😵‍💫</emoji> <b>Joined <a"
                 f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
             ),
         )
@@ -1200,7 +1200,7 @@ class LoaderMod(loader.Module):
                 with contextlib.suppress(Exception):
                     await utils.answer(
                         message,
-                        f"❌ <b>Модуль невалиден:</b> <code>{utils.escape_html(verr)}</code>",
+                        f"<emoji document_id=5237898864433837164>👎</emoji> <b>Модуль невалиден:</b> <code>{utils.escape_html(verr)}</code>",
                     )
             return False
 
@@ -2030,7 +2030,7 @@ class LoaderMod(loader.Module):
                         + [
                             [
                                 {
-                                    "text": self.strings["cancel"].replace("🚫", "❌"),
+                                    "text": self.strings["cancel"].replace("🚫", "👎"),
                                     "action": "close",
                                 }
                             ]
@@ -2046,8 +2046,8 @@ class LoaderMod(loader.Module):
             msg = ""
             for module in modules:
                 status = await self.unload_module(module)
-                if "❌" in status or "🚫" in status or "😖" in status:
-                    if "💡" in status:
+                if "<emoji document_id=5237898864433837164>👎</emoji>" in status or "<emoji document_id=5240241223632954241>🚫</emoji>" in status or "😖" in status:
+                    if "<emoji document_id=5422439311196834318>💡</emoji>" in status:
                         status = status.split("<code>")[0]
 
                     errors.append(f"<code>{module}</code> — {status}")
@@ -2460,7 +2460,7 @@ class LoaderMod(loader.Module):
         if not module_data:
             await utils.answer(
                 message,
-                "🚫 <b>Source not available for this module</b>\n"
+                "<emoji document_id=5240241223632954241>🚫</emoji> <b>Source not available for this module</b>\n"
                 "<i>Module was loaded without retained source.</i>",
             )
             return

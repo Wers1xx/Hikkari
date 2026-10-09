@@ -60,7 +60,7 @@ class Evaluator(loader.Module):
         def set(self, *args, **kwargs):
             if len(args) >= 2 and args[0] == "hikkari.security" and args[1] == "owner":
                 raise ValueError(
-                    "⚠️ Security Protection: You cannot change the bot owner via evaluator."
+                    "<emoji document_id=5447644880824181073>⚠️</emoji> Security Protection: You cannot change the bot owner via evaluator."
                 )
 
             return self._db.set(*args, **kwargs)
@@ -105,7 +105,7 @@ class Evaluator(loader.Module):
         if not (args or "").strip():
             await utils.answer(
                 message,
-                "💻 <b>Eval</b>\n"
+                "<emoji document_id=5282843764451195532>🖥</emoji> <b>Eval</b>\n"
                 "<code>.e &lt;python&gt;</code> or reply to a message with code.\n"
                 "Vars: <code>c</code>/<code>client</code>, <code>m</code>/<code>message</code>, "
                 "<code>r</code>/<code>reply</code>, <code>db</code>, <code>utils</code>",
@@ -141,7 +141,7 @@ class Evaluator(loader.Module):
                 "r." in args or "reply." in args
             ):
                 extra_hint = (
-                    "\n\n💡 <b>Hint:</b> <code>r</code>/<code>reply</code> is "
+                    "\n\n<emoji document_id=5422439311196834318>💡</emoji> <b>Hint:</b> <code>r</code>/<code>reply</code> is "
                     "<code>None</code> — reply to a message when using them."
                 )
 
@@ -155,7 +155,7 @@ class Evaluator(loader.Module):
                     self.censor(
                         "\n".join(item.full_stack.splitlines()[:-1])
                         + "\n\n"
-                        + "🚫 "
+                        + "<emoji document_id=5240241223632954241>🚫</emoji> "
                         + item.full_stack.splitlines()[-1]
                     ),
                 )

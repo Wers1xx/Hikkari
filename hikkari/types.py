@@ -155,7 +155,7 @@ class Module:
         - Create asset folder
         - ...
 
-        ⚠️ Note, that any error there will not interrupt module load, and will just
+        <emoji document_id=5447644880824181073>⚠️</emoji> Note, that any error there will not interrupt module load, and will just
         send a message to logs with verbosity INFO and exception traceback
         """
 
@@ -346,7 +346,7 @@ class Module:
         event.set()
         await call.edit(
             (
-                "✖️ <b>Declined joining <a"
+                "<emoji document_id=5985346521103604145>❌</emoji>️ <b>Declined joining <a"
                 f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
             ),
         )
@@ -362,8 +362,8 @@ class Module:
         :param peer: The channel to join.
         :param reason: The reason for joining.
         :param assure_joined: If set, module will not be loaded unless the required channel is joined.
-                              ⚠️ Works only in `client_ready`!
-                              ⚠️ If user declines to join channel, he will not be asked to
+                              <emoji document_id=5447644880824181073>⚠️</emoji> Works only in `client_ready`!
+                              <emoji document_id=5447644880824181073>⚠️</emoji> If user declines to join channel, he will not be asked to
                               join again, so unless he joins it manually, module will not be loaded
                               ever.
         :return: Status of the request.
@@ -423,12 +423,12 @@ class Module:
             reply_markup=self.inline.generate_markup(
                 [
                     {
-                        "text": "💫 Approve",
+                        "text": "😵‍💫 Approve",
                         "callback": self.lookup("LoaderMod").approve_internal,
                         "args": (channel, event),
                     },
                     {
-                        "text": "✖️ Decline",
+                        "text": "❌️ Decline",
                         "callback": self._decline,
                         "args": (channel, event),
                     },

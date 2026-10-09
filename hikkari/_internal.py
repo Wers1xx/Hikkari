@@ -68,7 +68,7 @@ def restart():
 
     logging.getLogger().setLevel(logging.CRITICAL)
 
-    print("🔄 Restarting...")
+    print("<emoji document_id=5258200195589504369>🔄</emoji> Restarting...")
 
     # Fast-path flags for the next process
     os.environ["HIKKARI_FAST_START"] = "1"

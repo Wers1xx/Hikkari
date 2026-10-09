@@ -147,7 +147,7 @@ class HikkariSecurityMod(loader.Module):
         await call.edit(
             self.strings["querysec_info"],
             reply_markup={
-                "text": "❌" if query else "✅",
+                "text": "👎" if query else "⤵️",
                 "callback": self.inline__switch_perm_inline_query,
             },
         )
@@ -162,7 +162,7 @@ class HikkariSecurityMod(loader.Module):
             utils.chunks(
                 [
                     {
-                        "text": f"{'✅' if level else '🚫'} {self.strings[group]}",
+                        "text": f"{'⤵️' if level else '🚫'} {self.strings[group]}",
                         "callback": self.inline__switch_perm,
                         "args": (
                             command.__name__.rsplit("_inline_handler", maxsplit=1)[0],
@@ -180,7 +180,7 @@ class HikkariSecurityMod(loader.Module):
             else utils.chunks(
                 [
                     {
-                        "text": f"{'✅' if level else '🚫'} {self.strings[group]}",
+                        "text": f"{'⤵️' if level else '🚫'} {self.strings[group]}",
                         "callback": self.inline__switch_perm,
                         "args": (
                             command.__name__.rsplit("cmd", maxsplit=1)[0],
@@ -210,7 +210,7 @@ class HikkariSecurityMod(loader.Module):
         return utils.chunks(
             [
                 {
-                    "text": f"{'✅' if level else '🚫'} {self.strings[group]}",
+                    "text": f"{'⤵️' if level else '🚫'} {self.strings[group]}",
                     "callback": self.inline__switch_perm_bm,
                     "args": (group, not level, is_inline),
                 }
@@ -526,7 +526,7 @@ class HikkariSecurityMod(loader.Module):
         await self.inline.form(
             self.strings["querysec_info"],
             reply_markup={
-                "text": "✅" if query else "❌",
+                "text": "⤵️" if query else "👎",
                 "callback": self.inline__switch_perm_inline_query,
             },
             message=message,
@@ -969,7 +969,7 @@ class HikkariSecurityMod(loader.Module):
                 message=message,
                 text=self.strings["multiple_rules"].format(
                     "\n".join(
-                        "🛡 <b>{}</b> <code>{}</code>".format(
+                        "<emoji document_id=5778423822940114949>🛡</emoji> <b>{}</b> <code>{}</code>".format(
                             self.strings[rule.split("/")[0]].capitalize(),
                             rule.split("/", maxsplit=1)[1],
                         )
@@ -1017,7 +1017,7 @@ class HikkariSecurityMod(loader.Module):
                 message=message,
                 text=self.strings["multiple_rules"].format(
                     "\n".join(
-                        "🛡 <b>{}</b> <code>{}</code>".format(
+                        "<emoji document_id=5778423822940114949>🛡</emoji> <b>{}</b> <code>{}</code>".format(
                             self.strings[rule.split("/")[0]].capitalize(),
                             rule.split("/", maxsplit=1)[1],
                         )
@@ -1090,7 +1090,7 @@ class HikkariSecurityMod(loader.Module):
                 message=message,
                 text=self.strings["multiple_rules"].format(
                     "\n".join(
-                        "🛡 <b>{}</b> <code>{}</code>".format(
+                        "<emoji document_id=5778423822940114949>🛡</emoji> <b>{}</b> <code>{}</code>".format(
                             self.strings[rule.split("/")[0]].capitalize(),
                             rule.split("/", maxsplit=1)[1],
                         )

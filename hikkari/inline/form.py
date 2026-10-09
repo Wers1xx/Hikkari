@@ -1,3 +1,4 @@
+from ..utils.emoji_prem import prem_btn_text
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -45,16 +46,16 @@ logger = logging.getLogger(__name__)
 
 VERIFICATION_EMOJIES = list(
     grapheme.graphemes(
-        "👨‍🏫👩‍🏫👨‍🎤🧑‍🎤👩‍🎤👨‍🎓👩‍🎓👩‍🍳👩‍🌾👩‍⚕️🕵️‍♀️💂‍♀️👷‍♂️👮‍♂️👴🧑‍🦳👩‍🦳👱‍♀️👩‍🦰👨‍🦱👩‍⚖️🧙‍♂️🧝‍♀️🧛‍♀️"
+        "👨‍🏫👩‍🏫👨‍🎤<emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍🎤👩‍🎤👨‍<emoji document_id=5296631769112525274>🎩</emoji>👩‍<emoji document_id=5296631769112525274>🎩</emoji>👩‍🍳👩‍🌾👩‍⚕️🕵️‍♀️💂‍♀️👷‍♂️👮‍♂️👴<emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍🦳👩‍🦳👱‍♀️👩‍🦰👨‍🦱👩‍⚖️🧙‍♂️🧝‍♀️🧛‍♀️"
         "🎅🧚‍♂️🙆‍♀️🙍‍♂️👩‍👦🧶🪢🪡🧵🩲👖👕👚🦺👗👙🩱👘🥻🩴🥿🧦🥾👟👞"
         "👢👡👠🪖👑💍👝👛👜💼🌂🥽🕶👓🧳🎒🐶🐱🐭🐹🐰🦊🐻🐷🐮"
-        "🦁🐯🐨🐻‍❄️🐼🐽🐸🐵🙈🙉🙊🐒🦆🐥🐣🐤🐦🐧🐔🦅🦉🦇🐺🐗🐴"
+        "🦁🐯🐨🐻‍<emoji document_id=5449449325434266744>❄️</emoji>🐼🐽🐸🐵🙈🙉🙊🐒🦆🐥🐣🐤🐦<emoji document_id=5361541227604878624>🐧</emoji>🐔🦅🦉🦇🐺🐗🐴"
         "🦄🐜🐞🐌🦋🐛🪱🐝🪰🪲🪳🦟🦗🕷🕸🐙🦕🦖🦎🐍🐢🦂🦑🦐🦞"
-        "🦀🐡🐠🐟🐅🐊🦭🦈🐋🐳🐬🐆🦓🦍🦧🦣🐘🦛🐃🦬🦘🦒🐫🐪🦏"
+        "🦀🐡🐠🐟🐅🐊🦭🦈🐋<emoji document_id=5431815452437257407>🐳</emoji>🐬🐆🦓🦍🦧🦣🐘🦛🐃🦬🦘🦒🐫🐪🦏"
         "🐂🐄🐎🐖🐏🐑🦙🐈🐕‍🦺🦮🐩🐕🦌🐐🐈‍⬛🪶🐓🦃🦤🦚🦜🦡🦨🦝🐇"
         "🕊🦩🦢🦫🦦🦥🐁🐀🐿🦔🌳🌲🌵🐲🐉🐾🎋🍂🍁🍄🐚🌾🪨💐🌷"
-        "🥀🌺🌸🌻🌞🌜🌘🌗🌎✨💫⭐️✨⚡️☄️💥☀️🌪🔥🌈🌤⛅️❄️⛄️🌊"
-        "☂️🍏🍎🍐🍊🍋🍌🍉🥭🍑🍒🍈🫐🍓🍇🍍🥥🥝🍅🥑🥦🧔‍♂️"
+        "🥀🌺🌸🌻🌞🌜🌘🌗🌎<emoji document_id=5283176512747507510>✨</emoji><emoji document_id=5294430452344434288>😵‍💫</emoji><emoji document_id=5438496463044752972>⭐️</emoji><emoji document_id=5283176512747507510>✨</emoji><emoji document_id=5456140674028019486>⚡️</emoji>☄️💥☀️🌪<emoji document_id=5424972470023104089>🔥</emoji>🌈🌤⛅️<emoji document_id=5449449325434266744>❄️</emoji>⛄️🌊"
+        "☂️<emoji document_id=5935989710420709120>🍎</emoji><emoji document_id=5935989710420709120>🍎</emoji>🍐<emoji document_id=5242197817459494910>🍊</emoji>🍋🍌🍉🥭🍑🍒🍈🫐🍓<emoji document_id=5346099823743346885>🍇</emoji>🍍🥥🥝🍅🥑🥦🧔‍♂️"
     )
 )
 
@@ -108,7 +109,7 @@ class Form(InlineUnit):
         :param video: Attach a video to the form. URL must be supplied
         :param location: Attach a map point to the form. List/tuple must be supplied (latitude, longitude)
                          Example: (55.749931, 48.742371)
-                         ⚠️ If you pass this parameter, you'll need to pass empty string to `text` ⚠️
+                         <emoji document_id=5447644880824181073>⚠️</emoji> If you pass this parameter, you'll need to pass empty string to `text` <emoji document_id=5447644880824181073>⚠️</emoji>
         :param audio: Attach a audio to the form. Dict or URL must be supplied
         :param silent: Whether the form must be sent silently (w/o "Opening form..." message)
         :return: If form is sent, returns :obj:`InlineMessage`, otherwise returns `False`
@@ -286,7 +287,7 @@ class Form(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.hikkari_me.premium
-                        else "✨"
+                        else "<emoji document_id=5283176512747507510>✨</emoji>"
                     )
                     + self.translator.getkey("inline.opening_form"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -495,12 +496,12 @@ class Form(InlineUnit):
                 # Same hk|uid|p|N callbacks — events.py answers + editMessageText(rich).
                 nav_row = []
                 if cur > 0:
-                    nav_row.append({"text": "◀", "data": f"hk|{unit_id}|p|{cur - 1}"})
+                    nav_row.append({"text": "◀️", "data": f"hk|{unit_id}|p|{cur - 1}"})
                 nav_row.append(
                     {"text": f"{cur + 1}/{len(page_list)}", "data": f"hk|{unit_id}|p|{cur}"}
                 )
                 if cur < len(page_list) - 1:
-                    nav_row.append({"text": "▶", "data": f"hk|{unit_id}|p|{cur + 1}"})
+                    nav_row.append({"text": "▶️", "data": f"hk|{unit_id}|p|{cur + 1}"})
                 markup = [nav_row] + (markup or [])
             else:
                 # URL / custom buttons only → official in-body <tg-button-row>
@@ -543,7 +544,7 @@ class Form(InlineUnit):
                         utils.get_platform_emoji()
                         if getattr(self._client, "hikkari_me", None)
                         and self._client.hikkari_me.premium
-                        else "✨"
+                        else "<emoji document_id=5283176512747507510>✨</emoji>"
                     )
                     + " <i>Opening rich…</i>",
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -624,11 +625,11 @@ class Form(InlineUnit):
                                     )
                                 ),
                                 text=(
-                                    "🔄 <b>Transferring value to"
+                                    "<emoji document_id=5258200195589504369>🔄</emoji> <b>Transferring value to"
                                     " userbot...</b>\n<i>This message will be"
                                     " deleted automatically</i>"
                                     if inline_query.from_user.id == self._me
-                                    else "🔄 <b>Transferring value to userbot...</b>"
+                                    else "<emoji document_id=5258200195589504369>🔄</emoji> <b>Transferring value to userbot...</b>"
                                 ),
                                 parse_mode="HTML",
                                 link_preview=False,
@@ -673,10 +674,10 @@ class Form(InlineUnit):
                                 if not isinstance(btn, dict):
                                     continue
                                 if btn.get("url"):
-                                    r.append({"text": btn.get("text", "•"), "url": btn["url"]})
+                                    r.append({"text": prem_btn_text(btn.get("text", "•")), "url": btn["url"]})
                                 elif btn.get("data") or btn.get("callback"):
                                     r.append({
-                                        "text": btn.get("text", "•"),
+                                        "text": prem_btn_text(btn.get("text", "•")),
                                         "callback_data": str(btn.get("data") or "noop")[:64],
                                     })
                             if r:
@@ -706,7 +707,7 @@ class Form(InlineUnit):
                     self._error_events[form["uid"]] = e
                 return
 
-        form_text = form.get("text") or "✨"
+        form_text = form.get("text") or "<emoji document_id=5283176512747507510>✨</emoji>"
 
         try:
             match True:

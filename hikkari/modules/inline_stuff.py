@@ -40,7 +40,7 @@ class InlineStuff(loader.Module):
         """Soft restart without requiring RestartMod."""
         if message is not None:
             with contextlib.suppress(Exception):
-                await utils.answer(message, "🔄 <b>Restarting…</b>")
+                await utils.answer(message, "<emoji document_id=5258200195589504369>🔄</emoji> <b>Restarting…</b>")
         # database.save() is SYNC — must not await
         with contextlib.suppress(Exception):
             if hasattr(self, "_db") and hasattr(self._db, "save"):
@@ -194,7 +194,7 @@ class InlineStuff(loader.Module):
             prefix = self.get_prefix()
             await utils.answer(
                 message,
-                "⚠️ <b>Не удалось создать бота через @BotFather</b>\n"
+                "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Не удалось создать бота через @BotFather</b>\n"
                 "(SpamBan / лимит ботов / ошибка диалога).\n\n"
                 f"Создай бота вручную в @BotFather и укажи токен:\n"
                 f"<code>{prefix}ch_bot_token &lt;token&gt;</code>",
@@ -205,7 +205,7 @@ class InlineStuff(loader.Module):
             prefix = self.get_prefix()
             await utils.answer(
                 message,
-                f"⚠️ <b>Ошибка создания бота:</b> "
+                f"<emoji document_id=5447644880824181073>⚠️</emoji> <b>Ошибка создания бота:</b> "
                 f"<code>{utils.escape_html(str(e)[:200])}</code>\n\n"
                 f"Укажи токен вручную: <code>{prefix}ch_bot_token &lt;token&gt;</code>",
             )

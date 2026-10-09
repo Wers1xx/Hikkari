@@ -1,3 +1,24 @@
+from .emoji_prem import prem_btn_text
+
+def _sanitize_markup_emojis(markup):
+    """Button text must be plain unicode — premium HTML is for message body only."""
+    if markup is None:
+        return markup
+    try:
+        if isinstance(markup, dict):
+            out = dict(markup)
+            if isinstance(out.get("text"), str):
+                out["text"] = prem_btn_text(out["text"])
+            for k, v in list(out.items()):
+                if isinstance(v, (dict, list)):
+                    out[k] = _sanitize_markup_emojis(v)
+            return out
+        if isinstance(markup, list):
+            return [_sanitize_markup_emojis(x) for x in markup]
+    except Exception:
+        return markup
+    return markup
+
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -61,7 +82,7 @@ except Exception:  # pragma: no cover
         return t
     def is_rich_enabled(db=None):
         return True
-    RICH_STAR = '✨'
+    RICH_STAR = '<emoji document_id=5283176512747507510>✨</emoji>'
 
 
 def get_topic(message: Message) -> int | None:
@@ -344,12 +365,12 @@ async def answer(
                 return
 
             reply_markup = message.client.loader.inline._normalize_markup(reply_markup)
-            # Prefer silent form: avoid ✨ "opening..." hang; delete cmd after click
+            # Prefer silent form: avoid <emoji document_id=5283176512747507510>✨</emoji> "opening..." hang; delete cmd after click
             kwargs.setdefault("silent", True)
             result = await message.client.loader.inline.form(
                 response,
                 message=message if message.out else get_chat_id(message),
-                reply_markup=reply_markup,
+                reply_markup=_sanitize_markup_emojis(reply_markup),
                 **kwargs,
             )
             return result
@@ -459,14 +480,14 @@ async def answer(
                 invert_media = False
 
         if file is not None and invert_media:
-            # ✨ bootstrap → edit(text+file, invert). On any failure restore full text+media.
+            # <emoji document_id=5283176512747507510>✨</emoji> bootstrap → edit(text+file, invert). On any failure restore full text+media.
             reply_to = kwargs.pop("reply_to", None)
             extra = {k: v for k, v in kwargs.items() if k != "reply_to"}
             result = None
             try:
                 if edit:
                     with contextlib.suppress(Exception):
-                        await message.edit("✨", link_preview=False)
+                        await message.edit("<emoji document_id=5283176512747507510>✨</emoji>", link_preview=False)
                     try:
                         result = await message.edit(
                             text,
@@ -491,7 +512,7 @@ async def answer(
                             )
                 else:
                     sent = await message.respond(
-                        "✨",
+                        "<emoji document_id=5283176512747507510>✨</emoji>",
                         reply_to=reply_to,
                         link_preview=False,
                     )

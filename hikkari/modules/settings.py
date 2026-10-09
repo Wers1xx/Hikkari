@@ -59,7 +59,7 @@ class CoreMod(loader.Module):
             "<code>&lt;p&gt;…&lt;/p&gt;</code> — paragraph\n"
             "<code>&lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt; &lt;code&gt; &lt;mark&gt;</code>\n"
             "<code>&lt;tg-spoiler&gt;</code> — spoiler\n"
-            "<code>&lt;tg-emoji emoji-id=ID&gt;✨&lt;/tg-emoji&gt;</code>\n"
+            "<code>&lt;tg-emoji emoji-id=ID&gt;<emoji document_id=5283176512747507510>✨</emoji>&lt;/tg-emoji&gt;</code>\n"
             "<code>&lt;blockquote&gt;</code> / expandable attribute\n"
             "<code>&lt;hr/&gt;</code> — divider</blockquote>\n\n"
             "<blockquote expandable><b>6. Table</b>\n"
@@ -100,7 +100,7 @@ class CoreMod(loader.Module):
             "• Max ~32k chars, tables up to 20 columns\n"
             "• Test: <code>{prefix}info</code> <code>{prefix}help</code></blockquote>"
         ),
-        "rich_status_on": "ON ✨",
+        "rich_status_on": "ON <emoji document_id=5283176512747507510>✨</emoji>",
         "rich_status_off": "OFF",
     }
 
@@ -131,7 +131,7 @@ class CoreMod(loader.Module):
             "<code>&lt;p&gt;…&lt;/p&gt;</code> — абзац\n"
             "<code>&lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt; &lt;code&gt; &lt;mark&gt;</code>\n"
             "<code>&lt;tg-spoiler&gt;</code> — спойлер\n"
-            "<code>&lt;tg-emoji emoji-id=ID&gt;✨&lt;/tg-emoji&gt;</code>\n"
+            "<code>&lt;tg-emoji emoji-id=ID&gt;<emoji document_id=5283176512747507510>✨</emoji>&lt;/tg-emoji&gt;</code>\n"
             "<code>&lt;blockquote&gt;</code> / expandable\n"
             "<code>&lt;hr/&gt;</code> — разделитель</blockquote>\n\n"
             "<blockquote expandable><b>6. Таблица</b>\n"
@@ -172,7 +172,7 @@ class CoreMod(loader.Module):
             "• До ~32k символов, таблицы до 20 колонок\n"
             "• Проверка: <code>{prefix}info</code> <code>{prefix}help</code></blockquote>"
         ),
-        "rich_status_on": "ВКЛ ✨",
+        "rich_status_on": "ВКЛ <emoji document_id=5283176512747507510>✨</emoji>",
         "rich_status_off": "ВЫКЛ",
     }
 
@@ -279,7 +279,7 @@ class CoreMod(loader.Module):
                 (
                     utils.get_platform_emoji()
                     if self._client.hikkari_me.premium
-                    else "✨ <b>Hikkari userbot</b>"
+                    else "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari userbot</b>"
                 ),
                 *version.__version__,
                 utils.get_commit_url(),

@@ -805,7 +805,7 @@ class HikkariWebMod(loader.Module):
             if not tok:
                 await utils.answer(
                     status,
-                    "🚫 <b>Нужен ngrok_token</b>\n\n"
+                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>Нужен ngrok_token</b>\n\n"
                     "<code>.cfg HikkariAccounts</code> → <code>ngrok_token</code>\n"
                     "или <code>export NGROK_AUTHTOKEN=…</code>\n"
                     "https://dashboard.ngrok.com",
@@ -832,7 +832,7 @@ class HikkariWebMod(loader.Module):
                 errs = getattr(web, "_tunnel_errors", []) or []
                 await utils.answer(
                     status,
-                    "🚫 <b>ngrok не поднялся</b>\n"
+                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>ngrok не поднялся</b>\n"
                     + ("<code>" + utils.escape_html(" | ".join(errs[:4])) + "</code>" if errs else ""),
                 )
                 return
@@ -841,7 +841,7 @@ class HikkariWebMod(loader.Module):
             await utils.answer(
                 status,
                 "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
-                f'<a href="{href}">✨ WebUI Hikkari</a>\n'
+                f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n'
                 f"<code>{href}</code>\n\n"
                 "<i>ngrok · ~15 мин</i>",
                 parse_mode="HTML",
@@ -876,6 +876,6 @@ class HikkariWebMod(loader.Module):
             logger.exception("weburl")
             await utils.answer(
                 status,
-                f"🚫 <b>WebUI error:</b> <code>{utils.escape_html(str(e))}</code>",
+                f"<emoji document_id=5240241223632954241>🚫</emoji> <b>WebUI error:</b> <code>{utils.escape_html(str(e))}</code>",
             )
 

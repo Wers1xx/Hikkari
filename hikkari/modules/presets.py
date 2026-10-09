@@ -168,7 +168,7 @@ class Presets(loader.Module):
             row = []
             for index, link in mod_row:
                 text = (
-                    f"{('✅ ' if link in to_install else '❌ ')}"
+                    f"{('<emoji document_id=5256182535917940722>⤵️</emoji> ' if link in to_install else '<emoji document_id=5237898864433837164>👎</emoji> ')}"
                     f"{link.rsplit('/', maxsplit=1)[1].split('.')[0]}"
                 )
                 row.append(

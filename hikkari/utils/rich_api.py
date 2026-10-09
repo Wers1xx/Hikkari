@@ -162,7 +162,7 @@ def nav_button_row(
     if page > 0:
         btns.append(
             tg_button(
-                "◀",
+                "<emoji document_id=5255999157994297240>◀️</emoji>",
                 type="callback_data",
                 data=f"{prefix}|{unit_id}|p|{page - 1}",
                 style="primary",
@@ -179,7 +179,7 @@ def nav_button_row(
     if page < total - 1:
         btns.append(
             tg_button(
-                "▶",
+                "<emoji document_id=5256039517801975973>▶️</emoji>",
                 type="callback_data",
                 data=f"{prefix}|{unit_id}|p|{page + 1}",
                 style="primary",

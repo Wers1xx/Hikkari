@@ -192,7 +192,7 @@ class TokenObtainment(InlineUnit):
                 try:
                     await self._client.send_message(
                         "me",
-                        "⚠️ <b>Не удалось создать бота через @BotFather</b>\n"
+                        "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Не удалось создать бота через @BotFather</b>\n"
                         "(часто из‑за SpamBan / лимита на создание ботов).\n\n"
                         "Юзербот продолжит работу <b>без инлайна</b>.\n"
                         f"Укажи токен существующего бота:\n"
@@ -230,7 +230,7 @@ class TokenObtainment(InlineUnit):
             token = None
             # 1) display name  2) username (BotFather returns token here)
             for msg in [
-                "✨ Hikkari userbot"[:64],
+                "<emoji document_id=5283176512747507510>✨</emoji> Hikkari userbot"[:64],
                 username,
             ]:
                 await fw_protect()
@@ -252,7 +252,7 @@ class TokenObtainment(InlineUnit):
                     await self._client.send_message(
                         "me",
                         (
-                            "⚠️ Бот создан, но токен не найден в ответе BotFather.\n"
+                            "<emoji document_id=5447644880824181073>⚠️</emoji> Бот создан, но токен не найден в ответе BotFather.\n"
                             "Открой @BotFather → /token и укажи:\n"
                             "<code>.ch_bot_token &lt;token&gt;</code>"
                         ),
@@ -322,7 +322,7 @@ class TokenObtainment(InlineUnit):
                 await self._client.send_message(
                     "me",
                     (
-                        f"✨ <b>Инлайн-бот создан:</b> {username}\n"
+                        f"<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот создан:</b> {username}\n"
                         "Токен сохранён. После рестарта инлайн будет активен."
                     ),
                     link_preview=False,
@@ -338,7 +338,7 @@ class TokenObtainment(InlineUnit):
             return
         prefix = self._db.get("hikkari.main", "command_prefix", False) or "."
         text = (
-            "✨ <b>Hikkari — Inline bot setup</b>\n\n"
+            "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari — Inline bot setup</b>\n\n"
             "Нужен инлайн-бот для форм, галерей и логов.\n\n"
             f"• <code>{prefix}yesbot</code> — создать нового бота через @BotFather\n"
             f"• <code>{prefix}nobot</code> — пропустить (без инлайна)\n"

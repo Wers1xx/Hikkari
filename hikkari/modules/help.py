@@ -187,8 +187,8 @@ class Help(loader.Module):
             self.strings["hidden_shown"].format(
                 len(hidden),
                 len(shown),
-                "\n".join([f"👁‍🗨 <i>{m}</i>" for m in hidden]),
-                "\n".join([f"👁 <i>{m}</i>" for m in shown]),
+                "\n".join([f"<emoji document_id=5294271804842469571>👁</emoji>‍🗨 <i>{m}</i>" for m in hidden]),
+                "\n".join([f"<emoji document_id=5294271804842469571>👁</emoji> <i>{m}</i>" for m in shown]),
             ),
         )
 
@@ -398,7 +398,7 @@ class Help(loader.Module):
                 if dev_text:
                     # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>🧑‍💻 <b>Developer:</b> "
+                        f"<p><emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍<emoji document_id=5282843764451195532>🖥</emoji> <b>Developer:</b> "
                         f"<code>{html_mod.escape(str(dev_text))}</code></p>"
                     )
                 if getattr(module, "__origin__", "").startswith("<core"):
@@ -406,7 +406,7 @@ class Help(loader.Module):
                         self.strings.get("core_notice"),
                         "Built-in module",
                     )
-                    parts.append(f"<p>🛡 {html_mod.escape(core_n)}</p>")
+                    parts.append(f"<p><emoji document_id=5778423822940114949>🛡</emoji> {html_mod.escape(core_n)}</p>")
 
                 # Meta banner of THIS module first, then Help config banner
                 meta_b = None
@@ -605,10 +605,10 @@ class Help(loader.Module):
 
             for cmd in icommands:
                 if first:
-                    tmp += f": ( 🤖 {cmd}"
+                    tmp += f": ( <emoji document_id=5985780596268339498>🤖</emoji> {cmd}"
                     first = False
                 else:
-                    tmp += f" | 🤖 {cmd}"
+                    tmp += f" | <emoji document_id=5985780596268339498>🤖</emoji> {cmd}"
 
             for placeholder in placeholders:
                 if first:
@@ -844,7 +844,7 @@ class Help(loader.Module):
                     if page < total_pages - 1:
                         nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
                     btns.append(nav)
-                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    btns.append([{"text": "⬇️ Close", "action": "close"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
                 # Always prefer official Rich (tables + <details> + <tg-button-row> nav)
@@ -860,7 +860,7 @@ class Help(loader.Module):
                 if total_pages > 1:
                     nav.append({"text": "▶️", "callback": goto, "args": (1,)})
                 first_btns.append(nav)
-                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                first_btns.append([{"text": "⬇️ Close", "action": "close"}])
                 await self.inline.form(
                     page_text(0),
                     message=message if message.out else utils.get_chat_id(message),

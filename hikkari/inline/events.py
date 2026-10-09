@@ -371,10 +371,10 @@ class Events(InlineUnit):
                             from ..utils.rich_api import API
                             nav_row = []
                             if new_page > 0:
-                                nav_row.append({"text": "◀", "callback_data": f"hk|{uid}|p|{new_page - 1}"})
+                                nav_row.append({"text": "◀️", "callback_data": f"hk|{uid}|p|{new_page - 1}"})
                             nav_row.append({"text": f"{new_page + 1}/{len(pages)}", "callback_data": f"hk|{uid}|p|{new_page}"})
                             if new_page < len(pages) - 1:
-                                nav_row.append({"text": "▶", "callback_data": f"hk|{uid}|p|{new_page + 1}"})
+                                nav_row.append({"text": "▶️", "callback_data": f"hk|{uid}|p|{new_page + 1}"})
                             rm = {"inline_keyboard": [nav_row]}
                             payload = {"reply_markup": rm}
                             if imid:

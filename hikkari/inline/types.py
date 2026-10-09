@@ -396,7 +396,7 @@ class InlineQuery:
     async def e400(self):
         await self.answer(
             await self._get_res(
-                title="🚫 400",
+                title="<emoji document_id=5240241223632954241>🚫</emoji> 400",
                 description=(
                     "Bad request. You need to pass right arguments, follow module's"
                     " documentation"
@@ -409,7 +409,7 @@ class InlineQuery:
     async def e403(self):
         await self.answer(
             await self._get_res(
-                title="🚫 403",
+                title="<emoji document_id=5240241223632954241>🚫</emoji> 403",
                 description="You have no permissions to access this result",
                 thumbnail_url="https://img.icons8.com/external-wanicon-flat-wanicon/344/external-forbidden-new-normal-wanicon-flat-wanicon.png",
             ),
@@ -419,7 +419,7 @@ class InlineQuery:
     async def e404(self):
         await self.answer(
             await self._get_res(
-                title="🚫 404",
+                title="<emoji document_id=5240241223632954241>🚫</emoji> 404",
                 description="No results found",
                 thumbnail_url="https://img.icons8.com/external-justicon-flat-justicon/344/external-404-error-responsive-web-design-justicon-flat-justicon.png",
             ),
@@ -429,7 +429,7 @@ class InlineQuery:
     async def e426(self):
         await self.answer(
             await self._get_res(
-                title="🚫 426",
+                title="<emoji document_id=5240241223632954241>🚫</emoji> 426",
                 description="You need to update Hikkari before sending this request",
                 thumbnail_url="https://img.icons8.com/fluency/344/approve-and-update.png",
             ),
@@ -439,7 +439,7 @@ class InlineQuery:
     async def e500(self):
         await self.answer(
             await self._get_res(
-                title="🚫 500",
+                title="<emoji document_id=5240241223632954241>🚫</emoji> 500",
                 description="Internal userbot error while processing request",
                 thumbnail_url="https://img.icons8.com/fluency/344/high-priority.png",
             ),

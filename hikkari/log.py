@@ -100,7 +100,7 @@ def override_text(exception: Exception) -> str | None:
             return "✈️ <b>Telegram has problems with their datacenters.</b>"
 
         case CoreOverwriteError():
-            return f"⚠️ {str(exception)}"
+            return f"<emoji document_id=5447644880824181073>⚠️</emoji> {str(exception)}"
 
         case ServerError():
             return "📡 <b>Telegram servers are currently experiencing issues. Please try again later.</b>"
@@ -109,7 +109,7 @@ def override_text(exception: Exception) -> str | None:
             return "🕓 <b>Telegram translation service timed out. Please try again later.</b>"
 
         case ModuleNotFoundError():
-            return f"📦 {traceback.format_exception_only(type(exception), exception)[0].split(':')[1].strip()}"
+            return f"<emoji document_id=5256094480498436162>📦</emoji> {traceback.format_exception_only(type(exception), exception)[0].split(':')[1].strip()}"
 
         case FloodWaitError():
             return f"✋ <b>Bot is hitting limits and got {exception.seconds} seconds floodwait</b>"
@@ -204,7 +204,7 @@ class HikkariException:
             message=override_text(exc_value)
             or (
                 "{}<b>🎯 Source:</b> <code>{}:{}</code><b> in"
-                ' </b><code>{}</code>\n<b>❓ Error:</b> <pre><code class="language-python">{}</code></pre>{}'
+                ' </b><code>{}</code>\n<b><emoji document_id=5436113877181941026>❓</emoji> Error:</b> <pre><code class="language-python">{}</code></pre>{}'
             ).format(
                 (
                     (
@@ -308,7 +308,7 @@ class TelegramLogsHandler(logging.Handler):
     ):
         chunks = (
             item.message
-            + "\n\n<b>✨ Full traceback:</b>\n"
+            + "\n\n<b><emoji document_id=5283176512747507510>✨</emoji> Full traceback:</b>\n"
             + f'<pre><code class="language-python">{item.full_stack}</code></pre>'
         )
 

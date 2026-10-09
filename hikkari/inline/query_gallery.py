@@ -148,7 +148,7 @@ class QueryGallery(InlineUnit):
                 await query.builder.article(
                     title=i["title"],
                     description=i["description"],
-                    text=f"✨ <b>Opening gallery...</b>\n<i>#id: {id_}</i>",
+                    text=f"<emoji document_id=5283176512747507510>✨</emoji> <b>Opening gallery...</b>\n<i>#id: {id_}</i>",
                     parse_mode="HTML",
                     link_preview=False,
                     thumb=self._web_document(photo_url),

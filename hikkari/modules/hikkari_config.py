@@ -115,7 +115,7 @@ class HikkariConfigMod(loader.Module):
         kw.update(self._cfg_banner_kwargs())
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
-        # silent form avoids ✨ hang
+        # silent form avoids <emoji document_id=5283176512747507510>✨</emoji> hang
         kw.setdefault("silent", True)
         return await self.inline.form(text, message=message, **kw)
 
@@ -292,12 +292,12 @@ class HikkariConfigMod(loader.Module):
             if isinstance(query, str) and (
                 "Transferring value" in query
                 or "will be deleted automatically" in query
-                or query in {"🔄", "✨"}
+                or query in {"<emoji document_id=5258200195589504369>🔄</emoji>", "<emoji document_id=5283176512747507510>✨</emoji>"}
             ):
                 await call.edit(
                     self.strings.get(
                         "validation_error",
-                        "🚫 <b>Invalid value</b>",
+                        "<emoji document_id=5240241223632954241>🚫</emoji> <b>Invalid value</b>",
                     ).format("empty or transfer placeholder — type the value in the inline field and send it"),
                     reply_markup={
                         "text": self.strings.get("try_again", "Try again"),
@@ -474,7 +474,7 @@ class HikkariConfigMod(loader.Module):
             reply_markup=self._generate_bool_markup(mod, option, obj_type),
         )
 
-        await call.answer("✅")
+        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
 
     def _generate_bool_markup(
         self,
@@ -487,7 +487,7 @@ class HikkariConfigMod(loader.Module):
                 *(
                     [
                         {
-                            "text": f"❌ {self.strings['set']} `False`",
+                            "text": f"👎 {self.strings['set']} `False`",
                             "callback": self.inline__set_bool,
                             "args": (mod, option, False),
                             "kwargs": {"obj_type": obj_type},
@@ -496,7 +496,7 @@ class HikkariConfigMod(loader.Module):
                     if self.lookup(mod).config[option]
                     else [
                         {
-                            "text": f"✅ {self.strings['set']} `True`",
+                            "text": f"⤵️ {self.strings['set']} `True`",
                             "callback": self.inline__set_bool,
                             "args": (mod, option, True),
                             "kwargs": {"obj_type": obj_type},
@@ -780,7 +780,7 @@ class HikkariConfigMod(loader.Module):
             ],
         )
 
-        await call.answer("✅")
+        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
 
     async def _multi_choice_set_value(
         self,
@@ -811,7 +811,7 @@ class HikkariConfigMod(loader.Module):
         await self.inline__configure_option(
             call, mod=mod, config_opt=option, force_hidden=False, obj_type=obj_type
         )
-        await call.answer("✅")
+        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
 
     def _generate_choice_markup(
         self,
@@ -839,7 +839,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": (
-                            f"{'☑️' if self.lookup(mod).config[option] == value else '🔘'} "
+                            f"{'<emoji document_id=5256182535917940722>⤵️</emoji>️' if self.lookup(mod).config[option] == value else '🔘'} "
                             f"{value if len(str(value)) < 20 else str(value)[:20]}"
                         ),
                         "callback": self._choice_set_value,
@@ -913,7 +913,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": (
-                            f"{'☑️' if value in self.lookup(mod).config[option] else '◻️'} "
+                            f"{'<emoji document_id=5256182535917940722>⤵️</emoji>️' if value in self.lookup(mod).config[option] else '◻️'} "
                             f"{value if len(str(value)) < 20 else str(value)[:20]}"
                         ),
                         "callback": self._multi_choice_set_value,
@@ -1187,7 +1187,7 @@ class HikkariConfigMod(loader.Module):
             with contextlib.suppress(Exception):
                 await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
             with contextlib.suppress(Exception):
-                await call.answer("⚠️ text truncated", show_alert=False)
+                await call.answer("<emoji document_id=5447644880824181073>⚠️</emoji> text truncated", show_alert=False)
 
     async def inline__configure_page(
         self,

@@ -571,7 +571,7 @@ def tag(*tags, **kwarg_tags):
     @loader.tag(only_messages=True)
     @loader.tag("only_messages", "only_pm", regex=r"^[.] ?hikkari$", from_id=659800858)
 
-    💡 These tags can be used directly in `@loader.watcher`:
+    <emoji document_id=5422439311196834318>💡</emoji> These tags can be used directly in `@loader.watcher`:
     @loader.watcher("no_commands", out=True)
     """
 
@@ -646,8 +646,8 @@ def raw_handler(*updates: TLObject):
     Decorator that marks function as raw telethon events handler
     Use it to prevent zombie-event-handlers, left by unloaded modules
     :param updates: Update(-s) to handle
-    ⚠️ Do not try to simulate behavior of this decorator by yourself!
-    ⚠️ This feature won't work, if you dynamically declare method with decorator!
+    <emoji document_id=5447644880824181073>⚠️</emoji> Do not try to simulate behavior of this decorator by yourself!
+    <emoji document_id=5447644880824181073>⚠️</emoji> This feature won't work, if you dynamically declare method with decorator!
     """
 
     def inner(func: Command) -> Command:

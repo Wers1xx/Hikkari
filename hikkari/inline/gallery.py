@@ -266,7 +266,7 @@ class Gallery(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.hikkari_me.premium
-                        else "✨"
+                        else "<emoji document_id=5283176512747507510>✨</emoji>"
                     )
                     + self.translator.getkey("inline.opening_gallery"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -431,7 +431,7 @@ class Gallery(InlineUnit):
                 parse_mode="HTML",
                 buttons=self._gallery_markup(unit_id),
             )
-            await call.answer("✅ Slideshow on")
+            await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji> Slideshow on")
         else:
             del self._units[unit_id]["slideshow"]
             await self._bot_client.edit_message(
@@ -440,7 +440,7 @@ class Gallery(InlineUnit):
                 parse_mode="HTML",
                 buttons=self._gallery_markup(unit_id),
             )
-            await call.answer("🚫 Slideshow off")
+            await call.answer("<emoji document_id=5240241223632954241>🚫</emoji> Slideshow off")
             return
 
         asyncio.ensure_future(
@@ -539,7 +539,7 @@ class Gallery(InlineUnit):
                     with contextlib.suppress(Exception):
                         await self._bot_client.edit_message(
                             call.inline_message_id,
-                            "✖️",
+                            "<emoji document_id=5985346521103604145>❌</emoji>️",
                             parse_mode="HTML",
                             buttons=None,
                         )
@@ -655,7 +655,7 @@ class Gallery(InlineUnit):
                             [
                                 {
                                     "text": (
-                                        "🛑" if unit.get("slideshow", False) else "⏱"
+                                        "<emoji document_id=5980953710157632545>❌</emoji>" if unit.get("slideshow", False) else "<emoji document_id=5382194935057372936>⏱</emoji>"
                                     ),
                                     "callback": callback,
                                     "args": ("slideshow",),
@@ -680,7 +680,7 @@ class Gallery(InlineUnit):
                     ]
                 ]
             )
-            + [[{"text": "🔻 Close", "callback": callback, "args": ("close",)}]]
+            + [[{"text": "⬇️ Close", "callback": callback, "args": ("close",)}]]
         )
 
     async def _gallery_inline_handler(self: "InlineManager", inline_query):

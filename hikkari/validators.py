@@ -45,7 +45,7 @@ class Validator:
     :param validator: Sync function, which raises `ValidationError` if passed
                       value is incorrect (with explanation) and returns converted
                       value if it is semantically correct.
-                      ⚠️ If validator returns `None`, value will always be set to `None`
+                      <emoji document_id=5447644880824181073>⚠️</emoji> If validator returns `None`, value will always be set to `None`
     :param doc: Docstrings for this validator as string, or dict in format:
                 {
                     "en": "docstring",
