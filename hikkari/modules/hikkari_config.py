@@ -87,19 +87,23 @@ class HikkariConfigMod(loader.Module):
             loader.ConfigValue(
                 "banner_url",
                 "",
-                lambda: "Banner for config UI (http URL or empty for built-in)",
+                lambda: (
+                    "Баннер конфига: http(s) ссылка на фото/gif, "
+                    "или пусто = встроенный hikkari-config.jpg. "
+                    "Можно загрузить через WebApp upload → вставить ссылку x0.at"
+                ),
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
                 "media_quote",
                 True,
-                lambda: "Use quote/webpage media for config banner",
+                lambda: "Показывать баннер конфига как webpage/quote media",
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
                 "invert_media",
                 True,
-                lambda: "Invert media (quote style) for config banner",
+                lambda: "Invert media (баннер сверху/quote style) для конфига",
                 validator=loader.validators.Boolean(),
             ),
         )
@@ -116,21 +120,43 @@ class HikkariConfigMod(loader.Module):
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
-        """photo + invert for config forms."""
+        """photo / webpage + invert for config forms (respects user banner_url)."""
         from pathlib import Path as _P
         from ..utils.other import ensure_builtin_asset
+
         url = str(self.config.get("banner_url") or "").strip()
-        if not url:
+        if not url or url.lower() in ("none", "null", "0", "-"):
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(p).is_file():
                 url = str(p)
-        if not url:
-            return {}
-        kw = {}
+            else:
+                return {}
+
+        kw: dict = {}
+        # Remote → InputMediaWebPage-friendly photo URL
         if url.startswith(("http://", "https://")):
             kw["photo"] = url
+            if bool(self.config.get("media_quote", True)):
+                try:
+                    from hikkaritl.tl.types import InputMediaWebPage
+                    kw["file"] = InputMediaWebPage(url, optional=True)
+                except Exception:
+                    pass
         else:
-            kw["photo"] = url  # local path form supports
+            # Local path
+            p = _P(url)
+            if p.is_file():
+                kw["photo"] = str(p)
+            else:
+                # fallback built-in
+                b = ensure_builtin_asset("hikkari-config.jpg")
+                if b and _P(b).is_file():
+                    kw["photo"] = str(b)
+                else:
+                    return {}
+
+        if bool(self.config.get("invert_media", True)):
+            kw["invert_media"] = True
         return kw
 
     @staticmethod

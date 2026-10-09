@@ -514,18 +514,16 @@ class Help(loader.Module):
             return
 
         hidden = self.get("hide", [])
-
-        reply = self.strings["all_header"].format(
-            len(self.allmodules.modules),
-            (
-                0
-                if force
-                else sum(
-                    module.__class__.__name__ in hidden
-                    for module in self.allmodules.modules
-                )
-            ),
+        hidden_count = (
+            0
+            if force
+            else sum(
+                module.__class__.__name__ in hidden
+                for module in self.allmodules.modules
+            )
         )
+        # Header filled AFTER lists are built so counts match Core+Loaded
+        reply = None
         shown_warn = False
 
         plain_ = []
@@ -636,6 +634,10 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
+        # What is actually shown in help (same as sections below)
+        shown_loaded = plain_ + (no_commands_ if force else [])
+        shown_total = len(core_) + len(shown_loaded)
+        reply = self.strings["all_header"].format(shown_total, hidden_count)
 
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
             """
