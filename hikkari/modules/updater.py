@@ -91,6 +91,12 @@ class UpdaterMod(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
+                "notify_owners",
+                True,
+                "Рассылать уведомления об обновлениях всем owner (не только основной аккаунт)",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
                 "autoupdate",
                 False,
                 doc=lambda: self.strings["_cfg_doc_autoupdate"],
@@ -232,6 +238,93 @@ class UpdaterMod(loader.Module):
                 await self.poller()
         asyncio.ensure_future(_boot_check())
 
+
+    def _update_notify_recipients(self) -> list[int]:
+        """All user IDs that should get update / announcement notifications."""
+        ids: set[int] = set()
+        # Primary account
+        with contextlib.suppress(Exception):
+            ids.add(int(self.tg_id))
+        # All linked clients
+        with contextlib.suppress(Exception):
+            for c in getattr(self, "allclients", None) or []:
+                with contextlib.suppress(Exception):
+                    ids.add(int(c.tg_id))
+        # Security owners (if enabled)
+        if bool(self.config.get("notify_owners", True)):
+            with contextlib.suppress(Exception):
+                owners = list(
+                    getattr(self._client.dispatcher.security, "owner", None) or []
+                )
+                for o in owners:
+                    with contextlib.suppress(Exception):
+                        ids.add(int(o))
+            with contextlib.suppress(Exception):
+                # db pointer fallback
+                from .. import security as _sec
+                for o in self._db.get(_sec.__name__, "owner", []) or []:
+                    with contextlib.suppress(Exception):
+                        ids.add(int(o))
+        return sorted(ids)
+
+    async def _broadcast_update_notice(
+        self,
+        text: str,
+        *,
+        reply_markup=None,
+        disable_web_page_preview: bool = True,
+    ) -> int | None:
+        """Send notice to every recipient via inline bot, fallback to userbot DM."""
+        recipients = self._update_notify_recipients()
+        if not recipients:
+            recipients = [int(self.tg_id)]
+
+        primary_msg_id = None
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+
+        for uid in recipients:
+            sent = False
+            # 1) Inline bot (preferred — buttons work)
+            if bot is not None:
+                try:
+                    kw = {
+                        "disable_web_page_preview": disable_web_page_preview,
+                    }
+                    if reply_markup is not None:
+                        kw["reply_markup"] = reply_markup
+                    m = await bot.send_message(uid, text, **kw)
+                    if primary_msg_id is None:
+                        primary_msg_id = getattr(m, "message_id", None) or getattr(
+                            m, "id", None
+                        )
+                    sent = True
+                except Exception as e:
+                    logger.debug(
+                        "update notify via bot to %s failed: %s", uid, e
+                    )
+            # 2) Fallback: userbot → Saved Messages / user
+            if not sent:
+                try:
+                    # Prefer main client for own id; otherwise try each client
+                    clients = list(getattr(self, "allclients", None) or [self._client])
+                    for c in clients:
+                        try:
+                            await c.send_message(
+                                uid,
+                                text,
+                                link_preview=not disable_web_page_preview,
+                            )
+                            sent = True
+                            break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug("update notify via client to %s failed: %s", uid, e)
+            if not sent:
+                logger.warning("Could not deliver update notice to %s", uid)
+
+        return primary_msg_id
+
     @loader.loop(interval=60, autostart=True)
     async def poller_announcement(self):
         async with aiohttp.ClientSession() as session:
@@ -248,9 +341,9 @@ class UpdaterMod(loader.Module):
                         announcement = (await r.text()).strip()
                         previous = self.get("announcement", "")
                         if announcement and announcement != previous:
-                            await self.inline.bot.send_message(
-                                self.tg_id,
+                            await self._broadcast_update_notice(
                                 self.strings["announcement"].format(announcement),
+                                reply_markup=None,
                             )
                             self.set("announcement", announcement)
                     case _:
@@ -282,24 +375,26 @@ class UpdaterMod(loader.Module):
 
         if self._pending not in {current, self._notified}:
             # Autoupdate removed: only notify, never auto-pull
-            m = await self.inline.bot.send_message(
-                self.tg_id,
-                self.strings["update_required"].format(
-                    current[:6],
-                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                        current[:12],
-                        self._pending[:12],
-                        self._pending[:6],
-                    ),
-                    changelog,
+            # Broadcast to all owners / linked accounts (not only primary tg_id)
+            text = self.strings["update_required"].format(
+                current[:6],
+                '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                    current[:12],
+                    self._pending[:12],
+                    self._pending[:6],
                 ),
+                changelog,
+            )
+            msg_id = await self._broadcast_update_notice(
+                text,
                 reply_markup=self._markup(),
                 disable_web_page_preview=True,
             )
             self._notified = self._pending
             self.set("ignore_permanent", False)
             await self._delete_all_upd_messages()
-            self.set("upd_msg", m.message_id)
+            if msg_id is not None:
+                self.set("upd_msg", msg_id)
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
