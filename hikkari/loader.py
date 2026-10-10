@@ -1451,8 +1451,11 @@ class Modules:
         try:
             mod.config_complete()
         except Exception as e:
-            logger.exception("Failed to send mod config complete signal due to %s", e)
-            raise
+            logger.exception(
+                "config_complete failed for %s due to %s — module stays loaded",
+                getattr(mod, "name", mod),
+                e,
+            )
 
     async def send_ready_one_wrapper(self, *args, **kwargs):
         """Wrapper for send_ready_one"""
@@ -1463,8 +1466,10 @@ class Modules:
 
     async def send_ready(self):
         """Send all data to all modules"""
+        # Copy list — nothing may shrink the live list during init
+        mods = list(self.modules)
         await asyncio.gather(
-            *[self.send_ready_one_wrapper(mod) for mod in self.modules]
+            *[self.send_ready_one_wrapper(mod) for mod in mods]
         )
 
     async def send_ready_one(
@@ -1485,7 +1490,48 @@ class Modules:
             except Exception:
                 logger.info("Can't process `on_dlmod` hook", exc_info=True)
 
-        client_ready_ok = True
+        # 1) Commands/watchers FIRST — module is usable even if client_ready fails
+        for _, method in utils.iter_attrs(mod):
+            if isinstance(method, InfiniteLoop):
+                setattr(method, "module_instance", mod)
+                if method.autostart:
+                    with contextlib.suppress(Exception):
+                        method.start()
+                logger.debug("Added module %s to method %s", mod, method)
+
+        with contextlib.suppress(Exception):
+            self.unregister_commands(mod, "update")
+            self.unregister_raw_handlers(mod, "update")
+            self.unregister_bot_update_handlers(mod, "update")
+        with contextlib.suppress(Exception):
+            self.register_commands(mod)
+            self.register_watchers(mod)
+            self.register_raw_handlers(mod)
+            self.register_bot_update_handlers(mod)
+
+        # 2) Translations
+        if hasattr(mod, "__source__"):
+            pack_url = next(
+                (
+                    line.replace(" ", "").split("#packurl:", maxsplit=1)[1]
+                    for line in str(mod.__source__).splitlines()
+                    if line.replace(" ", "").startswith("#packurl:")
+                ),
+                None,
+            )
+            if pack_url:
+                try:
+                    transations = await self.translator.load_module_translations(
+                        pack_url,
+                        MODULES_LANGPACKS_PATH
+                        / f"{self.client.tg_id}_{mod.__class__.__name__}.yml",
+                    )
+                    if transations:
+                        mod.strings.external_strings = transations
+                except Exception:
+                    logger.debug("langpack load failed for %s", mod, exc_info=True)
+
+        # 3) client_ready — never unload the module
         try:
             if len(inspect.signature(mod.client_ready).parameters) == 2:
                 await mod.client_ready(self.client, self._db)
@@ -1494,65 +1540,21 @@ class Modules:
         except SelfUnload as e:
             if no_self_unload:
                 raise e
-
-            logger.debug("Unloading %s, because it raised SelfUnload", mod)
-            with contextlib.suppress(ValueError):
-                self.modules.remove(mod)
-            return
+            logger.warning(
+                "SelfUnload from %s ignored — module stays loaded: %s",
+                getattr(mod, "name", mod),
+                e,
+            )
         except SelfSuspend as e:
             if no_self_unload:
                 raise e
-
-            logger.debug("Suspending %s, because it raised SelfSuspend", mod)
-            # Still register commands so module is usable when resumed
+            logger.debug("SelfSuspend from %s: %s", mod, e)
         except Exception as e:
-            # Heroku unloads here — that drops external modules (e.g. PMBL
-            # client_ready send_photo / missing inline.bot). Keep module loaded,
-            # log error, continue to register commands/watchers.
-            client_ready_ok = False
             logger.exception(
                 "client_ready failed for %s due to %s — module stays loaded",
-                mod,
+                getattr(mod, "name", mod),
                 e,
             )
-
-        # Check for pack_url and load translations
-        if hasattr(mod, "__source__"):
-            pack_url = next(
-                (
-                    line.replace(" ", "").split("#packurl:", maxsplit=1)[1]
-                    for line in mod.__source__.splitlines()
-                    if line.replace(" ", "").startswith("#packurl:")
-                ),
-                None,
-            )
-
-            if pack_url and (
-                transations := await self.translator.load_module_translations(
-                    pack_url,
-                    MODULES_LANGPACKS_PATH
-                    / f"{self.client.tg_id}_{mod.__class__.__name__}.yml",
-                )
-            ):
-                mod.strings.external_strings = transations
-
-        for _, method in utils.iter_attrs(mod):
-            if isinstance(method, InfiniteLoop):
-                setattr(method, "module_instance", mod)
-
-                if method.autostart:
-                    method.start()
-
-                logger.debug("Added module %s to method %s", mod, method)
-
-        self.unregister_commands(mod, "update")
-        self.unregister_raw_handlers(mod, "update")
-        self.unregister_bot_update_handlers(mod, "update")
-
-        self.register_commands(mod)
-        self.register_watchers(mod)
-        self.register_raw_handlers(mod)
-        self.register_bot_update_handlers(mod)
 
     def get_classname(self, name: str) -> str:
         return next(
