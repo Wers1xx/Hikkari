@@ -811,6 +811,18 @@ class Modules:
         no_external: bool = False,
     ) -> list[Module]:
         """Load all modules in the module directory"""
+        # Ensure package attrs for `from .. import loader, utils` in external modules
+        try:
+            _pkg = sys.modules.get(__package__)
+            if _pkg is not None:
+                if not hasattr(_pkg, "loader"):
+                    _pkg.loader = sys.modules.get(__name__)
+                if not hasattr(_pkg, "utils"):
+                    with contextlib.suppress(Exception):
+                        _pkg.utils = importlib.import_module(f"{__package__}.utils")
+        except Exception:
+            pass
+        self._failed_module_names = []
         external_mods = []
 
         if not mods:
@@ -836,10 +848,6 @@ class Modules:
         if not no_external:
             loaded += await self._register_modules(external_mods, "<file>")
 
-        with contextlib.suppress(Exception):
-            _release_memory()
-        logger.info("Modules loaded: %s core/file (RSS≈%.0fMB)", len(loaded), _rss_mb())
-
         return loaded
 
     async def _register_modules(
@@ -847,31 +855,14 @@ class Modules:
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
-        """Sequential filesystem load — same algorithm as Heroku."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         loaded = []
 
-        # Package attrs for `from .. import loader`
-        try:
-            _pkg = sys.modules.get(__package__)
-            if _pkg is not None:
-                if not hasattr(_pkg, "loader"):
-                    _pkg.loader = sys.modules.get(__name__)
-                if not hasattr(_pkg, "utils"):
-                    with contextlib.suppress(Exception):
-                        _pkg.utils = importlib.import_module(f"{__package__}.utils")
-        except Exception:
-            pass
-
-        if origin == "<file>" or str(origin).startswith("<file"):
-            with contextlib.suppress(Exception):
-                _ensure_tl_aliases()
-
         for mod in modules:
             try:
-                mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
+                mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
                 module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
                 user_friendly_origin = (
                     "<core {}>" if origin == "<core>" else "<file {}>"
@@ -879,35 +870,34 @@ class Modules:
 
                 logger.debug("Loading %s from filesystem", module_name)
 
-                try:
-                    src = Path(mod).read_text(encoding="utf-8")
-                except UnicodeDecodeError:
-                    src = Path(mod).read_text(encoding="utf-8", errors="replace")
-
-                if origin == "<file>" or str(origin).startswith("<file"):
-                    src = _normalize_external_source(src)
-
+                _src = Path(mod).read_text(encoding="utf-8")
+                if origin == "<file>":
+                    # telethon/herokutl → hikkaritl (same role as Heroku telethon→herokutl)
+                    for _a, _b in (
+                        ("telethon", "hikkaritl"),
+                        ("herokutl", "hikkaritl"),
+                        ("hikkatl", "hikkaritl"),
+                    ):
+                        _src = _src.replace(f"from {_a}", f"from {_b}").replace(
+                            f"import {_a}", f"import {_b}"
+                        )
                 spec = importlib.machinery.ModuleSpec(
                     module_name,
-                    StringLoader(src, user_friendly_origin),
+                    StringLoader(_src, user_friendly_origin),
                     origin=user_friendly_origin,
                 )
 
                 loaded += [await self.register_module(spec, module_name, origin)]
+
                 logger.debug("Successfully loaded %s from filesystem", module_name)
             except Exception as e:
                 logger.exception("Failed to load module %s due to %s:", mod, e)
                 try:
-                    if not hasattr(self, "_failed_module_names") or self._failed_module_names is None:
-                        self._failed_module_names = []
                     self._failed_module_names.append(
-                        f"{os.path.basename(str(mod))} ({type(e).__name__}: {str(e)[:100]})"
+                        f"{os.path.basename(str(mod))} ({type(e).__name__})"
                     )
                 except Exception:
                     pass
-                with contextlib.suppress(Exception):
-                    mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
-                    sys.modules.pop(f"{__package__}.{MODULES_NAME}.{mod_shortname}", None)
 
         return loaded
 
@@ -923,12 +913,6 @@ class Modules:
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
-        # module_from_spec sets __package__ from spec.parent (FQN hikkari.modules.X)
-        # Reinforce package for relative imports on all Python versions
-        pkg = getattr(spec, "parent", None) or ".".join(module_name.split(".")[:-1])
-        if pkg:
-            module.__package__ = pkg
-            module.__name__ = module_name
         sys.modules[module_name] = module
 
         source_data = (
@@ -984,58 +968,30 @@ class Modules:
 
         await _exec_module()
 
-        def _is_module_cls(value) -> bool:
-            if not inspect.isclass(value) or value is Module:
-                return False
-            try:
-                return issubclass(value, Module)
-            except TypeError:
-                return False
+        ret = None
 
         ret = next(
             (
                 value()
                 for value in vars(module).values()
-                if _is_module_cls(value)
+                if inspect.isclass(value) and issubclass(value, Module)
             ),
             None,
         )
+
+        if hasattr(module, "__version__"):
+            ret.__version__ = module.__version__
 
         if ret is None:
             ret = module.register(module_name)
             if not isinstance(ret, Module):
                 raise TypeError(f"Instance is not a Module, it is {type(ret)}")
 
-        if hasattr(module, "__version__"):
-            with contextlib.suppress(Exception):
-                ret.__version__ = module.__version__
-
         ret.__origin__ = origin
 
-        try:
-            raw_src = source_data if source_data else inspect.getsource(ret.__class__)
-        except Exception:
-            raw_src = source_data or ""
-        ret.__source__ = _meta_source_only(raw_src)
-        # Keep StringLoader.data for .ml export, but drop huge sources from RAM:
-        # if source is on disk (loaded_modules / core path), clear in-memory copy.
-        with contextlib.suppress(Exception):
-            if hasattr(spec.loader, "data") and spec.loader.data:
-                data_len = len(spec.loader.data)
-                on_disk = False
-                if origin == "<file>" or str(origin).startswith("<file"):
-                    # external modules are saved under LOADED_MODULES_DIR
-                    cls_name = ret.__class__.__name__
-                    disk = Path(LOADED_MODULES_DIR) / f"{cls_name}_{self.client.tg_id}.py"
-                    if disk.is_file() and disk.stat().st_size > 0:
-                        on_disk = True
-                        ret.__source_path__ = str(disk)
-                if on_disk and data_len > 8192:
-                    spec.loader.data = b""
-                elif data_len > 200_000:
-                    # huge module without disk copy — keep only meta in __source__
-                    # but leave data so .ml still works (user asked for RAM, not break .ml)
-                    pass
+        ret.__source__ = (
+            source_data if source_data else inspect.getsource(ret.__class__)
+        )
 
         if not hasattr(ret, "name"):
             ret.name = ret.strings["name"]
@@ -1133,13 +1089,10 @@ class Modules:
                 and _command.lower() in self._core_commands
                 and not instance.__origin__.startswith("<core")
             ):
-                # Don't kill the whole module — skip only the conflicting command
-                logger.warning(
-                    "Module %s: command '%s' conflicts with core — skipped",
-                    instance.__class__.__name__,
-                    _command,
-                )
-                continue
+                with contextlib.suppress(Exception):
+                    self.modules.remove(instance)
+
+                raise CoreOverwriteError(command=_command)
 
             self.commands.update({_command.lower(): cmd})
 
@@ -1292,14 +1245,9 @@ class Modules:
 
         for module in self.modules:
             if module.__class__.__name__ == instance.__class__.__name__:
-                if not self._remove_core_protection and str(
-                    getattr(module, "__origin__", "")
-                ).startswith("<core"):
-                    # Soft: do not kill the bot — refuse external overwrite of core
-                    logger.warning(
-                        "External module %s conflicts with core — not loaded",
-                        instance.__class__.__name__,
-                    )
+                if not self._remove_core_protection and module.__origin__.startswith(
+                    "<core"
+                ):
                     raise CoreOverwriteError(
                         module=(
                             module.__class__.__name__[:-3]
@@ -1309,15 +1257,12 @@ class Modules:
                     )
 
                 logger.debug("Removing module %s for update", module)
-                with contextlib.suppress(Exception):
-                    await module.on_unload()
+                await module.on_unload()
 
-                with contextlib.suppress(ValueError):
-                    self.modules.remove(module)
+                self.modules.remove(module)
                 for _, method in utils.iter_attrs(module):
                     if isinstance(method, InfiniteLoop):
-                        with contextlib.suppress(Exception):
-                            method.stop()
+                        method.stop()
                         logger.debug(
                             "Stopped loop in module %s, method %s",
                             module,
@@ -1451,11 +1396,8 @@ class Modules:
         try:
             mod.config_complete()
         except Exception as e:
-            logger.exception(
-                "config_complete failed for %s due to %s — module stays loaded",
-                getattr(mod, "name", mod),
-                e,
-            )
+            logger.exception("Failed to send mod config complete signal due to %s", e)
+            raise
 
     async def send_ready_one_wrapper(self, *args, **kwargs):
         """Wrapper for send_ready_one"""
@@ -1466,10 +1408,8 @@ class Modules:
 
     async def send_ready(self):
         """Send all data to all modules"""
-        # Copy list — nothing may shrink the live list during init
-        mods = list(self.modules)
         await asyncio.gather(
-            *[self.send_ready_one_wrapper(mod) for mod in mods]
+            *[self.send_ready_one_wrapper(mod) for mod in self.modules]
         )
 
     async def send_ready_one(
@@ -1490,48 +1430,6 @@ class Modules:
             except Exception:
                 logger.info("Can't process `on_dlmod` hook", exc_info=True)
 
-        # 1) Commands/watchers FIRST — module is usable even if client_ready fails
-        for _, method in utils.iter_attrs(mod):
-            if isinstance(method, InfiniteLoop):
-                setattr(method, "module_instance", mod)
-                if method.autostart:
-                    with contextlib.suppress(Exception):
-                        method.start()
-                logger.debug("Added module %s to method %s", mod, method)
-
-        with contextlib.suppress(Exception):
-            self.unregister_commands(mod, "update")
-            self.unregister_raw_handlers(mod, "update")
-            self.unregister_bot_update_handlers(mod, "update")
-        with contextlib.suppress(Exception):
-            self.register_commands(mod)
-            self.register_watchers(mod)
-            self.register_raw_handlers(mod)
-            self.register_bot_update_handlers(mod)
-
-        # 2) Translations
-        if hasattr(mod, "__source__"):
-            pack_url = next(
-                (
-                    line.replace(" ", "").split("#packurl:", maxsplit=1)[1]
-                    for line in str(mod.__source__).splitlines()
-                    if line.replace(" ", "").startswith("#packurl:")
-                ),
-                None,
-            )
-            if pack_url:
-                try:
-                    transations = await self.translator.load_module_translations(
-                        pack_url,
-                        MODULES_LANGPACKS_PATH
-                        / f"{self.client.tg_id}_{mod.__class__.__name__}.yml",
-                    )
-                    if transations:
-                        mod.strings.external_strings = transations
-                except Exception:
-                    logger.debug("langpack load failed for %s", mod, exc_info=True)
-
-        # 3) client_ready — never unload the module
         try:
             if len(inspect.signature(mod.client_ready).parameters) == 2:
                 await mod.client_ready(self.client, self._db)
@@ -1540,21 +1438,65 @@ class Modules:
         except SelfUnload as e:
             if no_self_unload:
                 raise e
-            logger.warning(
-                "SelfUnload from %s ignored — module stays loaded: %s",
-                getattr(mod, "name", mod),
-                e,
-            )
+
+            logger.debug("Unloading %s, because it raised SelfUnload", mod)
+            self.modules.remove(mod)
+            return
         except SelfSuspend as e:
             if no_self_unload:
                 raise e
-            logger.debug("SelfSuspend from %s: %s", mod, e)
+
+            logger.debug("Suspending %s, because it raised SelfSuspend", mod)
+            return
         except Exception as e:
             logger.exception(
-                "client_ready failed for %s due to %s — module stays loaded",
-                getattr(mod, "name", mod),
+                (
+                    "Failed to send mod init complete signal for %s due to %s,"
+                    " attempting unload"
+                ),
+                mod,
                 e,
             )
+            self.modules.remove(mod)
+            raise
+
+        # Check for pack_url and load translations
+        if hasattr(mod, "__source__"):
+            pack_url = next(
+                (
+                    line.replace(" ", "").split("#packurl:", maxsplit=1)[1]
+                    for line in mod.__source__.splitlines()
+                    if line.replace(" ", "").startswith("#packurl:")
+                ),
+                None,
+            )
+
+            if pack_url and (
+                transations := await self.translator.load_module_translations(
+                    pack_url,
+                    MODULES_LANGPACKS_PATH
+                    / f"{self.client.tg_id}_{mod.__class__.__name__}.yml",
+                )
+            ):
+                mod.strings.external_strings = transations
+
+        for _, method in utils.iter_attrs(mod):
+            if isinstance(method, InfiniteLoop):
+                setattr(method, "module_instance", mod)
+
+                if method.autostart:
+                    method.start()
+
+                logger.debug("Added module %s to method %s", mod, method)
+
+        self.unregister_commands(mod, "update")
+        self.unregister_raw_handlers(mod, "update")
+        self.unregister_bot_update_handlers(mod, "update")
+
+        self.register_commands(mod)
+        self.register_watchers(mod)
+        self.register_raw_handlers(mod)
+        self.register_bot_update_handlers(mod)
 
     def get_classname(self, name: str) -> str:
         return next(
