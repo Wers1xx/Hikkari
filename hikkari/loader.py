@@ -284,6 +284,43 @@ def patched_import(name: str, *args, **kwargs):
 
 builtins.__import__ = patched_import
 
+# Extra aliases so `import telethon` / `from telethon import ...` resolve
+# even when packages probe sys.modules first.
+def _ensure_tl_aliases():
+    try:
+        import hikkaritl as _hk
+        for alias in ("telethon", "hikkatl", "herokutl"):
+            sys.modules.setdefault(alias, _hk)
+            for sub in (
+                "tl",
+                "tl.types",
+                "tl.functions",
+                "tl.functions.contacts",
+                "tl.functions.messages",
+                "tl.custom",
+                "tl.custom.message",
+                "errors",
+                "errors.rpcerrorlist",
+                "utils",
+                "sessions",
+                "events",
+                "network",
+                "client",
+                "client.telegramclient",
+            ):
+                try:
+                    full = f"hikkaritl.{sub}"
+                    if full not in sys.modules:
+                        importlib.import_module(full)
+                    sys.modules.setdefault(f"{alias}.{sub}", sys.modules[full])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+_ensure_tl_aliases()
+
 
 # Compatibility: telethon.types → hikkaritl.tl.types for external modules
 try:
@@ -786,15 +823,12 @@ class Modules:
 
         loaded = []
 
-        # Fast parallel load. Each module has unique sys.modules key; failures
-        # are isolated. Pre-bind parent package once to avoid import races.
-        # External batches under memory pressure still use sequential path.
+        # Parallel ONLY for core modules. External (<file>) stay sequential —
+        # concurrent exec of third-party modules caused import races
+        # (from .. import loader / telethon shims) and silent load failures.
         n_mods = len(modules)
-        parallel = n_mods > 1 and not (
-            origin == "<file>" and _memory_pressure()
-        )
-        # concurrency: cores ~8, external a bit lower to limit RAM spikes
-        _sem_limit = 8 if origin == "<core>" else 5
+        parallel = origin == "<core>" and n_mods > 1
+        _sem_limit = 8
 
         # ── pre-bind package namespace once ──
         pkg_parent = f"{__package__}.{MODULES_NAME}"
