@@ -191,6 +191,32 @@ class Module:
         await self.allmodules.commands[command](message)
         return message
 
+    async def answer_rich(
+        self,
+        message,
+        html: str,
+        *,
+        title: str = "Hikkari",
+        description: str = "Rich message",
+        reply_markup=None,
+        thumbnail_url: str | None = None,
+        silent: bool = True,
+        **kwargs,
+    ):
+        """Send native Rich Message (external modules supported). See utils.answer_rich."""
+        from . import utils as _u
+        return await _u.answer_rich(
+            message,
+            html,
+            title=title,
+            description=description,
+            reply_markup=reply_markup,
+            thumbnail_url=thumbnail_url,
+            silent=silent,
+            **kwargs,
+        )
+
+
     @property
     def commands(self) -> dict[str, Command]:
         """List of commands that module supports"""

@@ -28,5 +28,7 @@ from .git import *
 from .args import *
 from .network import *
 from .placeholders import *
-from .rich import apply_rich, strip_rich, is_rich_enabled, can_use_rich, to_rich_html, STAR as RICH_STAR
-from .rich_api import try_send_rich, build_info_html, html_table, send_rich_message, answer_inline_rich, pick_banner_url, tg_button, tg_button_row, nav_button_row, markup_to_tg_rows, edit_rich_message
+from .rich import apply_rich, strip_rich, is_rich_enabled, can_use_rich, to_rich_html, rich_table, STAR as RICH_STAR
+from .rich_api import try_send_rich, build_info_html, html_table, send_rich_message, answer_inline_rich, pick_banner_url, tg_button, tg_button_row, nav_button_row, markup_to_tg_rows, edit_rich_message, to_rich_compatible, inject_banner_html
+
+from .messages import answer_rich, looks_like_rich_html  # noqa: F401

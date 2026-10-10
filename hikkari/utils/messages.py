@@ -81,7 +81,11 @@ except Exception:  # pragma: no cover
     def apply_rich(t, db=None):
         return t
     def is_rich_enabled(db=None):
-        return True
+        return False
+    def can_use_rich(client=None, db=None):
+        return False
+    def to_rich_html(t, db=None):
+        return t
     RICH_STAR = '<emoji document_id=5283176512747507510>✨</emoji>'
 
 
@@ -319,6 +323,123 @@ async def _answer_restricted_fallback(message: Message, response: str, **kwargs)
         return None
 
 
+
+_RICH_TAG_HINT = re.compile(
+    r"<(?:table|details|h[1-6]|tg-button-row|rich)\b",
+    re.I,
+)
+
+
+def looks_like_rich_html(text: str) -> bool:
+    """True if text already contains native Rich Message HTML tags."""
+    if not text or not isinstance(text, str):
+        return False
+    return bool(_RICH_TAG_HINT.search(text))
+
+
+async def answer_rich(
+    message,
+    html: str,
+    *,
+    title: str = "Hikkari",
+    description: str = "Rich message",
+    reply_markup=None,
+    thumbnail_url: str | None = None,
+    silent: bool = True,
+    pages: list | None = None,
+    page: int = 0,
+    force: bool = False,
+):
+    """
+    Send a native Telegram Rich Message (via @inline bot).
+
+    Public API for **external** and built-in modules.
+
+    :param message: Command message (or chat id)
+    :param html: Official Rich HTML — <h2>, <table>, <details>, <p>, <tg-emoji>, …
+    :param title: Inline result title
+    :param description: Inline result description
+    :param reply_markup: Optional inline buttons (same format as form)
+    :param thumbnail_url: Optional banner URL
+    :param silent: Do not show «Opening rich…»
+    :param force: Send even if rich_mode is off (still needs Premium + inline bot)
+    :returns: Message / True on success, False on failure (caller may fall back)
+
+    Example (external module)::
+
+        from .. import loader, utils
+
+        class MyMod(loader.Module):
+            async def demo_cmd(self, message):
+                html = (
+                    "<h2>Hello</h2>"
+                    + utils.html_table([("Status", "OK"), ("Ping", "12ms")])
+                )
+                ok = await utils.answer_rich(message, html, title="Demo")
+                if not ok:
+                    await utils.answer(message, "Hello — plain fallback")
+    """
+    if not isinstance(html, str) or not html.strip():
+        return False
+
+    client = getattr(message, "client", None)
+    if client is None and hasattr(message, "_client"):
+        client = message._client
+    if client is None:
+        return False
+
+    db = getattr(client, "hikkari_db", None) or getattr(
+        getattr(client, "loader", None), "_db", None
+    )
+
+    if not force:
+        try:
+            if not can_use_rich(client, db):
+                return False
+        except Exception:
+            return False
+
+    inline = getattr(getattr(client, "loader", None), "inline", None)
+    if inline is None:
+        return False
+
+    # Prefer via @bot path
+    try:
+        if not getattr(inline, "init_complete", False):
+            with contextlib.suppress(Exception):
+                await inline.register_manager(ignore_token_checks=True)
+        m = await inline.rich(
+            message,
+            html,
+            title=title[:64],
+            description=(description or "")[:120],
+            silent=silent,
+            reply_markup=reply_markup,
+            thumbnail_url=thumbnail_url,
+            pages=pages,
+            page=page,
+        )
+        if m:
+            return m
+    except Exception:
+        pass
+
+    # Bot API fallback
+    try:
+        from .rich_api import try_send_rich, to_rich_compatible
+
+        chat = get_chat_id(message) if not isinstance(message, int) else message
+        ok = await try_send_rich(client, chat, to_rich_compatible(html) if html else html)
+        if ok:
+            if hasattr(message, "out") and message.out:
+                with contextlib.suppress(Exception):
+                    await message.delete()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 async def answer(
     message: Message | InlineCall | InlineMessage,
     response: str,
@@ -375,8 +496,41 @@ async def answer(
             )
             return result
 
-    # Rich (via/@bot) only from Help / Info / Tester / Loader — not global answer()
-    kwargs.pop("skip_rich", None)
+    # External + built-in: optional native Rich Message (via @inline bot)
+    #   await utils.answer(message, html, rich=True)
+    #   await utils.answer_rich(message, html)
+    skip_rich = bool(kwargs.pop("skip_rich", False))
+    want_rich = bool(kwargs.pop("rich", False))
+    if (
+        not skip_rich
+        and isinstance(response, str)
+        and (
+            want_rich
+            or looks_like_rich_html(response)
+        )
+    ):
+        try:
+            client = getattr(message, "client", None)
+            db = getattr(client, "hikkari_db", None) if client else None
+            if client and can_use_rich(client, db):
+                title = kwargs.pop("rich_title", None) or "Hikkari"
+                desc = kwargs.pop("rich_description", None) or "Rich message"
+                thumb = kwargs.pop("thumbnail_url", None)
+                pages = kwargs.pop("rich_pages", None)
+                m = await answer_rich(
+                    message,
+                    response,
+                    title=str(title)[:64],
+                    description=str(desc)[:120],
+                    reply_markup=None,  # reply_markup already handled above
+                    thumbnail_url=thumb,
+                    silent=True,
+                    pages=pages,
+                )
+                if m:
+                    return m
+        except Exception:
+            pass  # fall through to classic answer
 
     if isinstance(message, (InlineMessage, InlineCall, BotInlineCall)):
         await message.edit(response)
