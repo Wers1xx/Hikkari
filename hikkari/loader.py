@@ -711,6 +711,34 @@ def need_update(*update_types: BotUpdateType):
     return inner
 
 
+
+def _normalize_external_source(src: str) -> str:
+    """Rewrite telethon/herokutl/hikkatl imports to hikkaritl for external modules."""
+    if not src:
+        return src
+    # from telethon... / import telethon...
+    pairs = (
+        ("telethon", "hikkaritl"),
+        ("herokutl", "hikkaritl"),
+        ("hikkatl", "hikkaritl"),
+        ("heroku.tl", "hikkaritl"),
+    )
+    out = src
+    for old, new in pairs:
+        # from X import / from X.Y import
+        out = re.sub(
+            rf"(from\s+){re.escape(old)}(\b)",
+            rf"\1{new}\2",
+            out,
+        )
+        out = re.sub(
+            rf"(import\s+){re.escape(old)}(\b)",
+            rf"\1{new}\2",
+            out,
+        )
+    return out
+
+
 class Modules:
     """Stores all registered modules"""
 
@@ -806,6 +834,18 @@ class Modules:
         loaded += await self._register_modules(mods)
 
         if not no_external:
+            with contextlib.suppress(Exception):
+                _ensure_tl_aliases()
+            # Ensure package attrs before external batch
+            try:
+                _pkg = sys.modules.get(__package__)
+                if _pkg is not None:
+                    if not hasattr(_pkg, "loader"):
+                        _pkg.loader = sys.modules.get(f"{__package__}.loader") or sys.modules[__name__]
+                    if not hasattr(_pkg, "utils"):
+                        _pkg.utils = sys.modules.get(f"{__package__}.utils")
+            except Exception:
+                pass
             loaded += await self._register_modules(external_mods, "<file>")
 
         _release_memory()
@@ -872,6 +912,12 @@ class Modules:
                 src = Path(mod).read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 src = Path(mod).read_text(encoding="utf-8", errors="replace")
+
+            # Normalize TL library imports so Hikka/Heroku modules run on hikkaritl
+            if origin == "<file>" or origin.startswith("<file"):
+                src = _normalize_external_source(src)
+                with contextlib.suppress(Exception):
+                    _ensure_tl_aliases()
 
             spec = importlib.machinery.ModuleSpec(
                 module_name,
@@ -1034,10 +1080,14 @@ class Modules:
         await _exec_module()
 
         ret = None
-
-        ret = None
         for value in vars(module).values():
-            if not inspect.isclass(value) or not issubclass(value, Module):
+            if not inspect.isclass(value):
+                continue
+            try:
+                if not issubclass(value, Module):
+                    continue
+            except TypeError:
+                # typing constructs / incomplete classes
                 continue
             if value is Module:
                 continue
@@ -1052,13 +1102,35 @@ class Modules:
                 )
                 raise
 
-        if hasattr(module, "__version__"):
-            ret.__version__ = module.__version__
+        if ret is None:
+            # Fallback: any class with strings["name"] (legacy modules)
+            for value in vars(module).values():
+                if not inspect.isclass(value):
+                    continue
+                strings = getattr(value, "strings", None)
+                if isinstance(strings, dict) and strings.get("name"):
+                    try:
+                        if Module not in getattr(value, "__mro__", ()):
+                            # force subclass if it looks like a module but MRO broken
+                            pass
+                        ret = value()
+                        break
+                    except Exception as e:
+                        logger.debug("fallback instantiate %s: %s", value, e)
 
         if ret is None:
-            ret = module.register(module_name)
+            try:
+                ret = module.register(module_name)
+            except Exception as e:
+                raise TypeError(
+                    f"No Module class found in {module_name} and register() failed: {e}"
+                ) from e
             if not isinstance(ret, Module):
                 raise TypeError(f"Instance is not a Module, it is {type(ret)}")
+
+        if hasattr(module, "__version__"):
+            with contextlib.suppress(Exception):
+                ret.__version__ = module.__version__
 
         ret.__origin__ = origin
 
