@@ -748,25 +748,66 @@ class UpdaterMod(loader.Module):
     def req_common():
         # Now we have downloaded new code, install requirements
         logger.debug("Installing new requirements...")
+        is_venv = hasattr(sys, "real_prefix") or (
+            hasattr(sys, "base_prefix") and sys.prefix != sys.base_prefix
+        )
+        # --user breaks installs inside venv (and Docker with VIRTUAL_ENV)
+        use_user = (
+            not is_venv
+            and "VIRTUAL_ENV" not in os.environ
+            and "PIP_TARGET" not in os.environ
+        )
+        req_path = os.path.join(
+            os.path.dirname(utils.get_base_dir()),
+            "requirements.txt",
+        )
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "-q",
+            "--disable-pip-version-check",
+            "--no-warn-script-location",
+            "--prefer-binary",
+            *([] if not use_user else ["--user"]),
+            "-r",
+            req_path,
+        ]
         try:
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "-r",
-                    os.path.join(
-                        os.path.dirname(utils.get_base_dir()),
-                        "requirements.txt",
-                    ),
-                    "--user",
-                ],
-                check=True,
+            r = subprocess.run(
+                cmd,
+                check=False,
                 timeout=600,
                 capture_output=True,
             )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            if r.returncode != 0:
+                err = ((r.stderr or r.stdout) or b"").decode(errors="ignore")
+                logger.error(
+                    "Req install failed (rc=%s): %s",
+                    r.returncode,
+                    err[-1200:] if err else "<no output>",
+                )
+                # Soft fallback: try critical packages without full freeze
+                for pkg in ("sympy", "mpmath", "meval"):
+                    with contextlib.suppress(Exception):
+                        subprocess.run(
+                            [
+                                sys.executable,
+                                "-m",
+                                "pip",
+                                "install",
+                                "-q",
+                                "--prefer-binary",
+                                *([] if not use_user else ["--user"]),
+                                pkg,
+                            ],
+                            check=False,
+                            timeout=180,
+                            capture_output=True,
+                        )
+        except (subprocess.TimeoutExpired, OSError):
             logger.exception("Req install failed")
 
     @loader.command()

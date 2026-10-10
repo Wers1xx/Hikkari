@@ -131,6 +131,7 @@ def deps():
             "-q",
             "--disable-pip-version-check",
             "--no-warn-script-location",
+            "--prefer-binary",
             "-r",
             "requirements.txt",
         ],
@@ -225,7 +226,7 @@ else:
         from . import main
     except ImportError as e:
         print(
-            f"{str(e)}\n\U0001f504 Attempting dependencies installation... Just wait <emoji document_id=5382194935057372936>⏱</emoji>"
+            f"{str(e)}\n\U0001f504 Attempting dependencies installation... Just wait ⏱"
         )
         deps()
         restart()
