@@ -548,6 +548,52 @@ class Evaluator(loader.Module):
             **self.get_sub(hikkaritl.tl.types),
         }
 
+
+    async def _ensure_sympy(self) -> bool:
+        """Install sympy + mpmath (venv-aware, no --user in venv)."""
+        import logging
+        import subprocess
+        import sys
+
+        log = logging.getLogger(__name__)
+        is_venv = hasattr(sys, "real_prefix") or (
+            hasattr(sys, "base_prefix") and sys.prefix != sys.base_prefix
+        )
+        use_user = (
+            not is_venv
+            and "VIRTUAL_ENV" not in os.environ
+            and "PIP_TARGET" not in os.environ
+        )
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--disable-pip-version-check",
+            "--no-warn-script-location",
+            "--prefer-binary",
+            *(["--user"] if use_user else []),
+            "sympy>=1.12",
+            "mpmath>=1.3.0",
+        ]
+        try:
+            r = await utils.run_sync(
+                subprocess.run,
+                cmd,
+                check=False,
+                capture_output=True,
+                timeout=300,
+            )
+            if r.returncode != 0:
+                err = ((r.stderr or r.stdout) or b"").decode(errors="ignore")
+                log.error("sympy install failed: %s", err[-800:])
+                return False
+            return True
+        except Exception:
+            log.exception("sympy install exception")
+            return False
+
     def _math_namespace(self) -> dict:
         """Rich math context for .e and .calc (sympy + stdlib)."""
         import math
@@ -892,10 +938,23 @@ class Evaluator(loader.Module):
         if ns.get("_sympy_missing"):
             await utils.answer(
                 message,
-                "🚫 <b>sympy</b> is not installed.\n"
-                "<code>pip install sympy mpmath</code>",
+                "⏳ <b>Installing sympy + mpmath…</b>",
             )
-            return
+            ok = await self._ensure_sympy()
+            if not ok:
+                await utils.answer(
+                    message,
+                    "🚫 <b>sympy</b> install failed.\n"
+                    "Run: <code>pip install sympy mpmath</code>",
+                )
+                return
+            ns = self._math_namespace()
+            if ns.get("_sympy_missing"):
+                await utils.answer(
+                    message,
+                    "🚫 <b>sympy</b> still missing. Restart userbot.",
+                )
+                return
 
         # Pre-declare common symbols so bare x,y,z work
         try:
