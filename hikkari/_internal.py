@@ -68,7 +68,7 @@ def restart():
 
     logging.getLogger().setLevel(logging.CRITICAL)
 
-    print("<emoji document_id=5258200195589504369>🔄</emoji> Restarting...")
+    print("🔄 Restarting...")
 
     # Fast-path flags for the next process
     os.environ["HIKKARI_FAST_START"] = "1"
@@ -169,13 +169,30 @@ def get_branch_name(repo_path):
 
 
 def reset_to_master(repo_path):
-    """Reset repository to master branch using gitpython or subprocess fallback"""
+    """Reset repository to master (or preferred branch if stored). Never silently drop beta."""
+    target = "master"
+    # Prefer last user-chosen branch if recorded next to the repo
+    for candidate in (
+        os.path.join(repo_path, ".hikkari_branch"),
+        os.path.join(repo_path, "data", ".hikkari_branch"),
+    ):
+        try:
+            with open(candidate, encoding="utf-8") as f:
+                name = f.read().strip()
+            if name in ("master", "beta", "dev"):
+                target = name
+                break
+        except Exception:
+            pass
     try:
         import git
 
         with git.Repo(path=repo_path) as repo:
             repo.head.reset(index=True, working_tree=True)
-            repo.heads.master.checkout(force=True)
+            if target in repo.heads:
+                repo.heads[target].checkout(force=True)
+            elif "master" in repo.heads:
+                repo.heads.master.checkout(force=True)
     except Exception:
         try:
             subprocess.run(
@@ -185,7 +202,7 @@ def reset_to_master(repo_path):
                 timeout=5,
             )
             subprocess.run(
-                ["git", "checkout", "master", "-f"],
+                ["git", "checkout", target, "-f"],
                 cwd=repo_path,
                 capture_output=True,
                 timeout=5,

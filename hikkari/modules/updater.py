@@ -91,18 +91,122 @@ class UpdaterMod(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
-                "notify_owners",
-                True,
-                "Рассылать уведомления об обновлениях всем owner (не только основной аккаунт)",
-                validator=loader.validators.Boolean(),
-            ),
-            loader.ConfigValue(
                 "autoupdate",
                 False,
                 doc=lambda: self.strings["_cfg_doc_autoupdate"],
                 validator=loader.validators.Boolean(),
             ),
         )
+
+
+    def _repo_dir(self) -> str:
+        return os.path.dirname(utils.get_base_dir())
+
+    def _current_branch(self) -> str:
+        """Live branch: git HEAD → preferred_branch in DB → version.branch → master."""
+        try:
+            from .._internal import get_branch_name
+            b = get_branch_name(self._repo_dir())
+            if b and b not in ("HEAD", "detached"):
+                return b
+        except Exception:
+            pass
+        pref = None
+        with contextlib.suppress(Exception):
+            pref = self.get("preferred_branch")
+        if not pref:
+            with contextlib.suppress(Exception):
+                pref = self._db.get("Updater", "preferred_branch", None)
+        if isinstance(pref, str) and pref.strip():
+            return pref.strip()
+        return getattr(version, "branch", None) or "master"
+
+    def _persist_branch(self, name: str) -> None:
+        name = (name or "master").strip()
+        with contextlib.suppress(Exception):
+            self.set("preferred_branch", name)
+        with contextlib.suppress(Exception):
+            self._db.set("Updater", "preferred_branch", name)
+        with contextlib.suppress(Exception):
+            version.branch = name
+        # Survive container recreation / code tree resets
+        with contextlib.suppress(Exception):
+            marker = os.path.join(self._repo_dir(), ".hikkari_branch")
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(name)
+
+    def _fetch_branch(self, branch: str | None = None) -> None:
+        """Fetch origin/<branch> explicitly (works with single-branch clones)."""
+        branch = branch or self._current_branch()
+        repo_dir = self._repo_dir()
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "fetch",
+                    "--quiet",
+                    "origin",
+                    f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+                ],
+                cwd=repo_dir,
+                timeout=30,
+                capture_output=True,
+                check=False,
+            )
+        except Exception as e:
+            logger.debug("fetch branch %s failed: %s", branch, e)
+            try:
+                subprocess.run(
+                    ["git", "fetch", "--quiet", "origin"],
+                    cwd=repo_dir,
+                    timeout=30,
+                    capture_output=True,
+                    check=False,
+                )
+            except Exception as e2:
+                logger.debug("fetch origin failed: %s", e2)
+
+    async def _ensure_preferred_branch(self) -> None:
+        """If DB says beta but git is on master — re-checkout and keep it."""
+        if NO_GIT:
+            return
+        pref = None
+        with contextlib.suppress(Exception):
+            pref = self.get("preferred_branch") or self._db.get(
+                "Updater", "preferred_branch", None
+            )
+        if not isinstance(pref, str) or not pref.strip():
+            # adopt current git as preferred so it survives
+            cur = self._current_branch()
+            self._persist_branch(cur)
+            return
+        pref = pref.strip()
+        cur = self._current_branch()
+        if cur == pref:
+            self._persist_branch(pref)
+            return
+        logger.warning(
+            "Branch drift: git=%s preferred=%s — restoring preferred", cur, pref
+        )
+        try:
+            self._fetch_branch(pref)
+            with git.Repo(self._repo_dir()) as repo:
+                try:
+                    repo.git.checkout("-B", pref, f"origin/{pref}")
+                except Exception:
+                    if pref in repo.heads:
+                        repo.heads[pref].checkout(force=True)
+                    else:
+                        raise
+                with contextlib.suppress(Exception):
+                    repo.heads[pref].set_tracking_branch(
+                        repo.remotes.origin.refs[pref]
+                    )
+            self._persist_branch(pref)
+            logger.info("Restored branch %s", pref)
+        except Exception:
+            logger.exception("Failed to restore preferred branch %s", pref)
+
 
     async def _set_autoupdate_state(self, call: BotInlineCall, state: bool):
         self.set("autoupdate_answered", True)
@@ -176,19 +280,10 @@ class UpdaterMod(loader.Module):
                     self._last_git_fetch == 0.0
                     or now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL
                 ):
-                    logger.debug("Fetching changelog from %s", origin.url)
+                    br = self._current_branch()
+                    logger.debug("Fetching changelog from %s branch=%s", origin.url, br)
                     try:
-                        subprocess.run(
-                            ["git", "fetch", "--quiet", "origin"],
-                            cwd=repo.working_dir,
-                            timeout=15,
-                            capture_output=True,
-                            check=False,
-                        )
-                    except subprocess.TimeoutExpired:
-                        logger.warning(
-                            "git fetch timed out — using local commits for changelog"
-                        )
+                        self._fetch_branch(br)
                     except Exception as e:
                         logger.debug("git fetch skipped: %s", e)
                     self._last_git_fetch = now
@@ -200,9 +295,9 @@ class UpdaterMod(loader.Module):
 
             current = repo.head.commit.hexsha
             latest = next(
-                repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
             ).hexsha
-            commits = [*repo.iter_commits(f"HEAD..origin/{version.branch}")]
+            commits = [*repo.iter_commits(f"HEAD..origin/{self._current_branch()}")]
 
             return (
                 current,
@@ -225,105 +320,23 @@ class UpdaterMod(loader.Module):
         try:
             with git.Repo() as repo:
                 return next(
-                    repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                    repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
                 ).hexsha
         except Exception:
             return ""
 
     async def client_ready(self):
+        # Restore preferred branch (beta must survive restarts / container recreation)
+        with contextlib.suppress(Exception):
+            await self._ensure_preferred_branch()
         # Immediate update check on start (don't wait for first poll interval)
         async def _boot_check():
             await asyncio.sleep(3)  # let inline bot / net settle
             with contextlib.suppress(Exception):
+                self._fetch_branch()
+            with contextlib.suppress(Exception):
                 await self.poller()
         asyncio.ensure_future(_boot_check())
-
-
-    def _update_notify_recipients(self) -> list[int]:
-        """All user IDs that should get update / announcement notifications."""
-        ids: set[int] = set()
-        # Primary account
-        with contextlib.suppress(Exception):
-            ids.add(int(self.tg_id))
-        # All linked clients
-        with contextlib.suppress(Exception):
-            for c in getattr(self, "allclients", None) or []:
-                with contextlib.suppress(Exception):
-                    ids.add(int(c.tg_id))
-        # Security owners (if enabled)
-        if bool(self.config.get("notify_owners", True)):
-            with contextlib.suppress(Exception):
-                owners = list(
-                    getattr(self._client.dispatcher.security, "owner", None) or []
-                )
-                for o in owners:
-                    with contextlib.suppress(Exception):
-                        ids.add(int(o))
-            with contextlib.suppress(Exception):
-                # db pointer fallback
-                from .. import security as _sec
-                for o in self._db.get(_sec.__name__, "owner", []) or []:
-                    with contextlib.suppress(Exception):
-                        ids.add(int(o))
-        return sorted(ids)
-
-    async def _broadcast_update_notice(
-        self,
-        text: str,
-        *,
-        reply_markup=None,
-        disable_web_page_preview: bool = True,
-    ) -> int | None:
-        """Send notice to every recipient via inline bot, fallback to userbot DM."""
-        recipients = self._update_notify_recipients()
-        if not recipients:
-            recipients = [int(self.tg_id)]
-
-        primary_msg_id = None
-        bot = getattr(getattr(self, "inline", None), "bot", None)
-
-        for uid in recipients:
-            sent = False
-            # 1) Inline bot (preferred — buttons work)
-            if bot is not None:
-                try:
-                    kw = {
-                        "disable_web_page_preview": disable_web_page_preview,
-                    }
-                    if reply_markup is not None:
-                        kw["reply_markup"] = reply_markup
-                    m = await bot.send_message(uid, text, **kw)
-                    if primary_msg_id is None:
-                        primary_msg_id = getattr(m, "message_id", None) or getattr(
-                            m, "id", None
-                        )
-                    sent = True
-                except Exception as e:
-                    logger.debug(
-                        "update notify via bot to %s failed: %s", uid, e
-                    )
-            # 2) Fallback: userbot → Saved Messages / user
-            if not sent:
-                try:
-                    # Prefer main client for own id; otherwise try each client
-                    clients = list(getattr(self, "allclients", None) or [self._client])
-                    for c in clients:
-                        try:
-                            await c.send_message(
-                                uid,
-                                text,
-                                link_preview=not disable_web_page_preview,
-                            )
-                            sent = True
-                            break
-                        except Exception:
-                            continue
-                except Exception as e:
-                    logger.debug("update notify via client to %s failed: %s", uid, e)
-            if not sent:
-                logger.warning("Could not deliver update notice to %s", uid)
-
-        return primary_msg_id
 
     @loader.loop(interval=60, autostart=True)
     async def poller_announcement(self):
@@ -341,9 +354,9 @@ class UpdaterMod(loader.Module):
                         announcement = (await r.text()).strip()
                         previous = self.get("announcement", "")
                         if announcement and announcement != previous:
-                            await self._broadcast_update_notice(
+                            await self.inline.bot.send_message(
+                                self.tg_id,
                                 self.strings["announcement"].format(announcement),
-                                reply_markup=None,
                             )
                             self.set("announcement", announcement)
                     case _:
@@ -358,8 +371,14 @@ class UpdaterMod(loader.Module):
         try:
             current, self._pending, changelog = self._get_update_state()
         except Exception as e:
-            self._log_git_poll_error(e)
-            return
+            # origin/<branch> may be missing on single-branch clones — fetch and retry
+            with contextlib.suppress(Exception):
+                self._fetch_branch()
+            try:
+                current, self._pending, changelog = self._get_update_state()
+            except Exception as e2:
+                self._log_git_poll_error(e2)
+                return
 
         if (
             self.config["disable_notifications"] and not self.config["autoupdate"]
@@ -375,26 +394,24 @@ class UpdaterMod(loader.Module):
 
         if self._pending not in {current, self._notified}:
             # Autoupdate removed: only notify, never auto-pull
-            # Broadcast to all owners / linked accounts (not only primary tg_id)
-            text = self.strings["update_required"].format(
-                current[:6],
-                '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                    current[:12],
-                    self._pending[:12],
-                    self._pending[:6],
+            m = await self.inline.bot.send_message(
+                self.tg_id,
+                self.strings["update_required"].format(
+                    current[:6],
+                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                        current[:12],
+                        self._pending[:12],
+                        self._pending[:6],
+                    ),
+                    changelog,
                 ),
-                changelog,
-            )
-            msg_id = await self._broadcast_update_notice(
-                text,
                 reply_markup=self._markup(),
                 disable_web_page_preview=True,
             )
             self._notified = self._pending
             self.set("ignore_permanent", False)
             await self._delete_all_upd_messages()
-            if msg_id is not None:
-                self.set("upd_msg", msg_id)
+            self.set("upd_msg", m.message_id)
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
@@ -483,7 +500,7 @@ class UpdaterMod(loader.Module):
                 message,
                 self.strings.get(
                     "changelog_empty",
-                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Changelog is empty</b>",
+                    "✨ <b>Changelog is empty</b>",
                 ),
             )
             return
@@ -499,7 +516,7 @@ class UpdaterMod(loader.Module):
 
         body = self.strings["changelog"].format(changelog)
         if build or ver:
-            prefix = f"<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari</b> <code>v{ver}</code>"
+            prefix = f"✨ <b>Hikkari</b> <code>v{ver}</code>"
             if build:
                 prefix += f" · {build}"
             body = prefix + "\n" + body
@@ -659,16 +676,46 @@ class UpdaterMod(loader.Module):
 
     async def download_common(self):
         self._save_pre_update_sha()
+        branch = self._current_branch()
 
         def _sync():
             try:
                 with Repo(os.path.dirname(utils.get_base_dir())) as repo:
                     origin = repo.remote("origin")
-                    logger.debug("Fetching updates from %s", origin.url)
-                    r = origin.pull()
+                    logger.debug("Fetching updates from %s branch=%s", origin.url, branch)
+                    try:
+                        origin.fetch(
+                            refspec=f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+                        )
+                    except Exception:
+                        origin.fetch()
+                    # Stay on preferred branch — never force master
+                    try:
+                        if branch not in repo.heads:
+                            repo.create_head(branch, f"origin/{branch}")
+                        repo.heads[branch].checkout(force=True)
+                        with contextlib.suppress(Exception):
+                            repo.heads[branch].set_tracking_branch(
+                                origin.refs[branch]
+                            )
+                    except Exception as ce:
+                        logger.debug("checkout %s before pull: %s", branch, ce)
+                    old = repo.head.commit.hexsha
+                    try:
+                        r = origin.pull(branch)
+                    except Exception:
+                        repo.git.pull("origin", branch)
+                        r = []
                     new_commit = repo.head.commit
-                    for info in r:
-                        if info.old_commit:
+                    if new_commit.hexsha != old:
+                        try:
+                            for d in new_commit.diff(repo.commit(old)):
+                                if d.b_path == "requirements.txt":
+                                    return True
+                        except Exception:
+                            pass
+                    for info in r or []:
+                        if getattr(info, "old_commit", None):
                             for d in new_commit.diff(info.old_commit):
                                 if d.b_path == "requirements.txt":
                                     return True
@@ -678,10 +725,18 @@ class UpdaterMod(loader.Module):
                 with repo:
                     origin = repo.create_remote("origin", self.config["GIT_ORIGIN_URL"])
                     logger.debug("Fetching initial updates from %s", origin.url)
-                    origin.fetch()
-                    repo.create_head("master", origin.refs.master)
-                    repo.heads.master.set_tracking_branch(origin.refs.master)
-                    repo.heads.master.checkout(True)
+                    br = branch or "master"
+                    try:
+                        origin.fetch(
+                            refspec=f"+refs/heads/{br}:refs/remotes/origin/{br}"
+                        )
+                    except Exception:
+                        origin.fetch()
+                    ref = getattr(origin.refs, br, None) or origin.refs.master
+                    if br not in repo.heads:
+                        repo.create_head(br, ref)
+                    repo.heads[br].set_tracking_branch(ref)
+                    repo.heads[br].checkout(True)
                 return False
 
         return await asyncio.wait_for(
@@ -727,7 +782,7 @@ class UpdaterMod(loader.Module):
             current = utils.get_git_hash() or ""
             with git.Repo() as repo:
                 upcoming = next(
-                    repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                    repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
                 ).hexsha
             if (
                 "-f" in args
@@ -925,7 +980,7 @@ class UpdaterMod(loader.Module):
             return
 
         if args not in ("master", "beta", "main"):
-            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Use <code>master</code> or <code>beta</code>")
+            await utils.answer(message, "❌ Use <code>master</code> or <code>beta</code>")
             return
         if args == "main":
             args = "master"
@@ -935,7 +990,7 @@ class UpdaterMod(loader.Module):
             if not allowed:
                 await utils.answer(
                     message,
-                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>Нет доступа к ветке beta</b>\n\n"
+                    "🚫 <b>Нет доступа к ветке beta</b>\n\n"
                     f"ID: <code>{uid}</code>\n"
                     "Переход на beta разрешён только ID из списка на GitHub:\n"
                     "<code>assets/beta_users.txt</code>\n"
@@ -946,7 +1001,7 @@ class UpdaterMod(loader.Module):
                 return
 
         if NO_GIT:
-            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Git disabled")
+            await utils.answer(message, "❌ Git disabled")
             return
 
         try:
@@ -1009,7 +1064,7 @@ class UpdaterMod(loader.Module):
                 if not remote_has:
                     await utils.answer(
                         message,
-                        f"<emoji document_id=5237898864433837164>👎</emoji> Remote branch <code>{args}</code> not found on origin\n"
+                        f"❌ Remote branch <code>{args}</code> not found on origin\n"
                         f"<i>Проверь:</i> <code>git ls-remote --heads origin</code>",
                     )
                     return
@@ -1018,7 +1073,7 @@ class UpdaterMod(loader.Module):
                     repo.git.checkout("-B", args, f"origin/{args}")
                 except Exception:
                     if args in repo.heads:
-                        repo.heads[args].checkout()
+                        repo.heads[args].checkout(force=True)
                     else:
                         target = None
                         for r in repo.refs:
@@ -1031,15 +1086,20 @@ class UpdaterMod(loader.Module):
                                 f"no local ref for {args} after fetch"
                             )
                         repo.create_head(args, target).checkout()
+                # Pin upstream so future pulls/polls stay on this branch
+                with contextlib.suppress(Exception):
+                    repo.heads[args].set_tracking_branch(
+                        repo.remotes.origin.refs[args]
+                    )
                 try:
                     repo.git.pull("origin", args)
                 except Exception as pe:
                     logger.debug("pull after branch switch: %s", pe)
 
-            version.branch = args
+            self._persist_branch(args)
             await utils.answer(
                 message,
-                f"<emoji document_id=5256182535917940722>⤵️</emoji> Switched to <code>{args}</code>\n"
+                f"✅ Switched to <code>{args}</code>\n"
                 f"Restarting to apply…",
             )
             try:
@@ -1051,7 +1111,7 @@ class UpdaterMod(loader.Module):
             logger.exception("branch switch failed")
             await utils.answer(
                 message,
-                f"<emoji document_id=5237898864433837164>👎</emoji> Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
+                f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
             )
 
 
@@ -1068,7 +1128,7 @@ class UpdaterMod(loader.Module):
         except Exception:
             pass
         lines = [
-            "<b><emoji document_id=5283176512747507510>✨</emoji> Beta access</b>",
+            "<b>✨ Beta access</b>",
             "",
             "<b>GitHub</b> <code>assets/beta_users.txt</code>:",
         ]
@@ -1088,6 +1148,38 @@ class UpdaterMod(loader.Module):
         await utils.answer(message, "\n".join(lines))
 
     @loader.command(
+        ru_doc="<id|reply> — локально добавить beta (основной список на GitHub)",
+        en_doc="<id|reply> — local beta grant (main list is on GitHub)",
+    )
+    async def betagrant(self, message: Message):
+        """Local-only beta grant. Prefer editing GitHub assets/beta_users.txt"""
+        args = utils.get_args_raw(message)
+        uid = None
+        if args and str(args).strip().isdigit():
+            uid = int(str(args).strip())
+        elif message.is_reply:
+            reply = await message.get_reply_message()
+            uid = reply.sender_id if reply else None
+        if not uid:
+            await utils.answer(
+                message,
+                "❌ Reply / ID\n\n"
+                "<b>Main list:</b> edit on GitHub\n"
+                "<code>assets/beta_users.txt</code>",
+            )
+            return
+        cur = list(self.config.get("beta_users") or [])
+        if uid not in [int(x) for x in cur]:
+            cur.append(int(uid))
+            self.config["beta_users"] = cur
+        await utils.answer(
+            message,
+            f"✅ Local beta for <code>{uid}</code>\n"
+            f"Prefer adding ID to GitHub <code>assets/beta_users.txt</code> "
+            f"so all installs see it.",
+        )
+
+    @loader.command(
         ru_doc="<id|reply> — убрать локальный beta-доступ",
         en_doc="<id|reply> — revoke local beta access",
     )
@@ -1101,7 +1193,7 @@ class UpdaterMod(loader.Module):
             reply = await message.get_reply_message()
             uid = reply.sender_id if reply else None
         if not uid:
-            await utils.answer(message, "<emoji document_id=5237898864433837164>👎</emoji> Reply to user or pass numeric ID")
+            await utils.answer(message, "❌ Reply to user or pass numeric ID")
             return
         cur = [int(x) for x in (self.config.get("beta_users") or [])]
         if uid in cur:
@@ -1109,7 +1201,7 @@ class UpdaterMod(loader.Module):
             self.config["beta_users"] = cur
         await utils.answer(
             message,
-            f"<emoji document_id=5256182535917940722>⤵️</emoji> Local beta revoked for <code>{uid}</code>\n"
+            f"✅ Local beta revoked for <code>{uid}</code>\n"
             f"GitHub list is separate — edit <code>assets/beta_users.txt</code> there.",
         )
 
@@ -1177,7 +1269,7 @@ class UpdaterMod(loader.Module):
                     self.tg_id,
                     self.strings.get(
                         "update_auto_rollback",
-                        "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
+                        "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
                     ).format(sha=(old or "?")[:7]),
                 )
         else:
@@ -1464,14 +1556,14 @@ class UpdaterMod(loader.Module):
                     message,
                     self.strings.get(
                         "rollback_version_not_found",
-                        f"<emoji document_id=5240241223632954241>🚫</emoji> <b>Version</b> <code>{args}</code> <b>not found in git history</b>",
+                        f"🚫 <b>Version</b> <code>{args}</code> <b>not found in git history</b>",
                     ),
                 )
                 return
             target = ("sha", sha, args)
             confirm = self.strings.get(
                 "rollback_confirm_ver",
-                "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Rollback to version</b> <code>{ver}</code> (<code>{sha}</code>)?",
+                "⚠️ <b>Rollback to version</b> <code>{ver}</code> (<code>{sha}</code>)?",
             ).format(ver=args, sha=sha[:7])
         elif args.isdigit():
             n = int(args)
@@ -1490,20 +1582,20 @@ class UpdaterMod(loader.Module):
             reply_markup=[
                 [
                     {
-                        "text": "⤵️",
+                        "text": "✅",
                         "callback": self.rollback_confirm,
                         "args": [target[0], target[1], target[2]],
                         "style": "success",
                     }
                 ],
-                [{"text": "👎", "action": "close", "style": "danger"}],
+                [{"text": "❌", "action": "close", "style": "danger"}],
             ],
         )
 
     async def rollback_confirm(self, call: InlineCall, mode: str, value, label: str):
         await utils.answer(
             call,
-            self.strings.get("rollback_process", "<emoji document_id=5386367538735104399>⌛</emoji> Rollback…").format(num=label),
+            self.strings.get("rollback_process", "⏳ Rollback…").format(num=label),
         )
         utils.ensure_child_watcher()
         if mode == "commits":
@@ -1545,12 +1637,12 @@ class UpdaterMod(loader.Module):
             reply_markup=[
                 [
                     {
-                        "text": "⤵️",
+                        "text": "✅",
                         "callback": self.ubstop_func,
                         "style": "primary",
                     },
                 ],
-                [{"text": "👎", "action": "close", "style": "primary"}],
+                [{"text": "❌", "action": "close", "style": "primary"}],
             ],
             silent=True,
         )
