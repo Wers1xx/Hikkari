@@ -30,9 +30,9 @@ from collections.abc import Callable
 async def fw_protect():
     # Shorter pause after restart / when fast-start is set
     if os.environ.get("HIKKARI_FAST_START") or os.environ.get("HIKKARI_DO_NOT_RESTART"):
-        await asyncio.sleep(random.randint(20, 60) / 1000)
+        await asyncio.sleep(0.02)
     else:
-        await asyncio.sleep(random.randint(200, 500) / 1000)
+        await asyncio.sleep(0.05)
 
 
 def get_startup_callback() -> Callable:
