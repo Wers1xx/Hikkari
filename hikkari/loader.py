@@ -847,40 +847,23 @@ class Modules:
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
-        """Load modules sequentially — same reliable path as Heroku."""
+        """Sequential filesystem load — same algorithm as Heroku."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         loaded = []
 
-        # Ensure relative imports (from .. import loader / utils) always work
+        # Package attrs for `from .. import loader`
         try:
             _pkg = sys.modules.get(__package__)
             if _pkg is not None:
                 if not hasattr(_pkg, "loader"):
-                    _pkg.loader = sys.modules.get(f"{__package__}.loader") or sys.modules.get(__name__)
+                    _pkg.loader = sys.modules.get(__name__)
                 if not hasattr(_pkg, "utils"):
                     with contextlib.suppress(Exception):
-                        _pkg.utils = sys.modules.get(f"{__package__}.utils") or importlib.import_module(
-                            f"{__package__}.utils"
-                        )
-                if not hasattr(_pkg, "main"):
-                    with contextlib.suppress(Exception):
-                        _pkg.main = sys.modules.get(f"{__package__}.main")
+                        _pkg.utils = importlib.import_module(f"{__package__}.utils")
         except Exception:
             pass
-
-        pkg_parent = f"{__package__}.{MODULES_NAME}"
-        if pkg_parent not in sys.modules:
-            try:
-                importlib.import_module(pkg_parent)
-            except Exception:
-                if pkg_parent not in sys.modules:
-                    import types as _types
-                    _p = _types.ModuleType(pkg_parent)
-                    _p.__path__ = [str(Path(utils.get_base_dir()) / MODULES_NAME)]
-                    _p.__package__ = pkg_parent
-                    sys.modules[pkg_parent] = _p
 
         if origin == "<file>" or str(origin).startswith("<file"):
             with contextlib.suppress(Exception):
@@ -901,7 +884,6 @@ class Modules:
                 except UnicodeDecodeError:
                     src = Path(mod).read_text(encoding="utf-8", errors="replace")
 
-                # External Hikka/Heroku modules: telethon/herokutl → hikkaritl
                 if origin == "<file>" or str(origin).startswith("<file"):
                     src = _normalize_external_source(src)
 
@@ -916,20 +898,16 @@ class Modules:
             except Exception as e:
                 logger.exception("Failed to load module %s due to %s:", mod, e)
                 try:
-                    fails = getattr(self, "_failed_module_names", None)
-                    if fails is None:
+                    if not hasattr(self, "_failed_module_names") or self._failed_module_names is None:
                         self._failed_module_names = []
-                        fails = self._failed_module_names
-                    short = os.path.basename(str(mod))
-                    fails.append(f"{short} ({type(e).__name__}: {str(e)[:120]})")
+                    self._failed_module_names.append(
+                        f"{os.path.basename(str(mod))} ({type(e).__name__}: {str(e)[:100]})"
+                    )
                 except Exception:
                     pass
-                # Drop broken module from sys.modules so next restart is clean
                 with contextlib.suppress(Exception):
                     mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
-                    sys.modules.pop(
-                        f"{__package__}.{MODULES_NAME}.{mod_shortname}", None
-                    )
+                    sys.modules.pop(f"{__package__}.{MODULES_NAME}.{mod_shortname}", None)
 
         return loaded
 
@@ -1507,6 +1485,7 @@ class Modules:
             except Exception:
                 logger.info("Can't process `on_dlmod` hook", exc_info=True)
 
+        client_ready_ok = True
         try:
             if len(inspect.signature(mod.client_ready).parameters) == 2:
                 await mod.client_ready(self.client, self._db)
@@ -1517,25 +1496,25 @@ class Modules:
                 raise e
 
             logger.debug("Unloading %s, because it raised SelfUnload", mod)
-            self.modules.remove(mod)
+            with contextlib.suppress(ValueError):
+                self.modules.remove(mod)
             return
         except SelfSuspend as e:
             if no_self_unload:
                 raise e
 
             logger.debug("Suspending %s, because it raised SelfSuspend", mod)
-            return
+            # Still register commands so module is usable when resumed
         except Exception as e:
+            # Heroku unloads here — that drops external modules (e.g. PMBL
+            # client_ready send_photo / missing inline.bot). Keep module loaded,
+            # log error, continue to register commands/watchers.
+            client_ready_ok = False
             logger.exception(
-                (
-                    "Failed to send mod init complete signal for %s due to %s,"
-                    " attempting unload"
-                ),
+                "client_ready failed for %s due to %s — module stays loaded",
                 mod,
                 e,
             )
-            self.modules.remove(mod)
-            raise
 
         # Check for pack_url and load translations
         if hasattr(mod, "__source__"):
