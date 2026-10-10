@@ -128,6 +128,27 @@ class Help(loader.Module):
                 return dev
         return None
 
+    @staticmethod
+    def _get_module_version(module) -> str | None:
+        """Version from __version__ or # meta version: — None if absent."""
+        ver = getattr(module, "__version__", None)
+        if isinstance(ver, tuple) and ver:
+            return ".".join(map(str, ver))
+        if isinstance(ver, (int, float)):
+            return str(ver)
+        if isinstance(ver, str) and ver.strip():
+            return ver.strip()
+        source = getattr(module, "__source__", None) or ""
+        if not source:
+            with contextlib.suppress(Exception):
+                source = inspect.getsource(module.__class__)
+        if source:
+            m = re.search(r"# ?meta version: ?(.+)", source, flags=re.I)
+            if m:
+                v = m.group(1).strip().strip('"').strip("'")
+                if v:
+                    return v
+        return None
 
     @staticmethod
     def _plain_doc(text: str | None, fallback: str = "") -> str:
@@ -395,6 +416,12 @@ class Help(loader.Module):
                             f"<details><summary>Placeholders</summary>"
                             f"<p>{html_mod.escape(ph)}</p></details>"
                         )
+                ver_text = self._get_module_version(module)
+                if ver_text:
+                    parts.append(
+                        f"<p><emoji document_id=5341715473882955310>⚙️</emoji> <b>Version:</b> "
+                        f"<code>{html_mod.escape(str(ver_text))}</code></p>"
+                    )
                 if dev_text:
                     # plain developer line (no nested broken HTML)
                     parts.append(
@@ -432,6 +459,7 @@ class Help(loader.Module):
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
+        _mod_ver = self._get_module_version(module)
         await utils.answer(
             message,
             f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
@@ -440,6 +468,7 @@ class Help(loader.Module):
                 if placeholders
                 else ""
             )
+            + (f"\n\n⚙️ <b>Version:</b> <code>{_mod_ver}</code>" if _mod_ver else "")
             + (f"\n\n{self.strings['developer']}".format(dev_text) if dev_text else "")
             + (f"\n\n{self.strings['not_exact']}" if not exact else "")
             + (

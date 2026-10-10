@@ -295,6 +295,25 @@ class LoaderMod(loader.Module):
                 rows.append((f"@{self.inline.bot_username} {name}", doc))
         return rows
 
+    @staticmethod
+    def _module_version_str(instance=None, doc: str = "") -> str:
+        """Return 'x.y.z' from __version__ or # meta version:, else ''."""
+        if instance is not None:
+            ver = getattr(instance, "__version__", None)
+            if isinstance(ver, tuple) and ver:
+                return ".".join(map(str, ver))
+            if isinstance(ver, (int, float)):
+                return str(ver)
+            if isinstance(ver, str) and ver.strip():
+                return ver.strip()
+        if doc:
+            m = re.search(r"# ?meta version: ?(.+)", doc, flags=re.I)
+            if m:
+                v = m.group(1).strip().strip('"').strip("'")
+                if v:
+                    return v
+        return ""
+
     async def _rich_module_loaded(
         self,
         message: Message,
@@ -306,17 +325,25 @@ class LoaderMod(loader.Module):
         origin: str = "",
         developer: str = "",
         meta_banner: str | None = None,
+        version: str = "",
     ) -> bool:
-        """Clean Rich announce after module install."""
+        """Clean Rich announce after module install. Retry + Bot API fallback."""
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, inject_banner_html
+            from ..utils.rich_api import html_table, inject_banner_html, try_send_rich
             import html as html_mod
 
             if not can_use_rich(self._client, self._db):
                 return False
+            # Ensure inline is ready (lost bot / late init)
             if not getattr(self.inline, "init_complete", False):
-                return False
+                with contextlib.suppress(Exception):
+                    await self.inline.register_manager(ignore_token_checks=True)
+            if not getattr(self.inline, "init_complete", False) and not getattr(
+                self.inline, "bot_token", None
+            ):
+                # Still try Bot API path below without via
+                pass
 
             # --- sanitize everything for Rich (no raw tags as text) ---
             name = self._plain_cmd_doc(modname, str(modname))[:64]
@@ -366,8 +393,11 @@ class LoaderMod(loader.Module):
                     f"<details open><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
                     f"{table}\n</details>"
                 )
-            # footer table: Developer / Source
+            # footer table: Version / Developer / Source
             footer_rows = []
+            ver_plain = (version or "").strip()
+            if ver_plain:
+                footer_rows.append(("Version", html_mod.escape(ver_plain[:32])))
             if dev_plain:
                 footer_rows.append(
                     ("Developer", html_mod.escape(dev_plain[:80]))
@@ -398,16 +428,46 @@ class LoaderMod(loader.Module):
             if meta_banner and str(meta_banner).startswith(("http://", "https://")):
                 html = inject_banner_html(html, meta_banner, force=True)
 
-            m = await self.inline.rich(
-                message,
-                html,
-                title=f"✓ {name}"[:64],
-                description=(desc[:80] if desc else "Module loaded"),
-                silent=True,
-                reply_markup=subscribe_markup,
-                thumbnail_url=meta_banner if meta_banner else None,
-            )
-            return bool(m)
+            title = f"✓ {name}"[:64]
+            description = desc[:80] if desc else "Module loaded"
+            thumb = meta_banner if meta_banner else None
+
+            # 1) via @inline bot (preferred)
+            m = None
+            if getattr(self.inline, "init_complete", False) or getattr(
+                self.inline, "bot_username", None
+            ):
+                for attempt in range(2):
+                    try:
+                        m = await self.inline.rich(
+                            message,
+                            html,
+                            title=title,
+                            description=description,
+                            silent=True,
+                            reply_markup=subscribe_markup,
+                            thumbnail_url=thumb,
+                        )
+                        if m:
+                            return True
+                    except Exception:
+                        logger.debug(
+                            "loader rich via attempt %s failed", attempt, exc_info=True
+                        )
+                    await asyncio.sleep(0.35 * (attempt + 1))
+
+            # 2) Bot API sendRichMessage fallback (no via, but still Rich)
+            try:
+                chat = utils.get_chat_id(message)
+                ok = await try_send_rich(self._client, chat, html)
+                if ok:
+                    if isinstance(message, Message) and message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return True
+            except Exception:
+                logger.debug("loader try_send_rich failed", exc_info=True)
+            return False
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
             return False
@@ -1862,6 +1922,7 @@ class LoaderMod(loader.Module):
             meta_b = None
             with contextlib.suppress(Exception):
                 meta_b = self._get_banner_url(doc) if doc else None
+            _ver = self._module_version_str(instance, doc or "")
             if await self._rich_module_loaded(
                 message,
                 modname=str(modname),
@@ -1871,6 +1932,7 @@ class LoaderMod(loader.Module):
                 origin=origin,
                 developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_b,
+                version=_ver,
             ):
                 return True
             await utils.answer(
