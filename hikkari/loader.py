@@ -1019,18 +1019,35 @@ class Modules:
                 LOADED_MODULES_DIR,
                 f"{cls_name}_{self.client.tg_id}.py",
             )
-            # Always persist when we have source — Heroku only saved origin=="<string>",
-            # so .lm/.dlm with other origins vanished after restart.
             data = None
             if hasattr(spec.loader, "data") and spec.loader.data:
                 data = spec.loader.data
                 if isinstance(data, str):
                     data = data.encode("utf-8")
             elif source_data:
-                data = source_data.encode("utf-8") if isinstance(source_data, str) else source_data
+                data = (
+                    source_data.encode("utf-8")
+                    if isinstance(source_data, str)
+                    else source_data
+                )
             if data:
-                Path(path).write_bytes(data)
-                logger.debug("Saved class %s to path %s (origin=%s)", cls_name, path, origin)
+                try:
+                    Path(LOADED_MODULES_DIR).mkdir(parents=True, exist_ok=True)
+                    Path(path).write_bytes(data)
+                    logger.info(
+                        "Persisted module %s → %s (%s bytes)",
+                        cls_name,
+                        path,
+                        len(data),
+                    )
+                except Exception:
+                    logger.exception("Failed to persist module %s to %s", cls_name, path)
+            else:
+                logger.warning(
+                    "save_fs=True but no source data for %s (origin=%s)",
+                    cls_name,
+                    origin,
+                )
 
         return ret
 

@@ -295,25 +295,6 @@ class LoaderMod(loader.Module):
                 rows.append((f"@{self.inline.bot_username} {name}", doc))
         return rows
 
-    @staticmethod
-    def _module_version_str(instance=None, doc: str = "") -> str:
-        """Return 'x.y.z' from __version__ or # meta version:, else ''."""
-        if instance is not None:
-            ver = getattr(instance, "__version__", None)
-            if isinstance(ver, tuple) and ver:
-                return ".".join(map(str, ver))
-            if isinstance(ver, (int, float)):
-                return str(ver)
-            if isinstance(ver, str) and ver.strip():
-                return ver.strip()
-        if doc:
-            m = re.search(r"# ?meta version: ?(.+)", doc, flags=re.I)
-            if m:
-                v = m.group(1).strip().strip('"').strip("'")
-                if v:
-                    return v
-        return ""
-
     async def _rich_module_loaded(
         self,
         message: Message,
@@ -325,25 +306,17 @@ class LoaderMod(loader.Module):
         origin: str = "",
         developer: str = "",
         meta_banner: str | None = None,
-        version: str = "",
     ) -> bool:
-        """Clean Rich announce after module install. Retry + Bot API fallback."""
+        """Clean Rich announce after module install."""
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, inject_banner_html, try_send_rich
+            from ..utils.rich_api import html_table, inject_banner_html
             import html as html_mod
 
             if not can_use_rich(self._client, self._db):
                 return False
-            # Ensure inline is ready (lost bot / late init)
             if not getattr(self.inline, "init_complete", False):
-                with contextlib.suppress(Exception):
-                    await self.inline.register_manager(ignore_token_checks=True)
-            if not getattr(self.inline, "init_complete", False) and not getattr(
-                self.inline, "bot_token", None
-            ):
-                # Still try Bot API path below without via
-                pass
+                return False
 
             # --- sanitize everything for Rich (no raw tags as text) ---
             name = self._plain_cmd_doc(modname, str(modname))[:64]
@@ -393,11 +366,8 @@ class LoaderMod(loader.Module):
                     f"<details open><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
                     f"{table}\n</details>"
                 )
-            # footer table: Version / Developer / Source
+            # footer table: Developer / Source
             footer_rows = []
-            ver_plain = (version or "").strip()
-            if ver_plain:
-                footer_rows.append(("Version", html_mod.escape(ver_plain[:32])))
             if dev_plain:
                 footer_rows.append(
                     ("Developer", html_mod.escape(dev_plain[:80]))
@@ -428,46 +398,16 @@ class LoaderMod(loader.Module):
             if meta_banner and str(meta_banner).startswith(("http://", "https://")):
                 html = inject_banner_html(html, meta_banner, force=True)
 
-            title = f"✓ {name}"[:64]
-            description = desc[:80] if desc else "Module loaded"
-            thumb = meta_banner if meta_banner else None
-
-            # 1) via @inline bot (preferred)
-            m = None
-            if getattr(self.inline, "init_complete", False) or getattr(
-                self.inline, "bot_username", None
-            ):
-                for attempt in range(2):
-                    try:
-                        m = await self.inline.rich(
-                            message,
-                            html,
-                            title=title,
-                            description=description,
-                            silent=True,
-                            reply_markup=subscribe_markup,
-                            thumbnail_url=thumb,
-                        )
-                        if m:
-                            return True
-                    except Exception:
-                        logger.debug(
-                            "loader rich via attempt %s failed", attempt, exc_info=True
-                        )
-                    await asyncio.sleep(0.35 * (attempt + 1))
-
-            # 2) Bot API sendRichMessage fallback (no via, but still Rich)
-            try:
-                chat = utils.get_chat_id(message)
-                ok = await try_send_rich(self._client, chat, html)
-                if ok:
-                    if isinstance(message, Message) and message.out:
-                        with contextlib.suppress(Exception):
-                            await message.delete()
-                    return True
-            except Exception:
-                logger.debug("loader try_send_rich failed", exc_info=True)
-            return False
+            m = await self.inline.rich(
+                message,
+                html,
+                title=f"✓ {name}"[:64],
+                description=(desc[:80] if desc else "Module loaded"),
+                silent=True,
+                reply_markup=subscribe_markup,
+                thumbnail_url=meta_banner if meta_banner else None,
+            )
+            return bool(m)
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
             return False
@@ -546,7 +486,7 @@ class LoaderMod(loader.Module):
                     batch: list[dict] = []
                     await utils.answer(
                         message,
-                        f"<emoji document_id=5386367538735104399>⌛</emoji> Installing <b>{len(args)}</b> modules…",
+                        f"⏳ Installing <b>{len(args)}</b> modules…",
                         skip_rich=True,
                     )
                     for arg in args:
@@ -574,12 +514,12 @@ class LoaderMod(loader.Module):
                             )
                     if not await self._rich_batch_loaded(message, batch):
                         text = (
-                            f"<emoji document_id=5256182535917940722>⤵️</emoji> Installed <b>{len(args) - len(not_installed)}"
+                            f"✅ Installed <b>{len(args) - len(not_installed)}"
                             f"/{len(args)}</b>"
                         )
                         if not_installed:
                             text += (
-                                "\n\n<emoji document_id=5237898864433837164>👎</emoji> <code>"
+                                "\n\n❌ <code>"
                                 + "</code>, <code>".join(
                                     utils.escape_html(str(x)) for x in not_installed
                                 )
@@ -638,7 +578,7 @@ class LoaderMod(loader.Module):
         buttons.append(
             [
                 {
-                    "text": "⬇️ Close",
+                    "text": "🔻 Close",
                     "action": "close",
                 }
             ]
@@ -836,31 +776,21 @@ class LoaderMod(loader.Module):
 
                 return MODULE_LOADING_FAILED
 
-            # Keep URL as origin (DB / re-download). save_fs=True writes disk copy.
             installed = await self.load_module(
                 r,
                 message,
                 module_name,
                 url,
                 blob_link=blob_link,
-                save_fs=True,
                 _raise_install_errors=True,
             )
 
             if not installed:
                 raise ModuleInstallError(f"Module {module_name} was not installed")
 
-            # Keep URL in DB for _update_modules re-download
-            with contextlib.suppress(Exception):
-                self.update_modules_in_db()
-
             return MODULE_LOADING_SUCCESS
-        except Exception as e:
-            logger.exception(
-                "Failed to install external module %s: %s",
-                module_name,
-                e,
-            )
+        except Exception:
+            logger.exception("Failed to install external module %s", module_name)
             return MODULE_LOADING_FAILED
 
     async def _inline__load(
@@ -873,7 +803,7 @@ class LoaderMod(loader.Module):
         if await self._check_pass(call):
             return
 
-        await self.load_module(doc, call, origin=path_ or "<string>", save_fs=True)
+        await self.load_module(doc, call, origin="<string>", save_fs=True)
 
     @loader.command(alias="lm")
     async def loadmod(self, message: Message):
@@ -889,7 +819,7 @@ class LoaderMod(loader.Module):
             message,
             self.strings["loading_module_via_file"]
             if len(files) == 1
-            else f"<emoji document_id=5386367538735104399>⌛</emoji> Installing <b>{len(files)}</b> modules…",
+            else f"⏳ Installing <b>{len(files)}</b> modules…",
             skip_rich=True,
         )
 
@@ -907,8 +837,11 @@ class LoaderMod(loader.Module):
                     batch.append({"name": f"id:{msg.id}", "ok": False, "rows": [], "doc": "bad unicode"})
                     continue
                 fname = getattr(getattr(msg, "file", None), "name", None) or f"file_{msg.id}"
+                # origin MUST be "<string>" so register_module persists to loaded_modules/
+                # (passing filename as origin was why .lm modules vanished after restart;
+                # .dlm uses http origin + DB reload, so it "worked")
                 ok = await self.load_module(
-                    doc, message, origin=str(fname), save_fs=True, quiet=quiet
+                    doc, message, origin="<string>", save_fs=True, quiet=quiet
                 )
                 info = getattr(self, "_last_loaded", None) or {}
                 batch.append(
@@ -928,7 +861,7 @@ class LoaderMod(loader.Module):
                 ok_n = sum(1 for r in batch if r.get("ok"))
                 await utils.answer(
                     message,
-                    f"<emoji document_id=5256182535917940722>⤵️</emoji> Installed <b>{ok_n}/{len(batch)}</b> modules",
+                    f"✅ Installed <b>{ok_n}/{len(batch)}</b> modules",
                     skip_rich=True,
                 )
 
@@ -947,7 +880,7 @@ class LoaderMod(loader.Module):
 
         await call.edit(
             (
-                "<emoji document_id=5294430452344434288>😵‍💫</emoji> <b>Joined <a"
+                "💫 <b>Joined <a"
                 f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
             ),
         )
@@ -1198,38 +1131,6 @@ class LoaderMod(loader.Module):
                 await call.edit(self.strings["load_failed"])
 
 
-
-    def _validate_module_source(self, doc: str) -> str | None:
-        """Return error string if source is not a loadable Hikkari/Hikka-style module."""
-        if not doc or not str(doc).strip():
-            return "empty source"
-        text = doc if isinstance(doc, str) else (
-            doc.decode("utf-8", errors="ignore") if isinstance(doc, (bytes, bytearray)) else str(doc)
-        )
-        try:
-            tree = ast.parse(text)
-        except SyntaxError as e:
-            return f"syntax error: {e.msg} (line {e.lineno})"
-        # Must define a class that looks like a Module (name ends with Mod or inherits something)
-        has_class = any(isinstance(n, ast.ClassDef) for n in tree.body)
-        if not has_class:
-            return "no class definition in file"
-        # Heuristic: mention of loader.Module / Module / @loader
-        lowered = text.lower()
-        markers = (
-            "loader.module",
-            "loader.tds",
-            "@loader.command",
-            "from .. import loader",
-            "from hikka import loader",
-            "from heroku import loader",
-            "from hikkari import loader",
-            "class ",
-        )
-        if not any(m in lowered for m in markers) and "module" not in lowered:
-            return "file does not look like a userbot module"
-        return None
-
     async def load_module(
         self,
         doc: str,
@@ -1252,17 +1153,6 @@ class LoaderMod(loader.Module):
                 doc = doc.decode("utf-8")
             except Exception:
                 doc = doc.decode("utf-8", errors="ignore")
-
-        verr = self._validate_module_source(doc)
-        if verr:
-            logger.error("Module %s rejected: %s", module_label, verr)
-            if isinstance(message, Message):
-                with contextlib.suppress(Exception):
-                    await utils.answer(
-                        message,
-                        f"<emoji document_id=5237898864433837164>👎</emoji> <b>Модуль невалиден:</b> <code>{utils.escape_html(verr)}</code>",
-                    )
-            return False
 
         if isinstance(doc, str) and not _safety_confirmed:
             blocked, warns = self._scan_module_safety(doc)
@@ -1922,7 +1812,6 @@ class LoaderMod(loader.Module):
             meta_b = None
             with contextlib.suppress(Exception):
                 meta_b = self._get_banner_url(doc) if doc else None
-            _ver = self._module_version_str(instance, doc or "")
             if await self._rich_module_loaded(
                 message,
                 modname=str(modname),
@@ -1932,7 +1821,6 @@ class LoaderMod(loader.Module):
                 origin=origin,
                 developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_b,
-                version=_ver,
             ):
                 return True
             await utils.answer(
@@ -2092,7 +1980,7 @@ class LoaderMod(loader.Module):
                         + [
                             [
                                 {
-                                    "text": self.strings["cancel"].replace("🚫", "👎"),
+                                    "text": self.strings["cancel"].replace("🚫", "❌"),
                                     "action": "close",
                                 }
                             ]
@@ -2108,8 +1996,8 @@ class LoaderMod(loader.Module):
             msg = ""
             for module in modules:
                 status = await self.unload_module(module)
-                if "<emoji document_id=5237898864433837164>👎</emoji>" in status or "<emoji document_id=5240241223632954241>🚫</emoji>" in status or "😖" in status:
-                    if "<emoji document_id=5422439311196834318>💡</emoji>" in status:
+                if "❌" in status or "🚫" in status or "😖" in status:
+                    if "💡" in status:
                         status = status.split("<code>")[0]
 
                     errors.append(f"<code>{module}</code> — {status}")
@@ -2341,46 +2229,8 @@ class LoaderMod(loader.Module):
             self._db.set(loader.__name__, "secure_boot", False)
             self._secure_boot = True
         else:
-            for cls_name, origin in list(todo.items()):
-                # Prefer already-saved file (reliable after .lm / HikkariFind)
-                disk = Path(loader.LOADED_MODULES_DIR) / f"{cls_name}_{self._client.tg_id}.py"
-                if disk.is_file() and disk.stat().st_size > 0:
-                    try:
-                        src = disk.read_text(encoding="utf-8")
-                        ok = await self.load_module(
-                            src,
-                            None,
-                            name=cls_name,
-                            origin=str(disk),
-                            save_fs=False,
-                            quiet=True,
-                        )
-                        if ok:
-                            logger.info("Loaded %s from disk %s", cls_name, disk.name)
-                            continue
-                        logger.warning(
-                            "Disk load failed for %s, re-downloading from %s",
-                            cls_name,
-                            origin,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Disk load error for %s — fallback to download",
-                            cls_name,
-                        )
-                # URL / remote origin
-                if isinstance(origin, str) and (
-                    origin.startswith("http://")
-                    or origin.startswith("https://")
-                    or origin.startswith("ftp://")
-                ):
-                    await self.download_and_install(origin)
-                else:
-                    logger.warning(
-                        "Skip reload of %s: origin is not a URL (%s)",
-                        cls_name,
-                        origin,
-                    )
+            for mod in todo.values():
+                await self.download_and_install(mod)
 
             self.update_modules_in_db()
 
@@ -2522,7 +2372,7 @@ class LoaderMod(loader.Module):
         if not module_data:
             await utils.answer(
                 message,
-                "<emoji document_id=5240241223632954241>🚫</emoji> <b>Source not available for this module</b>\n"
+                "🚫 <b>Source not available for this module</b>\n"
                 "<i>Module was loaded without retained source.</i>",
             )
             return
