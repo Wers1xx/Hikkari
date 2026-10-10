@@ -830,6 +830,18 @@ class Modules:
 
             self.secure_boot = self._db.get(__name__, "secure_boot", False)
 
+            def _ext_belongs(name: str) -> bool:
+                # ClassName_<this_tg_id>.py
+                if name.endswith(f"_{self.client.tg_id}.py"):
+                    return True
+                stem = name[:-3] if name.endswith(".py") else name
+                if "_" not in stem:
+                    return True  # plain Name.py — load for all accounts
+                last = stem.rsplit("_", 1)[-1]
+                if last.isdigit() and last != str(self.client.tg_id):
+                    return False  # bound to another account
+                return True
+
             external_mods = (
                 []
                 if self.secure_boot
@@ -837,7 +849,7 @@ class Modules:
                     Path(mod).resolve()
                     for mod in _iter_module_files(
                         LOADED_MODULES_DIR,
-                        include=lambda name: name.endswith(f"{self.client.tg_id}.py"),
+                        include=_ext_belongs,
                     )
                 ]
             )
@@ -969,23 +981,25 @@ class Modules:
         await _exec_module()
 
         ret = None
-
-        ret = next(
-            (
-                value()
-                for value in vars(module).values()
-                if inspect.isclass(value) and issubclass(value, Module)
-            ),
-            None,
-        )
-
-        if hasattr(module, "__version__"):
-            ret.__version__ = module.__version__
+        for value in vars(module).values():
+            if not inspect.isclass(value):
+                continue
+            try:
+                if issubclass(value, Module) and value is not Module:
+                    ret = value()
+                    break
+            except TypeError:
+                continue
 
         if ret is None:
-            ret = module.register(module_name)
+            if hasattr(module, "register"):
+                ret = module.register(module_name)
             if not isinstance(ret, Module):
                 raise TypeError(f"Instance is not a Module, it is {type(ret)}")
+
+        if hasattr(module, "__version__") and getattr(module, "__version__", None) is not None:
+            with contextlib.suppress(Exception):
+                ret.__version__ = module.__version__
 
         ret.__origin__ = origin
 
@@ -1005,11 +1019,18 @@ class Modules:
                 LOADED_MODULES_DIR,
                 f"{cls_name}_{self.client.tg_id}.py",
             )
-
-            if origin == "<string>":
-                Path(path).write_text(spec.loader.data.decode(), encoding="utf-8")
-
-                logger.debug("Saved class %s to path %s", cls_name, path)
+            # Always persist when we have source — Heroku only saved origin=="<string>",
+            # so .lm/.dlm with other origins vanished after restart.
+            data = None
+            if hasattr(spec.loader, "data") and spec.loader.data:
+                data = spec.loader.data
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+            elif source_data:
+                data = source_data.encode("utf-8") if isinstance(source_data, str) else source_data
+            if data:
+                Path(path).write_bytes(data)
+                logger.debug("Saved class %s to path %s (origin=%s)", cls_name, path, origin)
 
         return ret
 
@@ -1396,8 +1417,11 @@ class Modules:
         try:
             mod.config_complete()
         except Exception as e:
-            logger.exception("Failed to send mod config complete signal due to %s", e)
-            raise
+            logger.exception(
+                "config_complete failed for %s — module stays: %s",
+                getattr(mod, "name", mod),
+                e,
+            )
 
     async def send_ready_one_wrapper(self, *args, **kwargs):
         """Wrapper for send_ready_one"""
@@ -1438,27 +1462,22 @@ class Modules:
         except SelfUnload as e:
             if no_self_unload:
                 raise e
-
-            logger.debug("Unloading %s, because it raised SelfUnload", mod)
-            self.modules.remove(mod)
-            return
+            # Keep module loaded — SelfUnload must not wipe downloaded modules
+            logger.warning(
+                "SelfUnload from %s ignored — module stays loaded: %s",
+                getattr(mod, "name", mod),
+                e,
+            )
         except SelfSuspend as e:
             if no_self_unload:
                 raise e
-
-            logger.debug("Suspending %s, because it raised SelfSuspend", mod)
-            return
+            logger.debug("SelfSuspend from %s: %s", mod, e)
         except Exception as e:
             logger.exception(
-                (
-                    "Failed to send mod init complete signal for %s due to %s,"
-                    " attempting unload"
-                ),
-                mod,
+                "client_ready failed for %s due to %s — module stays loaded",
+                getattr(mod, "name", mod),
                 e,
             )
-            self.modules.remove(mod)
-            raise
 
         # Check for pack_url and load translations
         if hasattr(mod, "__source__"):
