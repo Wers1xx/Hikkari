@@ -60,7 +60,7 @@ class Evaluator(loader.Module):
         def set(self, *args, **kwargs):
             if len(args) >= 2 and args[0] == "hikkari.security" and args[1] == "owner":
                 raise ValueError(
-                    "<emoji document_id=5447644880824181073>⚠️</emoji> Security Protection: You cannot change the bot owner via evaluator."
+                    "⚠️ Security Protection: You cannot change the bot owner via evaluator."
                 )
 
             return self._db.set(*args, **kwargs)
@@ -105,7 +105,7 @@ class Evaluator(loader.Module):
         if not (args or "").strip():
             await utils.answer(
                 message,
-                "<emoji document_id=5282843764451195532>🖥</emoji> <b>Eval</b>\n"
+                "💻 <b>Eval</b>\n"
                 "<code>.e &lt;python&gt;</code> or reply to a message with code.\n"
                 "Vars: <code>c</code>/<code>client</code>, <code>m</code>/<code>message</code>, "
                 "<code>r</code>/<code>reply</code>, <code>db</code>, <code>utils</code>",
@@ -141,7 +141,7 @@ class Evaluator(loader.Module):
                 "r." in args or "reply." in args
             ):
                 extra_hint = (
-                    "\n\n<emoji document_id=5422439311196834318>💡</emoji> <b>Hint:</b> <code>r</code>/<code>reply</code> is "
+                    "\n\n💡 <b>Hint:</b> <code>r</code>/<code>reply</code> is "
                     "<code>None</code> — reply to a message when using them."
                 )
 
@@ -155,7 +155,7 @@ class Evaluator(loader.Module):
                     self.censor(
                         "\n".join(item.full_stack.splitlines()[:-1])
                         + "\n\n"
-                        + "<emoji document_id=5240241223632954241>🚫</emoji> "
+                        + "🚫 "
                         + item.full_stack.splitlines()[-1]
                     ),
                 )
@@ -524,6 +524,7 @@ class Evaluator(loader.Module):
 
     async def getattrs(self, message: Message) -> dict:
         reply = await self._get_reply(message)
+        math_ns = self._math_namespace()
         return {
             "message": message,
             "client": self._client,
@@ -542,9 +543,391 @@ class Evaluator(loader.Module):
             "lookup": self.lookup,
             "self": self,
             "db": self.db,
+            **math_ns,
             **self.get_sub(hikkaritl.tl.functions),
             **self.get_sub(hikkaritl.tl.types),
         }
+
+    def _math_namespace(self) -> dict:
+        """Rich math context for .e and .calc (sympy + stdlib)."""
+        import math
+        import cmath
+        import statistics
+        from decimal import Decimal, getcontext
+        from fractions import Fraction
+
+        getcontext().prec = 80
+        ns: dict = {
+            "math": math,
+            "cmath": cmath,
+            "statistics": statistics,
+            "Decimal": Decimal,
+            "Fraction": Fraction,
+            # common shortcuts
+            "sqrt": math.sqrt,
+            "sin": math.sin,
+            "cos": math.cos,
+            "tan": math.tan,
+            "log": math.log,
+            "log10": math.log10,
+            "log2": math.log2,
+            "exp": math.exp,
+            "pi": math.pi,
+            "e": math.e,
+            "tau": math.tau,
+            "inf": math.inf,
+            "nan": math.nan,
+            "factorial": math.factorial,
+            "gcd": math.gcd,
+            "lcm": getattr(math, "lcm", None),
+            "comb": getattr(math, "comb", None),
+            "perm": getattr(math, "perm", None),
+            "degrees": math.degrees,
+            "radians": math.radians,
+            "fabs": math.fabs,
+            "ceil": math.ceil,
+            "floor": math.floor,
+            "pow": pow,
+            "abs": abs,
+            "round": round,
+            "sum": sum,
+            "min": min,
+            "max": max,
+        }
+        # drop None helpers on older Python
+        ns = {k: v for k, v in ns.items() if v is not None}
+
+        try:
+            import sympy as sp
+            from sympy import (
+                symbols,
+                Symbol,
+                Function,
+                Eq,
+                solve,
+                solveset,
+                nsolve,
+                dsolve,
+                simplify,
+                expand,
+                factor,
+                collect,
+                cancel,
+                together,
+                apart,
+                trigsimp,
+                powsimp,
+                logcombine,
+                limit,
+                series,
+                diff,
+                integrate,
+                summation,
+                product,
+                Matrix,
+                eye,
+                zeros,
+                ones,
+                det,
+                inv,
+                transpose,
+                latex,
+                pretty,
+                N,
+                oo,
+                zoo,
+                I,
+                E,
+                pi as spi,
+                E as sE,
+                sin as ssin,
+                cos as scos,
+                tan as stan,
+                asin,
+                acos,
+                atan,
+                atan2,
+                sinh,
+                cosh,
+                tanh,
+                exp as sexp,
+                log as slog,
+                sqrt as ssqrt,
+                root,
+                Pow,
+                Integer,
+                Rational,
+                Float,
+                Abs,
+                re,
+                im,
+                arg,
+                conjugate,
+                factorial as sfactorial,
+                binomial,
+                fibonacci,
+                primerange,
+                isprime,
+                factorint,
+                gcd as sgcd,
+                lcm as slcm,
+                floor as sfloor,
+                ceiling,
+                Mod,
+                Sum,
+                Product,
+                Integral,
+                Derivative,
+                Lambda,
+                Piecewise,
+                Heaviside,
+                DiracDelta,
+                gamma,
+                beta,
+                zeta,
+                erf,
+                erfc,
+                Si,
+                Ci,
+                expint,
+            )
+
+            # Prefer sympy for symbolic names (override stdlib math shortcuts)
+            ns.update(
+                {
+                    "sin": ssin,
+                    "cos": scos,
+                    "tan": stan,
+                    "exp": sexp,
+                    "log": slog,
+                    "sqrt": ssqrt,
+                    "pi": spi,
+                    "e": sE,
+                    "factorial": sfactorial,
+                    "sympy": sp,
+                    "sp": sp,
+                    "symbols": symbols,
+                    "Symbol": Symbol,
+                    "Function": Function,
+                    "Eq": Eq,
+                    "solve": solve,
+                    "solveset": solveset,
+                    "nsolve": nsolve,
+                    "dsolve": dsolve,
+                    "simplify": simplify,
+                    "expand": expand,
+                    "factor": factor,
+                    "collect": collect,
+                    "cancel": cancel,
+                    "together": together,
+                    "apart": apart,
+                    "trigsimp": trigsimp,
+                    "powsimp": powsimp,
+                    "logcombine": logcombine,
+                    "limit": limit,
+                    "series": series,
+                    "diff": diff,
+                    "integrate": integrate,
+                    "summation": summation,
+                    "product": product,
+                    "Matrix": Matrix,
+                    "eye": eye,
+                    "zeros": zeros,
+                    "ones": ones,
+                    "det": det,
+                    "inv": inv,
+                    "transpose": transpose,
+                    "latex": latex,
+                    "pretty": pretty,
+                    "N": N,
+                    "oo": oo,
+                    "zoo": zoo,
+                    "I": I,
+                    "E": E,
+                    "spi": spi,
+                    "ssin": ssin,
+                    "scos": scos,
+                    "stan": stan,
+                    "asin": asin,
+                    "acos": acos,
+                    "atan": atan,
+                    "atan2": atan2,
+                    "sinh": sinh,
+                    "cosh": cosh,
+                    "tanh": tanh,
+                    "sexp": sexp,
+                    "slog": slog,
+                    "ssqrt": ssqrt,
+                    "root": root,
+                    "Pow": Pow,
+                    "Integer": Integer,
+                    "Rational": Rational,
+                    "Float": Float,
+                    "Abs": Abs,
+                    "re": re,
+                    "im": im,
+                    "arg": arg,
+                    "conjugate": conjugate,
+                    "sfactorial": sfactorial,
+                    "binomial": binomial,
+                    "fibonacci": fibonacci,
+                    "primerange": primerange,
+                    "isprime": isprime,
+                    "factorint": factorint,
+                    "sgcd": sgcd,
+                    "slcm": slcm,
+                    "sfloor": sfloor,
+                    "ceiling": ceiling,
+                    "Mod": Mod,
+                    "Sum": Sum,
+                    "Product": Product,
+                    "Integral": Integral,
+                    "Derivative": Derivative,
+                    "Lambda": Lambda,
+                    "Piecewise": Piecewise,
+                    "Heaviside": Heaviside,
+                    "DiracDelta": DiracDelta,
+                    "gamma": gamma,
+                    "beta": beta,
+                    "zeta": zeta,
+                    "erf": erf,
+                    "erfc": erfc,
+                    "Si": Si,
+                    "Ci": Ci,
+                    "expint": expint,
+                    # prefer sympy pi/E when both present for symbolic work
+                    "S": sp.S,
+                }
+            )
+        except ImportError:
+            ns["_sympy_missing"] = True
+
+        try:
+            import mpmath as mp
+
+            mp.mp.dps = 50
+            ns["mpmath"] = mp
+            ns["mp"] = mp
+        except ImportError:
+            pass
+
+        try:
+            import numpy as np
+
+            ns["numpy"] = np
+            ns["np"] = np
+        except ImportError:
+            pass
+
+        return ns
+
+    def _format_math_result(self, result) -> str:
+        """Pretty-print sympy / numeric results."""
+        if result is None:
+            return "None"
+        try:
+            import sympy as sp
+
+            if isinstance(result, sp.Basic):
+                try:
+                    text = sp.pretty(result, use_unicode=True)
+                except Exception:
+                    text = str(result)
+                # also numeric approx when possible
+                try:
+                    num = sp.N(result, 20)
+                    if num != result and not num.free_symbols:
+                        text = f"{text}\n≈ {num}"
+                except Exception:
+                    pass
+                return text
+            if isinstance(result, (list, tuple)) and result and all(
+                isinstance(x, sp.Basic) for x in result
+            ):
+                parts = []
+                for i, x in enumerate(result):
+                    try:
+                        parts.append(f"[{i}] {sp.pretty(x, use_unicode=True)}")
+                    except Exception:
+                        parts.append(f"[{i}] {x}")
+                return "\n".join(parts)
+        except Exception:
+            pass
+        return str(result)
+
+    @loader.command(alias="calculator")
+    async def calc(self, message: Message):
+        """Advanced symbolic calculator (sympy).
+        Examples:
+        .calc integrate(x**2, x)
+        .calc solve(x**2 - 5*x + 6, x)
+        .calc diff(sin(x)**2, x)
+        .calc limit(sin(x)/x, x, 0)
+        .calc Matrix([[1,2],[3,4]]).inv()
+        .calc N(pi, 50)
+        """
+        args = utils.get_args_raw(message) or ""
+        reply = await self._get_reply(message)
+        if not args.strip() and reply and (getattr(reply, "text", None) or getattr(reply, "message", None)):
+            args = reply.message or reply.text or ""
+        args = (args or "").replace("\xa0", " ").strip()
+        if not args:
+            await utils.answer(
+                message,
+                "🧮 <b>Calc</b> — symbolic engine (sympy)\n\n"
+                "<code>.calc integrate(x**2, x)</code>\n"
+                "<code>.calc solve([x**2-5*x+6], x)</code>\n"
+                "<code>.calc diff(sin(x)**2, x)</code>\n"
+                "<code>.calc limit(sin(x)/x, x, 0)</code>\n"
+                "<code>.calc series(exp(x), x, 0, 6)</code>\n"
+                "<code>.calc N(pi, 40)</code>\n"
+                "<code>.calc Matrix([[1,2],[3,4]]).det()</code>\n"
+                "<code>.calc factor(x**3-1)</code>\n"
+                "<code>.calc simplify((x**2-1)/(x-1))</code>\n\n"
+                "Also available in <code>.e</code>: sympy, sp, solve, diff, integrate, Matrix, N, …",
+            )
+            return
+
+        ns = self._math_namespace()
+        if ns.get("_sympy_missing"):
+            await utils.answer(
+                message,
+                "🚫 <b>sympy</b> is not installed.\n"
+                "<code>pip install sympy mpmath</code>",
+            )
+            return
+
+        # Pre-declare common symbols so bare x,y,z work
+        try:
+            import sympy as sp
+
+            for name in ("x", "y", "z", "t", "n", "k", "a", "b", "c", "m"):
+                ns[name] = sp.symbols(name, real=True)
+            ns["theta"] = sp.symbols("theta", real=True)
+            ns["phi"] = sp.symbols("phi", real=True)
+        except Exception:
+            pass
+
+        start = time.time()
+        try:
+            result = eval(compile(args, "<calc>", "eval"), {"__builtins__": {}}, ns)
+            text = self._format_math_result(result)
+            took = round(time.time() - start, 3)
+            if len(text) > 3500:
+                text = text[:3500] + "\n…"
+            await utils.answer(
+                message,
+                f"🧮 <b>Calc</b>\n"
+                f"<code>{utils.escape_html(args)}</code>\n\n"
+                f"<b>Result:</b>\n<code>{utils.escape_html(text)}</code>\n\n"
+                f"⏱ <code>{took}s</code>",
+            )
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"🧮 <b>Calc error</b>\n<code>{utils.escape_html(args)}</code>\n\n"
+                f"🚫 <code>{utils.escape_html(type(e).__name__)}: {utils.escape_html(str(e))}</code>",
+            )
 
     def get_sub(self, obj: typing.Any, _depth: int = 1) -> dict:
         """Get all callable capitalised objects in an object recursively, ignoring _*"""
