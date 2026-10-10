@@ -834,21 +834,10 @@ class Modules:
         loaded += await self._register_modules(mods)
 
         if not no_external:
-            with contextlib.suppress(Exception):
-                _ensure_tl_aliases()
-            # Ensure package attrs before external batch
-            try:
-                _pkg = sys.modules.get(__package__)
-                if _pkg is not None:
-                    if not hasattr(_pkg, "loader"):
-                        _pkg.loader = sys.modules.get(f"{__package__}.loader") or sys.modules[__name__]
-                    if not hasattr(_pkg, "utils"):
-                        _pkg.utils = sys.modules.get(f"{__package__}.utils")
-            except Exception:
-                pass
             loaded += await self._register_modules(external_mods, "<file>")
 
-        _release_memory()
+        with contextlib.suppress(Exception):
+            _release_memory()
         logger.info("Modules loaded: %s core/file (RSS≈%.0fMB)", len(loaded), _rss_mb())
 
         return loaded
@@ -858,19 +847,29 @@ class Modules:
         modules: list,
         origin: str = "<core>",
     ) -> list[Module]:
+        """Load modules sequentially — same reliable path as Heroku."""
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         loaded = []
 
-        # Parallel ONLY for core modules. External (<file>) stay sequential —
-        # concurrent exec of third-party modules caused import races
-        # (from .. import loader / telethon shims) and silent load failures.
-        n_mods = len(modules)
-        parallel = origin == "<core>" and n_mods > 1
-        _sem_limit = 8
+        # Ensure relative imports (from .. import loader / utils) always work
+        try:
+            _pkg = sys.modules.get(__package__)
+            if _pkg is not None:
+                if not hasattr(_pkg, "loader"):
+                    _pkg.loader = sys.modules.get(f"{__package__}.loader") or sys.modules.get(__name__)
+                if not hasattr(_pkg, "utils"):
+                    with contextlib.suppress(Exception):
+                        _pkg.utils = sys.modules.get(f"{__package__}.utils") or importlib.import_module(
+                            f"{__package__}.utils"
+                        )
+                if not hasattr(_pkg, "main"):
+                    with contextlib.suppress(Exception):
+                        _pkg.main = sys.modules.get(f"{__package__}.main")
+        except Exception:
+            pass
 
-        # ── pre-bind package namespace once ──
         pkg_parent = f"{__package__}.{MODULES_NAME}"
         if pkg_parent not in sys.modules:
             try:
@@ -882,129 +881,55 @@ class Modules:
                     _p.__path__ = [str(Path(utils.get_base_dir()) / MODULES_NAME)]
                     _p.__package__ = pkg_parent
                     sys.modules[pkg_parent] = _p
-        try:
-            _pkg = sys.modules.get(__package__)
-            if _pkg is not None:
-                if not hasattr(_pkg, "loader"):
-                    _pkg.loader = sys.modules.get(f"{__package__}.loader") or importlib.import_module(
-                        f"{__package__}.loader"
-                    )
-                if not hasattr(_pkg, "utils"):
-                    _pkg.utils = sys.modules.get(f"{__package__}.utils") or importlib.import_module(
-                        f"{__package__}.utils"
-                    )
-                if not hasattr(_pkg, "main"):
-                    with contextlib.suppress(Exception):
-                        _pkg.main = sys.modules.get(f"{__package__}.main") or importlib.import_module(
-                            f"{__package__}.main"
-                        )
-        except Exception:
-            logger.debug("pre-bind package attrs failed", exc_info=True)
 
-        async def _load_one(mod):
-            mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
-            module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
-            user_friendly_origin = (
-                "<core {}>" if origin == "<core>" else "<file {}>"
-            ).format(module_name)
-            logger.debug("Loading %s from filesystem", module_name)
+        if origin == "<file>" or str(origin).startswith("<file"):
+            with contextlib.suppress(Exception):
+                _ensure_tl_aliases()
+
+        for mod in modules:
             try:
-                src = Path(mod).read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                src = Path(mod).read_text(encoding="utf-8", errors="replace")
+                mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
+                module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
+                user_friendly_origin = (
+                    "<core {}>" if origin == "<core>" else "<file {}>"
+                ).format(module_name)
 
-            # Normalize TL library imports so Hikka/Heroku modules run on hikkaritl
-            if origin == "<file>" or origin.startswith("<file"):
-                src = _normalize_external_source(src)
-                with contextlib.suppress(Exception):
-                    _ensure_tl_aliases()
-
-            spec = importlib.machinery.ModuleSpec(
-                module_name,
-                StringLoader(src, user_friendly_origin),
-                origin=user_friendly_origin,
-            )
-            try:
-                return await self.register_module(spec, module_name, origin)
-            except Exception:
-                sys.modules.pop(module_name, None)
-                raise
-
-        if parallel:
-            sem = asyncio.Semaphore(_sem_limit)
-
-            async def _guarded(mod):
-                async with sem:
-                    try:
-                        return await _load_one(mod)
-                    except Exception as e:
-                        logger.exception("Failed to load module %s due to %s:", mod, e)
-                        try:
-                            fails = getattr(self, "_failed_module_names", None)
-                            if fails is None:
-                                self._failed_module_names = []
-                                fails = self._failed_module_names
-                            short = os.path.basename(str(mod))
-                            err = f"{type(e).__name__}: {e}"
-                            fails.append(f"{short} ({err[:120]})")
-                        except Exception:
-                            pass
-                        return None
-
-            results = await asyncio.gather(*(_guarded(m) for m in modules))
-            loaded = [r for r in results if r is not None]
-        else:
-            for i, mod in enumerate(modules):
-                # Under memory pressure: free RAM before next heavy module
-                if origin == "<file>" and _memory_pressure():
-                    logger.warning(
-                        "Memory pressure (RSS≈%.0fMB) before loading %s — trimming caches",
-                        _rss_mb(),
-                        os.path.basename(str(mod)),
-                    )
-                    _release_memory()
-                    # purge entity caches on all clients if available
-                    with contextlib.suppress(Exception):
-                        for cl in getattr(self, "allclients", None) or [self.client]:
-                            if hasattr(cl, "_purge_entity_caches"):
-                                cl._purge_entity_caches(force=True)
-                    _release_memory()
-                    # still too high: skip remaining external modules to avoid OOM kill
-                    if _memory_pressure():
-                        logger.error(
-                            "RSS still high (≈%.0fMB) — skipping remaining %s external module(s) to prevent OOM",
-                            _rss_mb(),
-                            len(modules) - i,
-                        )
-                        fails = getattr(self, "_failed_module_names", None)
-                        if fails is None:
-                            self._failed_module_names = []
-                            fails = self._failed_module_names
-                        for skipped in modules[i:]:
-                            fails.append(
-                                f"{os.path.basename(str(skipped))} (skipped: memory pressure)"
-                            )
-                        break
+                logger.debug("Loading %s from filesystem", module_name)
 
                 try:
-                    loaded += [await _load_one(mod)]
-                    logger.debug("Successfully loaded from filesystem")
-                except Exception as e:
-                    logger.exception("Failed to load module %s due to %s:", mod, e)
-                    try:
-                        fails = getattr(self, "_failed_module_names", None)
-                        if fails is None:
-                            self._failed_module_names = []
-                            fails = self._failed_module_names
-                        short = os.path.basename(str(mod))
-                        err = f"{type(e).__name__}: {e}"
-                        fails.append(f"{short} ({err[:120]})")
-                    except Exception:
-                        pass
-                finally:
-                    # free transient allocs after each external module
-                    if origin == "<file>":
-                        _release_memory()
+                    src = Path(mod).read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    src = Path(mod).read_text(encoding="utf-8", errors="replace")
+
+                # External Hikka/Heroku modules: telethon/herokutl → hikkaritl
+                if origin == "<file>" or str(origin).startswith("<file"):
+                    src = _normalize_external_source(src)
+
+                spec = importlib.machinery.ModuleSpec(
+                    module_name,
+                    StringLoader(src, user_friendly_origin),
+                    origin=user_friendly_origin,
+                )
+
+                loaded += [await self.register_module(spec, module_name, origin)]
+                logger.debug("Successfully loaded %s from filesystem", module_name)
+            except Exception as e:
+                logger.exception("Failed to load module %s due to %s:", mod, e)
+                try:
+                    fails = getattr(self, "_failed_module_names", None)
+                    if fails is None:
+                        self._failed_module_names = []
+                        fails = self._failed_module_names
+                    short = os.path.basename(str(mod))
+                    fails.append(f"{short} ({type(e).__name__}: {str(e)[:120]})")
+                except Exception:
+                    pass
+                # Drop broken module from sys.modules so next restart is clean
+                with contextlib.suppress(Exception):
+                    mod_shortname = os.path.basename(str(mod)).rsplit(".py", maxsplit=1)[0]
+                    sys.modules.pop(
+                        f"{__package__}.{MODULES_NAME}.{mod_shortname}", None
+                    )
 
         return loaded
 
@@ -1020,10 +945,12 @@ class Modules:
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
         module = importlib.util.module_from_spec(spec)
-        # Relative imports (from .. import loader) need correct __package__
+        # module_from_spec sets __package__ from spec.parent (FQN hikkari.modules.X)
+        # Reinforce package for relative imports on all Python versions
         pkg = getattr(spec, "parent", None) or ".".join(module_name.split(".")[:-1])
         if pkg:
             module.__package__ = pkg
+            module.__name__ = module_name
         sys.modules[module_name] = module
 
         source_data = (
@@ -1079,52 +1006,25 @@ class Modules:
 
         await _exec_module()
 
-        ret = None
-        for value in vars(module).values():
-            if not inspect.isclass(value):
-                continue
+        def _is_module_cls(value) -> bool:
+            if not inspect.isclass(value) or value is Module:
+                return False
             try:
-                if not issubclass(value, Module):
-                    continue
+                return issubclass(value, Module)
             except TypeError:
-                # typing constructs / incomplete classes
-                continue
-            if value is Module:
-                continue
-            try:
-                ret = value()
-                break
-            except Exception as e:
-                logger.exception(
-                    "Failed to instantiate module class %s: %s",
-                    getattr(value, "__name__", value),
-                    e,
-                )
-                raise
+                return False
+
+        ret = next(
+            (
+                value()
+                for value in vars(module).values()
+                if _is_module_cls(value)
+            ),
+            None,
+        )
 
         if ret is None:
-            # Fallback: any class with strings["name"] (legacy modules)
-            for value in vars(module).values():
-                if not inspect.isclass(value):
-                    continue
-                strings = getattr(value, "strings", None)
-                if isinstance(strings, dict) and strings.get("name"):
-                    try:
-                        if Module not in getattr(value, "__mro__", ()):
-                            # force subclass if it looks like a module but MRO broken
-                            pass
-                        ret = value()
-                        break
-                    except Exception as e:
-                        logger.debug("fallback instantiate %s: %s", value, e)
-
-        if ret is None:
-            try:
-                ret = module.register(module_name)
-            except Exception as e:
-                raise TypeError(
-                    f"No Module class found in {module_name} and register() failed: {e}"
-                ) from e
+            ret = module.register(module_name)
             if not isinstance(ret, Module):
                 raise TypeError(f"Instance is not a Module, it is {type(ret)}")
 
