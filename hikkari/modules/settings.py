@@ -179,6 +179,70 @@ class CoreMod(loader.Module):
         ),
         "rich_status_on": "ВКЛ ✨",
         "rich_status_off": "ВЫКЛ",
+
+        "ubproc_title": "<emoji document_id=5282843764451195532>🖥</emoji> <b>Hikkari · Процессы</b>",
+        "ubproc_choose": "Выбери раздел:",
+        "ubproc_pid": "<b>PID</b>: <code>{}</code>",
+        "ubproc_rss": "<b>RSS</b>: <code>{}</code>",
+        "ubproc_cpu": "<b>CPU</b>: <code>{}</code>",
+        "ubproc_threads": "<b>Потоки</b>: <code>{}</code>",
+        "ubproc_tasks": "<b>Async-задачи</b>: <code>{}</code>",
+        "ubproc_modules": "<b>Модули</b>: <code>{}</code>",
+        "ubproc_children": "<b>Дочерние</b>: <code>{}</code>",
+        "ubproc_btn_global": "🌐 Глобальный анализ",
+        "ubproc_btn_threads": "🧵 Потоки",
+        "ubproc_btn_tasks": "⚡ Задачи",
+        "ubproc_btn_modules": "📦 Модули",
+        "ubproc_btn_memory": "🧠 Память",
+        "ubproc_btn_children": "👶 Дочерние",
+        "ubproc_btn_gc": "🗑 GC / мусор",
+        "ubproc_btn_refresh": "🔄 Обновить",
+        "ubproc_btn_close": "❌ Закрыть",
+        "ubproc_btn_menu": "◀️ Меню",
+        "ubproc_btn_gc_run": "♻️ Запустить gc.collect()",
+        "ubproc_btn_gc_back": "🗑 Назад к GC",
+        "ubproc_global_title": "<emoji document_id=5282843764451195532>🖥</emoji> <b>Глобальный анализ</b>",
+        "ubproc_line_rss": "• RSS процесса: <code>{}</code>",
+        "ubproc_line_vms": "• VMS процесса: <code>{}</code>",
+        "ubproc_line_cpu": "• CPU: <code>{}</code>",
+        "ubproc_line_os_threads": "• Потоки ОС: <code>{}</code>",
+        "ubproc_line_py_threads": "• Потоки Python: <code>{}</code>",
+        "ubproc_line_async": "• Async-задачи: <code>{}</code> (живых {})",
+        "ubproc_line_mods": "• Модули: <code>{}</code> (ядро {}, внешние {})",
+        "ubproc_line_child": "• Дочерние процессы: <code>{}</code>",
+        "ubproc_line_files": "• Открытые файлы: <code>{}</code>",
+        "ubproc_line_conns": "• Соединения: <code>{}</code>",
+        "ubproc_line_sysram": "• ОЗУ системы: <code>{}%</code> ({} / {})",
+        "ubproc_line_gc": "• GC counts: <code>{}</code>, мусор: <code>{}</code>, объекты: <code>{}</code>",
+        "ubproc_top_mods": "<b>Топ модулей по размеру</b>",
+        "ubproc_top_children": "<b>Дочерние (RSS)</b>",
+        "ubproc_sec_threads": "🧵 <b>Потоки</b> ({})",
+        "ubproc_sec_tasks": "⚡ <b>Async-задачи</b> ({})",
+        "ubproc_sec_modules": "📦 <b>Модули</b> ({}) — по оценке размера",
+        "ubproc_sec_memory": "🧠 <b>Память</b>",
+        "ubproc_sec_children": "👶 <b>Дочерние процессы</b> ({})",
+        "ubproc_sec_gc": "🗑 <b>GC / мусор</b>",
+        "ubproc_no_children": "<i>Дочерних процессов нет</i>",
+        "ubproc_mem_rss": "• RSS: <code>{}</code>",
+        "ubproc_mem_vms": "• VMS: <code>{}</code>",
+        "ubproc_mem_cpu": "• CPU: <code>{}</code>",
+        "ubproc_mem_files": "• Открытые файлы: <code>{}</code>",
+        "ubproc_mem_conns": "• Соединения: <code>{}</code>",
+        "ubproc_sys_title": "<b>Система</b>",
+        "ubproc_sys_used": "• Занято: <code>{}</code> / <code>{}</code>",
+        "ubproc_sys_free": "• Доступно: <code>{}</code>",
+        "ubproc_sys_load": "• Нагрузка: <code>{}%</code>",
+        "ubproc_gc_counts": "• counts: <code>{}</code>",
+        "ubproc_gc_garbage": "• список garbage: <code>{}</code>",
+        "ubproc_gc_objects": "• отслеживаемые объекты: <code>{}</code>",
+        "ubproc_gc_hint": "<i>Много объектов + рост RSS часто значит утечку в цикле модуля.</i>",
+        "ubproc_gc_done": "♻️ <b>gc.collect()</b> → освобождено <code>{}</code> объектов",
+        "ubproc_page": "📄 {}/{}",
+        "ubproc_core": "ядро",
+        "ubproc_ext": "внешн.",
+        "ubproc_daemon": "daemon",
+        "ubproc_main_thr": "main",
+        "_cmd_doc_ubproc": "Панель внутренних процессов и ресурсов (RAM/CPU, задачи, модули)",
     }
 
     def __init__(self):
@@ -921,7 +985,10 @@ class CoreMod(loader.Module):
 
     # ─── .ubproc — internal process / resource panel ─────────────────────────
 
-    @loader.command()
+    @loader.command(
+        ru_doc="Панель внутренних процессов и ресурсов (RAM/CPU, задачи, модули)",
+        en_doc="Internal processes & resource panel (RAM/CPU, tasks, modules)",
+    )
     async def ubproc(self, message: Message):
         """Internal processes & resource panel (RAM/CPU, tasks, modules)."""
         text, buttons = self._ubproc_menu_payload()
@@ -1075,97 +1142,106 @@ class CoreMod(loader.Module):
 
         return data
 
+
     def _ubproc_menu_payload(self):
         snap = self._ubproc_snapshot()
-        text = (
-            f"<emoji document_id=5282843764451195532>🖥</emoji> <b>Hikkari · Processes</b>\n\n"
-            f"<b>PID</b>: <code>{snap['pid']}</code>\n"
-            f"<b>RSS</b>: <code>{self._ubproc_fmt_bytes(snap['rss'])}</code>\n"
-            f"<b>CPU</b>: <code>{snap['cpu']:.1f}%</code>\n"
-            f"<b>Threads</b>: <code>{snap['threads']}</code>\n"
-            f"<b>Async tasks</b>: <code>{len(snap['tasks'])}</code>\n"
-            f"<b>Modules</b>: <code>{len(snap['modules'])}</code>\n"
-            f"<b>Children</b>: <code>{len(snap['children'])}</code>\n\n"
-            f"Choose a section:"
+        s = self.strings
+        cpu_s = "{:.1f}%".format(snap["cpu"])
+        text = "\n".join(
+            [
+                s["ubproc_title"],
+                "",
+                s["ubproc_pid"].format(snap["pid"]),
+                s["ubproc_rss"].format(self._ubproc_fmt_bytes(snap["rss"])),
+                s["ubproc_cpu"].format(cpu_s),
+                s["ubproc_threads"].format(snap["threads"]),
+                s["ubproc_tasks"].format(len(snap["tasks"])),
+                s["ubproc_modules"].format(len(snap["modules"])),
+                s["ubproc_children"].format(len(snap["children"])),
+                "",
+                s["ubproc_choose"],
+            ]
         )
         buttons = [
+            [{"text": s["ubproc_btn_global"], "callback": self._ubproc_cb, "args": ("global", 0)}],
             [
-                {"text": "🌐 Global analysis", "callback": self._ubproc_cb, "args": ("global", 0)},
+                {"text": s["ubproc_btn_threads"], "callback": self._ubproc_cb, "args": ("threads", 0)},
+                {"text": s["ubproc_btn_tasks"], "callback": self._ubproc_cb, "args": ("tasks", 0)},
             ],
             [
-                {"text": "🧵 Threads", "callback": self._ubproc_cb, "args": ("threads", 0)},
-                {"text": "⚡ Tasks", "callback": self._ubproc_cb, "args": ("tasks", 0)},
+                {"text": s["ubproc_btn_modules"], "callback": self._ubproc_cb, "args": ("modules", 0)},
+                {"text": s["ubproc_btn_memory"], "callback": self._ubproc_cb, "args": ("memory", 0)},
             ],
             [
-                {"text": "📦 Modules", "callback": self._ubproc_cb, "args": ("modules", 0)},
-                {"text": "🧠 Memory", "callback": self._ubproc_cb, "args": ("memory", 0)},
+                {"text": s["ubproc_btn_children"], "callback": self._ubproc_cb, "args": ("children", 0)},
+                {"text": s["ubproc_btn_gc"], "callback": self._ubproc_cb, "args": ("gc", 0)},
             ],
             [
-                {"text": "👶 Children", "callback": self._ubproc_cb, "args": ("children", 0)},
-                {"text": "🗑 GC / garbage", "callback": self._ubproc_cb, "args": ("gc", 0)},
-            ],
-            [
-                {"text": "🔄 Refresh", "callback": self._ubproc_cb, "args": ("menu", 0)},
-                {"text": "❌ Close", "action": "close"},
+                {"text": s["ubproc_btn_refresh"], "callback": self._ubproc_cb, "args": ("menu", 0)},
+                {"text": s["ubproc_btn_close"], "action": "close"},
             ],
         ]
         return text, buttons
 
     def _ubproc_page(self, lines: list, page: int, per: int = 12):
-        total = max(1, (len(lines) + per - 1) // per)
+        total = max(1, (len(lines) + per - 1) // per) if lines else 1
         page = max(0, min(page, total - 1))
         chunk = lines[page * per : (page + 1) * per]
         return chunk, page, total
 
     def _ubproc_section_text(self, section: str, page: int = 0):
         snap = self._ubproc_snapshot()
-        nav_section = section
+        s = self.strings
 
         if section == "menu":
             return self._ubproc_menu_payload()
 
         if section == "global":
             heavy_mod = snap["modules"][:5]
-            heavy_thr = [t for t in snap["thr_list"] if t.get("alive")][:8]
-            heavy_tasks = [t for t in snap["tasks"] if not t.get("done")][:8]
             lines = [
-                f"<emoji document_id=5282843764451195532>🖥</emoji> <b>Global analysis</b>\n",
-                f"• Process RSS: <code>{self._ubproc_fmt_bytes(snap['rss'])}</code>",
-                f"• Process VMS: <code>{self._ubproc_fmt_bytes(snap['vms'])}</code>",
-                f"• CPU: <code>{snap['cpu']:.1f}%</code>",
-                f"• OS threads: <code>{snap['threads']}</code>",
-                f"• Python threads: <code>{len(snap['thr_list'])}</code>",
-                f"• Async tasks: <code>{len(snap['tasks'])}</code> "
-                f"(alive {sum(1 for t in snap['tasks'] if not t.get('done'))})",
-                f"• Modules: <code>{len(snap['modules'])}</code> "
-                f"(core {sum(1 for m in snap['modules'] if m.get('core'))}, "
-                f"ext {sum(1 for m in snap['modules'] if not m.get('core'))})",
-                f"• Child procs: <code>{len(snap['children'])}</code>",
-                f"• Open files: <code>{snap['open_files']}</code>",
-                f"• Connections: <code>{snap['conns']}</code>",
+                f"{s['ubproc_global_title']}\n",
+                s["ubproc_line_rss"].format(self._ubproc_fmt_bytes(snap["rss"])),
+                s["ubproc_line_vms"].format(self._ubproc_fmt_bytes(snap["vms"])),
+                s["ubproc_line_cpu"].format(f"{snap['cpu']:.1f}%"),
+                s["ubproc_line_os_threads"].format(snap["threads"]),
+                s["ubproc_line_py_threads"].format(len(snap["thr_list"])),
+                s["ubproc_line_async"].format(
+                    len(snap["tasks"]),
+                    sum(1 for t in snap["tasks"] if not t.get("done")),
+                ),
+                s["ubproc_line_mods"].format(
+                    len(snap["modules"]),
+                    sum(1 for m in snap["modules"] if m.get("core")),
+                    sum(1 for m in snap["modules"] if not m.get("core")),
+                ),
+                s["ubproc_line_child"].format(len(snap["children"])),
+                s["ubproc_line_files"].format(snap["open_files"]),
+                s["ubproc_line_conns"].format(snap["conns"]),
             ]
             if snap.get("sys_mem"):
                 sm = snap["sys_mem"]
                 lines.append(
-                    f"• System RAM: <code>{sm.get('percent', 0):.0f}%</code> "
-                    f"({self._ubproc_fmt_bytes(sm.get('used', 0))} / "
-                    f"{self._ubproc_fmt_bytes(sm.get('total', 0))})"
+                    s["ubproc_line_sysram"].format(
+                        f"{sm.get('percent', 0):.0f}",
+                        self._ubproc_fmt_bytes(sm.get("used", 0)),
+                        self._ubproc_fmt_bytes(sm.get("total", 0)),
+                    )
                 )
             g = snap.get("gc") or {}
             if g:
                 lines.append(
-                    f"• GC counts: <code>{g.get('counts')}</code>, "
-                    f"garbage: <code>{g.get('garbage', 0)}</code>, "
-                    f"objects: <code>{g.get('objects', 0)}</code>"
+                    s["ubproc_line_gc"].format(
+                        g.get("counts"), g.get("garbage", 0), g.get("objects", 0)
+                    )
                 )
-            lines.append("\n<b>Top modules by size</b>")
+            lines.append(f"\n{s['ubproc_top_mods']}")
             for m in heavy_mod:
                 lines.append(
                     f"  · <code>{utils.escape_html(str(m['name'])[:32])}</code> "
                     f"— {self._ubproc_fmt_bytes(m['size'])}"
                 )
             if snap["children"]:
-                lines.append("\n<b>Children (RSS)</b>")
+                lines.append(f"\n{s['ubproc_top_children']}")
                 for ch in sorted(snap["children"], key=lambda x: x["rss"], reverse=True)[:5]:
                     lines.append(
                         f"  · pid <code>{ch['pid']}</code> "
@@ -1174,109 +1250,141 @@ class CoreMod(loader.Module):
                     )
             text = "\n".join(lines)
             buttons = [
-                [{"text": "🔄 Refresh", "callback": self._ubproc_cb, "args": ("global", 0)}],
-                [{"text": "◀️ Menu", "callback": self._ubproc_cb, "args": ("menu", 0)},
-                 {"text": "❌ Close", "action": "close"}],
+                [{"text": s["ubproc_btn_refresh"], "callback": self._ubproc_cb, "args": ("global", 0)}],
+                [
+                    {"text": s["ubproc_btn_menu"], "callback": self._ubproc_cb, "args": ("menu", 0)},
+                    {"text": s["ubproc_btn_close"], "action": "close"},
+                ],
             ]
             return text, buttons
 
         if section == "threads":
-            lines = [
-                f"🧵 <b>Threads</b> ({len(snap['thr_list'])})\n"
-            ]
+            body = []
             for th in snap["thr_list"]:
                 flag = "🟢" if th.get("alive") else "⚪"
-                d = "daemon" if th.get("daemon") else "main"
-                lines.append(
+                d = s["ubproc_daemon"] if th.get("daemon") else s["ubproc_main_thr"]
+                body.append(
                     f"{flag} <code>{utils.escape_html(str(th.get('name', '?'))[:40])}</code> "
                     f"[{d}] id=<code>{th.get('ident')}</code>"
                 )
-            chunk, page, total = self._ubproc_page(lines[1:], page, per=15)
-            text = lines[0] + "\n".join(chunk) + f"\n\n📄 {page + 1}/{total}"
-            buttons = self._ubproc_nav_buttons("threads", page, total)
-            return text, buttons
+            chunk, page, total = self._ubproc_page(body, page, per=15)
+            text = (
+                s["ubproc_sec_threads"].format(len(snap["thr_list"]))
+                + "\n\n"
+                + "\n".join(chunk)
+                + f"\n\n{s['ubproc_page'].format(page + 1, total)}"
+            )
+            return text, self._ubproc_nav_buttons("threads", page, total)
 
         if section == "tasks":
-            lines = [f"⚡ <b>Async tasks</b> ({len(snap['tasks'])})\n"]
+            body = []
             for t in snap["tasks"]:
-                st = "✅" if t.get("done") else ("🚫" if t.get("cancelled") else "▶️")
-                lines.append(
-                    f"{st} <code>{utils.escape_html(str(t.get('name', ''))[:36])}</code>\n"
+                stt = "✅" if t.get("done") else ("🚫" if t.get("cancelled") else "▶️")
+                body.append(
+                    f"{stt} <code>{utils.escape_html(str(t.get('name', ''))[:36])}</code>\n"
                     f"   <i>{utils.escape_html(str(t.get('coro', ''))[:60])}</i>"
                 )
-            chunk, page, total = self._ubproc_page(lines[1:], page, per=10)
-            text = lines[0] + "\n".join(chunk) + f"\n\n📄 {page + 1}/{total}"
-            buttons = self._ubproc_nav_buttons("tasks", page, total)
-            return text, buttons
+            chunk, page, total = self._ubproc_page(body, page, per=10)
+            text = (
+                s["ubproc_sec_tasks"].format(len(snap["tasks"]))
+                + "\n\n"
+                + "\n".join(chunk)
+                + f"\n\n{s['ubproc_page'].format(page + 1, total)}"
+            )
+            return text, self._ubproc_nav_buttons("tasks", page, total)
 
         if section == "modules":
-            lines = [f"📦 <b>Modules</b> ({len(snap['modules'])}) — by estimated size\n"]
+            body = []
             for m in snap["modules"]:
-                tag = "core" if m.get("core") else "ext"
-                lines.append(
+                tag = s["ubproc_core"] if m.get("core") else s["ubproc_ext"]
+                body.append(
                     f"· <code>{utils.escape_html(str(m['name'])[:36])}</code> "
                     f"[{tag}] {self._ubproc_fmt_bytes(m['size'])}"
                 )
-            chunk, page, total = self._ubproc_page(lines[1:], page, per=15)
-            text = lines[0] + "\n".join(chunk) + f"\n\n📄 {page + 1}/{total}"
-            buttons = self._ubproc_nav_buttons("modules", page, total)
-            return text, buttons
+            chunk, page, total = self._ubproc_page(body, page, per=15)
+            text = (
+                s["ubproc_sec_modules"].format(len(snap["modules"]))
+                + "\n\n"
+                + "\n".join(chunk)
+                + f"\n\n{s['ubproc_page'].format(page + 1, total)}"
+            )
+            return text, self._ubproc_nav_buttons("modules", page, total)
 
         if section == "memory":
-            text = (
-                f"🧠 <b>Memory</b>\n\n"
-                f"• RSS: <code>{self._ubproc_fmt_bytes(snap['rss'])}</code>\n"
-                f"• VMS: <code>{self._ubproc_fmt_bytes(snap['vms'])}</code>\n"
-                f"• CPU: <code>{snap['cpu']:.1f}%</code>\n"
-                f"• Open files: <code>{snap['open_files']}</code>\n"
-                f"• Connections: <code>{snap['conns']}</code>\n"
-            )
+            cpu_s = "{:.1f}%".format(snap["cpu"])
+            parts = [
+                s["ubproc_sec_memory"],
+                "",
+                s["ubproc_mem_rss"].format(self._ubproc_fmt_bytes(snap["rss"])),
+                s["ubproc_mem_vms"].format(self._ubproc_fmt_bytes(snap["vms"])),
+                s["ubproc_mem_cpu"].format(cpu_s),
+                s["ubproc_mem_files"].format(snap["open_files"]),
+                s["ubproc_mem_conns"].format(snap["conns"]),
+            ]
             if snap.get("sys_mem"):
                 sm = snap["sys_mem"]
-                text += (
-                    f"\n<b>System</b>\n"
-                    f"• Used: <code>{self._ubproc_fmt_bytes(sm.get('used', 0))}</code> "
-                    f"/ <code>{self._ubproc_fmt_bytes(sm.get('total', 0))}</code>\n"
-                    f"• Free-ish: <code>{self._ubproc_fmt_bytes(sm.get('available', 0))}</code>\n"
-                    f"• Load: <code>{sm.get('percent', 0):.1f}%</code>\n"
+                parts.extend(
+                    [
+                        "",
+                        s["ubproc_sys_title"],
+                        s["ubproc_sys_used"].format(
+                            self._ubproc_fmt_bytes(sm.get("used", 0)),
+                            self._ubproc_fmt_bytes(sm.get("total", 0)),
+                        ),
+                        s["ubproc_sys_free"].format(
+                            self._ubproc_fmt_bytes(sm.get("available", 0))
+                        ),
+                        s["ubproc_sys_load"].format(
+                            "{:.1f}".format(sm.get("percent", 0))
+                        ),
+                    ]
                 )
+            text = "\n".join(parts)
             buttons = [
-                [{"text": "🔄 Refresh", "callback": self._ubproc_cb, "args": ("memory", 0)}],
-                [{"text": "◀️ Menu", "callback": self._ubproc_cb, "args": ("menu", 0)},
-                 {"text": "❌ Close", "action": "close"}],
+                [{"text": s["ubproc_btn_refresh"], "callback": self._ubproc_cb, "args": ("memory", 0)}],
+                [
+                    {"text": s["ubproc_btn_menu"], "callback": self._ubproc_cb, "args": ("menu", 0)},
+                    {"text": s["ubproc_btn_close"], "action": "close"},
+                ],
             ]
             return text, buttons
 
         if section == "children":
-            lines = [f"👶 <b>Child processes</b> ({len(snap['children'])})\n"]
+            body = []
             if not snap["children"]:
-                lines.append("<i>No child processes</i>")
+                body.append(s["ubproc_no_children"])
             for ch in sorted(snap["children"], key=lambda x: x["rss"], reverse=True):
-                lines.append(
+                body.append(
                     f"· pid <code>{ch['pid']}</code> "
                     f"<code>{utils.escape_html(ch['name'][:24])}</code> "
                     f"RSS {self._ubproc_fmt_bytes(ch['rss'])} "
                     f"CPU {ch['cpu']:.1f}% [{ch['status']}]"
                 )
-            chunk, page, total = self._ubproc_page(lines[1:], page, per=12)
-            text = lines[0] + "\n".join(chunk) + f"\n\n📄 {page + 1}/{total}"
-            buttons = self._ubproc_nav_buttons("children", page, total)
-            return text, buttons
+            chunk, page, total = self._ubproc_page(body, page, per=12)
+            text = (
+                s["ubproc_sec_children"].format(len(snap["children"]))
+                + "\n\n"
+                + "\n".join(chunk)
+                + f"\n\n{s['ubproc_page'].format(page + 1, total)}"
+            )
+            return text, self._ubproc_nav_buttons("children", page, total)
 
         if section == "gc":
             g = snap.get("gc") or {}
             text = (
-                f"🗑 <b>GC / garbage</b>\n\n"
-                f"• counts: <code>{g.get('counts')}</code>\n"
-                f"• garbage list: <code>{g.get('garbage', 0)}</code>\n"
-                f"• tracked objects: <code>{g.get('objects', 0)}</code>\n\n"
-                f"<i>High object count + RSS growth often means a leak in a module loop.</i>"
+                f"{s['ubproc_sec_gc']}\n\n"
+                f"{s['ubproc_gc_counts'].format(g.get('counts'))}\n"
+                f"{s['ubproc_gc_garbage'].format(g.get('garbage', 0))}\n"
+                f"{s['ubproc_gc_objects'].format(g.get('objects', 0))}\n\n"
+                f"{s['ubproc_gc_hint']}"
             )
             buttons = [
-                [{"text": "♻️ Run gc.collect()", "callback": self._ubproc_cb, "args": ("gc_run", 0)}],
-                [{"text": "🔄 Refresh", "callback": self._ubproc_cb, "args": ("gc", 0)}],
-                [{"text": "◀️ Menu", "callback": self._ubproc_cb, "args": ("menu", 0)},
-                 {"text": "❌ Close", "action": "close"}],
+                [{"text": s["ubproc_btn_gc_run"], "callback": self._ubproc_cb, "args": ("gc_run", 0)}],
+                [{"text": s["ubproc_btn_refresh"], "callback": self._ubproc_cb, "args": ("gc", 0)}],
+                [
+                    {"text": s["ubproc_btn_menu"], "callback": self._ubproc_cb, "args": ("menu", 0)},
+                    {"text": s["ubproc_btn_close"], "action": "close"},
+                ],
             ]
             return text, buttons
 
@@ -1284,16 +1392,17 @@ class CoreMod(loader.Module):
             n = 0
             with contextlib.suppress(Exception):
                 n = gc.collect()
-            text = f"♻️ <b>gc.collect()</b> → freed <code>{n}</code> objects"
+            text = s["ubproc_gc_done"].format(n)
             buttons = [
-                [{"text": "🗑 Back to GC", "callback": self._ubproc_cb, "args": ("gc", 0)}],
-                [{"text": "◀️ Menu", "callback": self._ubproc_cb, "args": ("menu", 0)}],
+                [{"text": s["ubproc_btn_gc_back"], "callback": self._ubproc_cb, "args": ("gc", 0)}],
+                [{"text": s["ubproc_btn_menu"], "callback": self._ubproc_cb, "args": ("menu", 0)}],
             ]
             return text, buttons
 
         return self._ubproc_menu_payload()
 
     def _ubproc_nav_buttons(self, section: str, page: int, total: int):
+        s = self.strings
         row = []
         if page > 0:
             row.append({"text": "◀️", "callback": self._ubproc_cb, "args": (section, page - 1)})
@@ -1303,10 +1412,10 @@ class CoreMod(loader.Module):
         return [
             row,
             [
-                {"text": "🔄 Refresh", "callback": self._ubproc_cb, "args": (section, page)},
-                {"text": "◀️ Menu", "callback": self._ubproc_cb, "args": ("menu", 0)},
+                {"text": s["ubproc_btn_refresh"], "callback": self._ubproc_cb, "args": (section, page)},
+                {"text": s["ubproc_btn_menu"], "callback": self._ubproc_cb, "args": ("menu", 0)},
             ],
-            [{"text": "❌ Close", "action": "close"}],
+            [{"text": s["ubproc_btn_close"], "action": "close"}],
         ]
 
     async def _ubproc_cb(self, call: InlineCall, section: str = "menu", page: int = 0):
@@ -1315,7 +1424,6 @@ class CoreMod(loader.Module):
         except Exception:
             page = 0
         text, buttons = self._ubproc_section_text(section, page)
-        # Telegram caption/message limit ~4096
         if len(text) > 4000:
             text = text[:3980] + "\n…"
         await call.edit(text, reply_markup=buttons)
