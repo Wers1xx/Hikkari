@@ -390,7 +390,7 @@ class LoaderMod(loader.Module):
             if clean_rows:
                 table = html_table(clean_rows, header=("Command", "Description"))
                 parts.append(
-                    f"<details open><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
+                    f"<details><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
                     f"{table}\n</details>"
                 )
             # footer table: Version / Developer / Source

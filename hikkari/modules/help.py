@@ -383,7 +383,7 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<details open><summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"<details><summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n</details>"
                     )
                 if placeholders:
