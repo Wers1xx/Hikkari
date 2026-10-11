@@ -409,10 +409,154 @@ def is_audio_banner(banner) -> bool:
         except Exception:
             return False
     s = str(banner).strip()
-    if s.startswith("audio:"):
+    if s.startswith(("audio:", "audio_ref:", "audio_msg:")):
         return True
     p = Path(s)
     return p.suffix.lower() in {".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus"}
+
+
+def _pick_banner_item(banner):
+    if isinstance(banner, (list, tuple)) and banner:
+        import random
+        try:
+            return random.choice(list(banner))
+        except Exception:
+            return banner[0] if banner else None
+    return banner
+
+
+def pack_audio_ref_from_message(message) -> str | None:
+    """
+    Build instant-send audio banner value from a replied music message.
+    Prefer Telegram document reference (no re-upload) + title/performer.
+    Format: audio_ref:<base64-json>
+    """
+    import base64
+    import json
+
+    if not message:
+        return None
+    doc = getattr(message, "document", None)
+    if doc is None and getattr(message, "media", None) is not None:
+        doc = getattr(message.media, "document", None)
+    if doc is None and getattr(message, "audio", None) is not None:
+        # audio prop may already be the document
+        aud = message.audio
+        doc = getattr(aud, "document", None) or aud
+
+    title = ""
+    performer = ""
+    duration = 0
+    voice = False
+    attrs = list(getattr(doc, "attributes", None) or [])
+    for attr in attrs:
+        if "Audio" in type(attr).__name__:
+            title = getattr(attr, "title", None) or ""
+            performer = getattr(attr, "performer", None) or ""
+            duration = int(getattr(attr, "duration", 0) or 0)
+            voice = bool(getattr(attr, "voice", False))
+            break
+
+    payload = {
+        "title": title or "",
+        "performer": performer or "",
+        "duration": duration,
+        "voice": voice,
+        "mime": getattr(doc, "mime_type", None) or "audio/mpeg",
+        "size": int(getattr(doc, "size", 0) or 0),
+    }
+
+    if doc is not None and getattr(doc, "id", None) is not None:
+        fr = getattr(doc, "file_reference", b"") or b""
+        if isinstance(fr, str):
+            fr = fr.encode("utf-8", errors="ignore")
+        payload.update(
+            {
+                "id": int(doc.id),
+                "access_hash": int(getattr(doc, "access_hash", 0) or 0),
+                "file_reference": base64.b64encode(fr).decode("ascii"),
+                "dc_id": int(getattr(doc, "dc_id", 0) or 0),
+            }
+        )
+        # also keep source message for copy fallback
+        try:
+            payload["chat_id"] = int(
+                getattr(message, "chat_id", None)
+                or getattr(getattr(message, "peer_id", None), "channel_id", 0)
+                or 0
+            )
+            payload["msg_id"] = int(getattr(message, "id", 0) or 0)
+        except Exception:
+            pass
+        raw = base64.urlsafe_b64encode(
+            json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        ).decode("ascii")
+        return f"audio_ref:{raw}"
+
+    return None
+
+
+def unpack_audio_ref(value: str) -> dict | None:
+    import base64
+    import json
+
+    s = str(value or "").strip()
+    if s.startswith("audio_ref:"):
+        s = s[len("audio_ref:") :]
+    else:
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(s.encode("ascii")).decode("utf-8"))
+        if isinstance(data, dict) and data.get("id") is not None:
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def audio_banner_send_kwargs(banner) -> dict:
+    """
+    kwargs for client.send_file / utils.answer to send audio banner instantly.
+    Returns {} if not an audio_ref banner.
+    """
+    item = _pick_banner_item(banner)
+    data = unpack_audio_ref(str(item or ""))
+    if not data:
+        return {}
+    try:
+        from hikkaritl.tl.types import (
+            InputDocument,
+            DocumentAttributeAudio,
+            DocumentAttributeFilename,
+        )
+        import base64
+
+        fr = base64.b64decode(data.get("file_reference") or "")
+        doc = InputDocument(
+            id=int(data["id"]),
+            access_hash=int(data.get("access_hash") or 0),
+            file_reference=fr,
+        )
+        title = data.get("title") or "Track"
+        performer = data.get("performer") or ""
+        duration = int(data.get("duration") or 0)
+        attrs = [
+            DocumentAttributeAudio(
+                duration=duration,
+                title=title,
+                performer=performer,
+                voice=bool(data.get("voice")),
+            ),
+        ]
+        fname = f"{performer + ' - ' if performer else ''}{title}.m4a"
+        attrs.append(DocumentAttributeFilename(file_name=fname[:64]))
+        return {
+            "file": doc,
+            "attributes": attrs,
+            "voice_note": False,
+        }
+    except Exception:
+        return {}
 
 
 def resolve_banner_media(banner):
@@ -432,7 +576,10 @@ def resolve_banner_media(banner):
     if not s:
         return None
 
-    # Audio track saved via .fcfg reply to music
+    # Instant audio ref — handled by audio_banner_send_kwargs (not a file path)
+    if s.startswith("audio_ref:"):
+        return s
+    # Audio track saved via .fcfg reply to music (local fallback)
     if s.startswith("audio:"):
         path = Path(s[6:].strip())
         return str(path) if path.is_file() else None

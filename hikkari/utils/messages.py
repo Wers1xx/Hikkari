@@ -618,6 +618,12 @@ async def answer(
         invert_media = kwargs.pop("invert_media", False)
         kwargs.pop("photo", None)  # not a Telethon edit_message kwarg
 
+        # InputDocument / audio_ref → never edit (slow/fail), always send_file once
+        _fn = type(file).__name__ if file is not None else ""
+        if _fn in ("InputDocument", "Document", "InputMediaDocument"):
+            edit = False
+            invert_media = False
+
         # Never pass garbage / non-media strings as file=
         if isinstance(file, str):
             bad = (

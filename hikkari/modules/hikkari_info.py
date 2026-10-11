@@ -430,6 +430,14 @@ class HikkariInfoMod(loader.Module):
 
 
         try:
+            from ..utils.other import is_audio_banner, audio_banner_send_kwargs
+            _akw = (
+                audio_banner_send_kwargs(self.config.get("banner_url"))
+                if is_audio_banner(self.config.get("banner_url"))
+                else {}
+            )
+            if _akw:
+                media = None  # use document ref kwargs instead
             match True:
                 case _ if self.config["custom_message"] is None:
                     await utils.answer(
@@ -437,17 +445,19 @@ class HikkariInfoMod(loader.Module):
                         await self._render_info(start),
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
-                        invert_media=self.config["invert_media"],
+                        invert_media=self.config["invert_media"] if not _akw else False,
+                        **_akw,
                     )
                 case _:
-                    if "{ping}" in (self.config["custom_message"] or ""):
+                    if "{ping}" in (self.config["custom_message"] or "") and not _akw:
                         message = await utils.answer(message, self.config["ping_emoji"])
                     await utils.answer(
                         message,
                         await self._render_info(start),
                         file=media,
                         reply_to=getattr(message, "reply_to_msg_id", None),
-                        invert_media=self.config["invert_media"],
+                        invert_media=self.config["invert_media"] if not _akw else False,
+                        **_akw,
                     )
         except WebpageMediaEmptyError:
             await utils.answer(

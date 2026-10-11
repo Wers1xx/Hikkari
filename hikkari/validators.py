@@ -417,6 +417,8 @@ class Link(Validator):
                 raise ValidationError(f"Passed value ({value}) is not a valid local asset")
             return value
         # Audio track as banner (.fcfg reply to music)
+        if value.startswith("audio_ref:"):
+            return value
         if value.startswith("audio:"):
             path = value[6:].strip()
             if not path:

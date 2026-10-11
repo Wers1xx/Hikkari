@@ -355,9 +355,10 @@ class TestMod(loader.Module):
             and can_use_rich(self._client, self._db)
             and getattr(self.inline, "init_complete", False)
         )
-        # Rich mode: no intermediate emoji (message goes via @bot as Rich)
-        # Classic / audio track: one timing emoji then edit to result
-        if not _rich:
+        # Rich mode: no intermediate emoji (via @bot)
+        # Audio banner: no intermediate emoji either (instant send with caption)
+        # Classic image: timing emoji then edit
+        if not _rich and not _audio_banner:
             message = await utils.answer(
                 message, self.config["ping_emoji"], skip_rich=True
             )
@@ -493,6 +494,21 @@ class TestMod(loader.Module):
         except Exception:
             logger.warning("ping rich failed", exc_info=True)
 
+        # Audio track banner → instant send via document ref (no re-upload)
+        if _audio_banner:
+            from ..utils.other import audio_banner_send_kwargs
+            akw = audio_banner_send_kwargs(self.config.get("banner_url"))
+            if akw:
+                await utils.answer(
+                    message,
+                    placeholders_msg,
+                    skip_rich=True,
+                    **akw,
+                )
+                return
+            # fallback: local audio: path from resolve
+            if isinstance(banner, str) and banner.startswith("audio_ref:"):
+                banner = None
         await utils.answer(
             message,
             placeholders_msg,

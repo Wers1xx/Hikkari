@@ -1956,35 +1956,50 @@ class HikkariConfigMod(loader.Module):
                 and self._is_banner_option(str(option))
                 and self._reply_has_audio(reply)
             ):
+                # Instant: store Telegram document ref (no re-upload on ping)
+                from ..utils.other import pack_audio_ref_from_message
+
+                ref = pack_audio_ref_from_message(reply)
+                # Still download local fallback + delete old files
                 path = await self._save_reply_audio_banner(reply, mod_name, str(option))
-                if not path:
+                value = ref or (f"audio:{path}" if path else None)
+                if not value:
                     await utils.answer(
                         message,
                         "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
-                        "<b>Не удалось скачать трек</b>\n"
-                        "<i>Убедись что реплай именно на аудио/музыку</i>",
+                        "<b>Не удалось сохранить трек</b>\n"
+                        "<i>Реплай должен быть на аудио/музыку</i>",
                     )
                     return
                 try:
-                    # RandomLink accepts list or single string via Series
-                    instance.config[option] = f"audio:{path}"
-                except Exception as e:
-                    # force via internal set if validator still rejects
+                    instance.config[option] = value
+                except Exception:
                     try:
-                        instance.config[option] = [f"audio:{path}"]
+                        instance.config[option] = [value]
                     except Exception as e2:
                         await utils.answer(
                             message,
                             "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
-                            f"<b>Не сохранено:</b> <code>{utils.escape_html(str(e2) or str(e))}</code>",
+                            f"<b>Не сохранено:</b> <code>{utils.escape_html(str(e2))}</code>",
                         )
                         return
+                meta = ""
+                try:
+                    from ..utils.other import unpack_audio_ref
+                    d = unpack_audio_ref(value) or {}
+                    t = d.get("title") or ""
+                    p = d.get("performer") or ""
+                    if t or p:
+                        meta = f"\n<i>{utils.escape_html(p)} — {utils.escape_html(t)}</i>"
+                except Exception:
+                    pass
                 await utils.answer(
                     message,
                     "<tg-emoji emoji-id=5256182535917940722>✅</tg-emoji> "
                     f"<b>{utils.escape_html(str(option))}</b> → трек как баннер\n"
-                    f"<code>{utils.escape_html(mod_name)}</code>\n"
-                    f"<code>audio:{utils.escape_html(path)}</code>",
+                    f"<code>{utils.escape_html(mod_name)}</code>"
+                    f"{meta}\n"
+                    "<i>Отправка без повторной загрузки</i>",
                 )
                 return
 
