@@ -42,7 +42,7 @@ from ..types import HikkariReplyMarkup
 
 
 ROW_SIZE = 3
-NUM_ROWS = 5
+NUM_ROWS = 12
 
 
 class _InlineFormDraft:
@@ -182,13 +182,30 @@ class HikkariConfigMod(loader.Module):
 
     @staticmethod
     def _paginate_text_markup(
+        self,
         text: str,
         page: int,
         callback: typing.Any,
-        length: int = 4096,
+        length: int | None = None,
+        with_media: bool = False,
     ) -> tuple[str, list[list[dict[str, typing.Any]]]]:
-        # length=900 when parent form has photo (caption limit ~1024)
+        """
+        Paginate ONLY when text exceeds Telegram limits.
+        - with media/caption: 1024
+        - plain message: 4096
+        No nav buttons if content fits on one page.
+        """
+        if length is None:
+            length = 1024 if with_media else 4096
+
+        # Fast path: under limit → no pagination
+        if len(text or "") <= length:
+            return text, []
+
         parsed_text, parsed_entities = html.parse(text)
+        if len(parsed_text or "") <= length:
+            return text, []
+
         pages = list(
             utils.smart_split(
                 parsed_text,
@@ -1050,7 +1067,7 @@ class HikkariConfigMod(loader.Module):
                     force_hidden=force_hidden,
                     obj_type=obj_type,
                 ),
-                length=900,
+                with_media=True,
             )
             match validator.internal_id:
                 case "Boolean":
@@ -1118,7 +1135,7 @@ class HikkariConfigMod(loader.Module):
                 force_hidden=force_hidden,
                 obj_type=obj_type,
             ),
-            length=900,
+            with_media=True,
         )
 
         markup = additonal_button_row + [
