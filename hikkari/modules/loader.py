@@ -868,8 +868,16 @@ class LoaderMod(loader.Module):
                 return MODULE_LOADING_FAILED
 
             # Keep URL as origin (DB / re-download). save_fs=True writes disk copy.
+            # Embed source URL so .ml can show link even if origin was rewritten
+            src_body = r if isinstance(r, str) else (
+                r.decode("utf-8", errors="ignore")
+                if isinstance(r, (bytes, bytearray))
+                else str(r)
+            )
+            if "# meta source:" not in src_body.lower():
+                src_body = f"# meta source: {url}\n" + src_body
             installed = await self.load_module(
-                r,
+                src_body,
                 message,
                 module_name,
                 url,
@@ -2379,11 +2387,17 @@ class LoaderMod(loader.Module):
                 if disk.is_file() and disk.stat().st_size > 0:
                     try:
                         src = disk.read_text(encoding="utf-8")
+                        use_origin = (
+                            origin
+                            if isinstance(origin, str)
+                            and origin.startswith(("http://", "https://", "ftp://"))
+                            else str(disk)
+                        )
                         ok = await self.load_module(
                             src,
                             None,
                             name=cls_name,
-                            origin=str(disk),
+                            origin=use_origin,
                             save_fs=False,
                             quiet=True,
                         )
@@ -2570,32 +2584,40 @@ class LoaderMod(loader.Module):
             )
             return
 
-        link = module.__origin__
+        # Resolve share URL: __origin__ → DB loaded_modules → # meta source
+        link = getattr(module, "__origin__", "") or ""
+        if not utils.check_url(str(link)):
+            db_map = self.get("loaded_modules", {}) or {}
+            for key in (
+                module.__class__.__name__,
+                class_name,
+                getattr(module, "name", None),
+            ):
+                if not key:
+                    continue
+                cand = db_map.get(key) or db_map.get(str(key))
+                if utils.check_url(str(cand or "")):
+                    link = str(cand).strip()
+                    break
+        if not utils.check_url(str(link)):
+            src = getattr(module, "__source__", None) or module_doc or ""
+            msrc = re.search(r"#\s*meta\s+source:\s*(\S+)", src, flags=re.I)
+            if msrc and utils.check_url(msrc.group(1).strip()):
+                link = msrc.group(1).strip()
 
-        text = (
-            f"<b>🧳 {utils.escape_html(class_name)}</b>"
-            if not utils.check_url(link)
-            else (
-                f'📼 <b><a href="{link}">Link</a> for'
-                f" {utils.escape_html(class_name)}:</b>"
-                f' <code>{link}</code>\n\n{self.strings["not_exact"] if not exact else ""}'
-            )
-        )
-
-        text = (
-            self.strings["link"].format(
+        if utils.check_url(str(link)):
+            text = self.strings["link"].format(
                 class_name=utils.escape_html(class_name),
-                url=link,
+                url=utils.escape_html(str(link)),
                 not_exact=self.strings["not_exact"] if not exact else "",
                 prefix=utils.escape_html(self.get_prefix()),
             )
-            if utils.check_url(link)
-            else self.strings["file"].format(
+        else:
+            text = self.strings["file"].format(
                 class_name=utils.escape_html(class_name),
                 not_exact=self.strings["not_exact"] if not exact else "",
                 prefix=utils.escape_html(self.get_prefix()),
             )
-        )
 
         file = io.BytesIO(module_data)
         file.name = f"{class_name}.py"
