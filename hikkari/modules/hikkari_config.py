@@ -180,7 +180,6 @@ class HikkariConfigMod(loader.Module):
         plain_limit = max(0, limit - len(suffix) - len("<b><code></code></b>"))
         return f"<b><code>{utils.escape_html(plain[:plain_limit])}</code></b>{suffix}"
 
-    @staticmethod
     def _paginate_text_markup(
         self,
         text: str,
@@ -305,7 +304,14 @@ class HikkariConfigMod(loader.Module):
             if query == "" and option not in {"banner_url", "custom_message"}:
                 # empty might be intentional for some options; still allow for string
                 pass
+            prev_q = None
+            with contextlib.suppress(Exception):
+                prev_q = self.lookup(mod).config[option]
             self.lookup(mod).config[option] = query
+            if self._is_banner_option(str(option)):
+                qs = str(query or "")
+                if not qs.startswith(("audio:", "audio_ref:")):
+                    self._cleanup_audio_banner_files(mod, str(option), prev_q)
         except loader.validators.ValidationError as e:
             await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
@@ -1812,7 +1818,25 @@ class HikkariConfigMod(loader.Module):
                 return
 
             try:
+                prev = None
+                with contextlib.suppress(Exception):
+                    prev = instance.config[option]
                 instance.config[option] = value
+                # If banner option left audio mode → delete old track files
+                if self._is_banner_option(str(option)):
+                    new_s = str(value or "")
+                    if not (
+                        new_s.startswith("audio:")
+                        or new_s.startswith("audio_ref:")
+                        or (
+                            isinstance(value, (list, tuple))
+                            and any(
+                                str(x).startswith(("audio:", "audio_ref:"))
+                                for x in value
+                            )
+                        )
+                    ):
+                        self._cleanup_audio_banner_files(mod, str(option), prev)
             except loader.validators.ValidationError as e:
                 await utils.answer(
                     message, self.strings["validation_error"].format(e.args[0])
@@ -1905,6 +1929,37 @@ class HikkariConfigMod(loader.Module):
                 if mime.startswith("audio/"):
                     return True
         return False
+
+
+    def _cleanup_audio_banner_files(self, mod: str, option: str, prev_value=None) -> None:
+        """Delete local audio banner files when track is replaced or cleared."""
+        from pathlib import Path as _P
+        with contextlib.suppress(Exception):
+            try:
+                from .. import main as _main
+                base = _P(getattr(_main, "BASE_PATH", _P.cwd()))
+            except Exception:
+                base = _P.cwd()
+            dest_dir = base / "assets" / "banners"
+            if dest_dir.is_dir():
+                safe_mod = re.sub(r"[^\w\-]+", "_", str(mod))[:40]
+                safe_opt = re.sub(r"[^\w\-]+", "_", str(option))[:40]
+                prefix = f"{safe_mod}_{safe_opt}_"
+                for old_f in list(dest_dir.glob(prefix + "*")):
+                    with contextlib.suppress(Exception):
+                        if old_f.is_file():
+                            old_f.unlink()
+            # Also remove explicit path from previous audio: value
+            if prev_value:
+                items = prev_value if isinstance(prev_value, (list, tuple)) else [prev_value]
+                for item in items:
+                    s = str(item or "")
+                    if s.startswith("audio:"):
+                        p = _P(s[6:].strip())
+                        if p.is_file():
+                            with contextlib.suppress(Exception):
+                                p.unlink()
+
 
     async def _save_reply_audio_banner(self, reply, mod: str, option: str) -> str | None:
         """Download replied track into assets/banners and return absolute path."""
