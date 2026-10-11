@@ -280,13 +280,42 @@ class LoaderMod(loader.Module):
         s = re.sub(r"[ \t]+", " ", s).strip()
         return s or fallback
 
+    def _cmd_aliases(self, name: str, fun) -> list[str]:
+        """Aliases from decorator + user .addalias map."""
+        aliases: list[str] = []
+        if getattr(fun, "aliases", None):
+            aliases.extend(list(fun.aliases))
+        elif getattr(fun, "alias", None):
+            aliases.append(fun.alias)
+        cmd = (name or "").lower()
+        for alias, target in (getattr(self.allmodules, "aliases", None) or {}).items():
+            if not alias or not target:
+                continue
+            if str(target).split()[0].lower().strip() == cmd and alias.lower() != cmd:
+                aliases.append(alias)
+        seen = set()
+        out = []
+        for a in aliases:
+            a = str(a).strip()
+            if not a or a.lower() in seen or a.lower() == cmd:
+                continue
+            seen.add(a.lower())
+            out.append(a)
+        return out
+
     def _module_cmds_rows(self, instance) -> list[tuple[str, str]]:
         rows = []
         prefix = self.get_prefix()
         undoc = self.strings.get("undoc", "—")
-        for name, fun in sorted(getattr(instance, "commands", {}).items(), key=lambda x: x[0]):
+        for name, fun in sorted(
+            getattr(instance, "commands", {}).items(), key=lambda x: x[0]
+        ):
             doc = self._plain_cmd_doc(inspect.getdoc(fun), undoc)[:120]
-            rows.append((f"{prefix}{name}", doc))
+            al = self._cmd_aliases(name, fun)
+            label = f"{prefix}{name}"
+            if al:
+                label = f"{label} ({', '.join(al)})"
+            rows.append((label, doc))
         if getattr(self.inline, "init_complete", False):
             for name, fun in sorted(
                 getattr(instance, "inline_handlers", {}).items(), key=lambda x: x[0]
@@ -390,8 +419,10 @@ class LoaderMod(loader.Module):
             if clean_rows:
                 table = html_table(clean_rows, header=("Command", "Description"))
                 parts.append(
-                    f"<details><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
-                    f"{table}\n</details>"
+                    "<details>"
+                    f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
+                    f"{table}\n"
+                    "</details>"
                 )
             # footer table: Version / Developer / Source
             footer_rows = []

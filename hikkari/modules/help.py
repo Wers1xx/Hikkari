@@ -196,15 +196,46 @@ class Help(loader.Module):
         )
 
     def find_aliases(self, command: str) -> list:
-        """Find aliases for command"""
-        aliases = []
-        _command = self.allmodules.commands[command]
-        if getattr(_command, "alias", None) and not (
-            aliases := getattr(_command, "aliases", None)
-        ):
-            aliases = [_command.alias]
+        """Find aliases for command (decorator + user .addalias)."""
+        aliases: list[str] = []
+        cmd = (command or "").lower().strip()
+        if not cmd:
+            return []
 
-        return aliases or []
+        func = self.allmodules.commands.get(cmd) or self.allmodules.commands.get(
+            command
+        )
+        if func is not None:
+            if getattr(func, "aliases", None):
+                aliases.extend(list(func.aliases))
+            elif getattr(func, "alias", None):
+                aliases.append(func.alias)
+
+        for alias, target in (getattr(self.allmodules, "aliases", None) or {}).items():
+            if not alias or not target:
+                continue
+            target_cmd = str(target).split()[0].lower().strip()
+            if target_cmd == cmd and alias.lower() != cmd:
+                aliases.append(alias)
+
+        seen: set[str] = set()
+        out: list[str] = []
+        for a in aliases:
+            a = str(a).strip()
+            if not a or a.lower() in seen or a.lower() == cmd:
+                continue
+            seen.add(a.lower())
+            out.append(a)
+        return out
+
+    def _cmd_label(self, name: str, *, with_prefix: bool = True) -> str:
+        """Heroku-style: backupall (backup)."""
+        prefix = self.get_prefix() if with_prefix else ""
+        al = self.find_aliases(name)
+        base = f"{prefix}{name}"
+        if not al:
+            return base
+        return f"{base} ({', '.join(al)})"
 
     async def modhelp(self, message: Message, args: str):
         exact = True
@@ -359,7 +390,7 @@ class Help(loader.Module):
                     rows.append(
                         (
                             html_mod.escape(
-                                f"{self.get_prefix()}{name}"
+                                self._cmd_label(name, with_prefix=True)
                             ),
                             html_mod.escape(doc),
                         )
@@ -383,8 +414,10 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<details><summary><b>Commands</b> ({len(rows)})</summary>\n"
-                        f"{table}\n</details>"
+                        "<details>"
+                        f"<summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"{table}\n"
+                        "</details>"
                     )
                 if placeholders:
                     ph = self._plain_doc(placeholders, "")
