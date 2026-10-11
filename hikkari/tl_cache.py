@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -80,6 +81,12 @@ def hashable(value: typing.Any) -> bool:
 class CustomTelegramClient(TelegramClient):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Auto-sleep on FloodWait up to 24h instead of raising — reduces session risk
+        with contextlib.suppress(Exception):
+            self.flood_sleep_threshold = max(
+                int(getattr(self, "flood_sleep_threshold", 0) or 0),
+                24 * 60 * 60,
+            )
 
         self._hikkari_entity_cache: dict[
             str | int,

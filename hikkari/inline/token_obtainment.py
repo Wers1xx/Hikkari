@@ -155,6 +155,102 @@ def _load_bot_token(db, tg_id: int | None = None) -> str | None:
 
 
 class TokenObtainment(InlineUnit):
+
+    async def _resolve_bot_avatar_path(self) -> str | None:
+        """Local star avatar path (prefer package assets, then download)."""
+        from pathlib import Path
+        from ..utils.other import ensure_builtin_asset
+
+        candidates = (
+            "hikkari-ava.png",
+            "bot_avatar.png",
+            "hikkari-star.png",
+        )
+        for name in candidates:
+            p = ensure_builtin_asset(name)
+            if p is not None and Path(p).is_file() and Path(p).stat().st_size > 500:
+                return str(p)
+        # package-relative fallback
+        here = Path(__file__).resolve().parent.parent  # hikkari/
+        for rel in (
+            "assets/hikkari-ava.png",
+            "assets/bot_avatar.png",
+            "assets/hikkari-star.png",
+        ):
+            p = here / rel
+            if p.is_file() and p.stat().st_size > 500:
+                return str(p)
+        root = here.parent / "assets" / "hikkari-ava.png"
+        if root.is_file():
+            return str(root)
+        return None
+
+    async def _apply_bot_avatar(self: "InlineManager", conv, username: str) -> bool:
+        """
+        Set inline bot profile photo via @BotFather.
+        Sequence: /setuserpic → @username → image file as photo.
+        """
+        await asyncio.sleep(1.0)
+        m = await conv.send_message("/setuserpic")
+        r = await conv.get_response()
+        logger.debug(">> /setuserpic")
+        logger.debug("<< %s", (r.raw_text or "")[:200])
+        await asyncio.sleep(0.6)
+        with contextlib.suppress(Exception):
+            await m.delete()
+            await r.delete()
+
+        uname = (username or "").strip()
+        if uname and not uname.startswith("@"):
+            uname = f"@{uname}" if not uname.endswith("bot") else uname
+        # BotFather expects the bot username without @ usually
+        uname_plain = uname.lstrip("@")
+
+        await asyncio.sleep(0.5)
+        m = await conv.send_message(uname_plain)
+        r = await conv.get_response()
+        logger.debug(">> %s", uname_plain)
+        logger.debug("<< %s", (r.raw_text or "")[:200])
+        await asyncio.sleep(0.6)
+        with contextlib.suppress(Exception):
+            await m.delete()
+            await r.delete()
+
+        path = await self._resolve_bot_avatar_path()
+        if not path:
+            logger.warning("No local bot avatar asset found")
+            # last resort: github
+            try:
+                m = await conv.send_file(
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
+                    force_document=False,
+                )
+            except Exception:
+                logger.exception("remote avatar send failed")
+                return False
+        else:
+            logger.info("Setting bot avatar from %s", path)
+            m = await conv.send_file(path, force_document=False)
+
+        r = await conv.get_response()
+        logger.debug(">> <avatar photo>")
+        logger.debug("<< %s", (r.raw_text or "")[:200])
+        await asyncio.sleep(0.5)
+        with contextlib.suppress(Exception):
+            await m.delete()
+            await r.delete()
+
+        raw = (r.raw_text or "").lower()
+        if any(x in raw for x in ("success", "успех", "changed", "updated", "saved", "установ")):
+            logger.info("Bot avatar applied OK")
+            return True
+        # BotFather sometimes answers generically — still OK if no error
+        if any(x in raw for x in ("error", "invalid", "невер", "fail", "sorry")):
+            logger.warning("BotFather avatar response looks like error: %s", r.raw_text)
+            return False
+        return True
+
+
     async def _create_bot(self: "InlineManager"):
         logger.info("User doesn't have bot, attempting creating new one")
         async with self._client.conversation("@BotFather", exclusive=False) as conv:
@@ -192,7 +288,7 @@ class TokenObtainment(InlineUnit):
                 try:
                     await self._client.send_message(
                         "me",
-                        "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Не удалось создать бота через @BotFather</b>\n"
+                        "⚠️ <b>Не удалось создать бота через @BotFather</b>\n"
                         "(часто из‑за SpamBan / лимита на создание ботов).\n\n"
                         "Юзербот продолжит работу <b>без инлайна</b>.\n"
                         f"Укажи токен существующего бота:\n"
@@ -230,7 +326,7 @@ class TokenObtainment(InlineUnit):
             token = None
             # 1) display name  2) username (BotFather returns token here)
             for msg in [
-                "<emoji document_id=5283176512747507510>✨</emoji> Hikkari userbot"[:64],
+                "✨ Hikkari userbot"[:64],
                 username,
             ]:
                 await fw_protect()
@@ -252,7 +348,7 @@ class TokenObtainment(InlineUnit):
                     await self._client.send_message(
                         "me",
                         (
-                            "<emoji document_id=5447644880824181073>⚠️</emoji> Бот создан, но токен не найден в ответе BotFather.\n"
+                            "⚠️ Бот создан, но токен не найден в ответе BotFather.\n"
                             "Открой @BotFather → /token и укажи:\n"
                             "<code>.ch_bot_token &lt;token&gt;</code>"
                         ),
@@ -266,7 +362,7 @@ class TokenObtainment(InlineUnit):
             self._token = token
             logger.debug("Inline bot created, token saved (+backup)")
 
-            # Enable inline mode + feedback + avatar
+            # Enable inline mode + feedback
             for msg in [
                 "/setinline",
                 username,
@@ -274,45 +370,26 @@ class TokenObtainment(InlineUnit):
                 "/setinlinefeedback",
                 username,
                 "Enabled",
-                "/setuserpic",
-                username,
             ]:
                 try:
-                    await fw_protect()
+                    await asyncio.sleep(0.8)
                     m = await conv.send_message(msg)
                     r = await conv.get_response()
                     logger.debug(">> %s", m.raw_text)
                     logger.debug("<< %s", r.raw_text)
-                    await fw_protect()
+                    await asyncio.sleep(0.5)
                     await m.delete()
                     await r.delete()
                 except Exception:
                     logger.exception("BotFather step failed: %s", msg)
 
+            # Avatar: BotFather /setuserpic → username → photo (must be image, not document)
             try:
-                await fw_protect()
-                from .. import main
-                from ..utils.other import ensure_builtin_asset
-                ava = ensure_builtin_asset("hikkari-ava.png")
-                if "DOCKER" in os.environ:
-                    m = await conv.send_file(
-                        "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/master/assets/hikkari-ava.png"
-                    )
-                elif ava.is_file():
-                    m = await conv.send_file(str(ava))
-                else:
-                    m = None
-                if m is not None:
-                    r = await conv.get_response()
-                    logger.debug(">> <Photo>")
-                    logger.debug("<< %s", r.raw_text)
-                    await fw_protect()
-                    await m.delete()
-                    await r.delete()
+                await self._apply_bot_avatar(conv, username)
             except Exception:
                 logger.exception("Failed to set bot avatar")
                 with contextlib.suppress(Exception):
-                    await fw_protect()
+                    await asyncio.sleep(0.5)
                     m = await conv.send_message("/cancel")
                     r = await conv.get_response()
                     await m.delete()
@@ -322,7 +399,7 @@ class TokenObtainment(InlineUnit):
                 await self._client.send_message(
                     "me",
                     (
-                        f"<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот создан:</b> {username}\n"
+                        f"✨ <b>Инлайн-бот создан:</b> {username}\n"
                         "Токен сохранён. После рестарта инлайн будет активен."
                     ),
                     link_preview=False,
@@ -338,7 +415,7 @@ class TokenObtainment(InlineUnit):
             return
         prefix = self._db.get("hikkari.main", "command_prefix", False) or "."
         text = (
-            "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari — Inline bot setup</b>\n\n"
+            "✨ <b>Hikkari — Inline bot setup</b>\n\n"
             "Нужен инлайн-бот для форм, галерей и логов.\n\n"
             f"• <code>{prefix}yesbot</code> — создать нового бота через @BotFather\n"
             f"• <code>{prefix}nobot</code> — пропустить (без инлайна)\n"

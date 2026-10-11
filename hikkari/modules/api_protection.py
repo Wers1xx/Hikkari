@@ -88,7 +88,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "threshold",
-                120,
+                100,
                 lambda: self.strings["_cfg_threshold"],
                 validator=loader.validators.Integer(minimum=10),
             ),
@@ -106,7 +106,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "soft_throttle_ms",
-                40,
+                60,
                 lambda: "Soft delay (ms) between bulk-read requests when approaching limit",
                 validator=loader.validators.Integer(minimum=0, maximum=2000),
             ),
