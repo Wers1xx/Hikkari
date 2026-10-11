@@ -23,6 +23,7 @@ import contextlib
 import difflib
 import functools
 import logging
+logger = logging.getLogger(__name__)
 import typing
 from pathlib import Path
 from math import ceil
@@ -87,23 +88,19 @@ class HikkariConfigMod(loader.Module):
             loader.ConfigValue(
                 "banner_url",
                 "",
-                lambda: (
-                    "Баннер конфига: http(s) ссылка на фото/gif, "
-                    "или пусто = встроенный hikkari-config.jpg. "
-                    "Можно загрузить через WebApp upload → вставить ссылку x0.at"
-                ),
+                lambda: "Banner for config UI (http URL or empty for built-in)",
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
                 "media_quote",
                 True,
-                lambda: "Показывать баннер конфига как webpage/quote media",
+                lambda: "Use quote/webpage media for config banner",
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
                 "invert_media",
                 True,
-                lambda: "Invert media (баннер сверху/quote style) для конфига",
+                lambda: "Invert media (quote style) for config banner",
                 validator=loader.validators.Boolean(),
             ),
         )
@@ -115,48 +112,26 @@ class HikkariConfigMod(loader.Module):
         kw.update(self._cfg_banner_kwargs())
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
-        # silent form avoids <emoji document_id=5283176512747507510>✨</emoji> hang
+        # silent form avoids ✨ hang
         kw.setdefault("silent", True)
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
-        """photo / webpage + invert for config forms (respects user banner_url)."""
+        """photo + invert for config forms."""
         from pathlib import Path as _P
         from ..utils.other import ensure_builtin_asset
-
         url = str(self.config.get("banner_url") or "").strip()
-        if not url or url.lower() in ("none", "null", "0", "-"):
+        if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(p).is_file():
                 url = str(p)
-            else:
-                return {}
-
-        kw: dict = {}
-        # Remote → InputMediaWebPage-friendly photo URL
+        if not url:
+            return {}
+        kw = {}
         if url.startswith(("http://", "https://")):
             kw["photo"] = url
-            if bool(self.config.get("media_quote", True)):
-                try:
-                    from hikkaritl.tl.types import InputMediaWebPage
-                    kw["file"] = InputMediaWebPage(url, optional=True)
-                except Exception:
-                    pass
         else:
-            # Local path
-            p = _P(url)
-            if p.is_file():
-                kw["photo"] = str(p)
-            else:
-                # fallback built-in
-                b = ensure_builtin_asset("hikkari-config.jpg")
-                if b and _P(b).is_file():
-                    kw["photo"] = str(b)
-                else:
-                    return {}
-
-        if bool(self.config.get("invert_media", True)):
-            kw["invert_media"] = True
+            kw["photo"] = url  # local path form supports
         return kw
 
     @staticmethod
@@ -292,12 +267,12 @@ class HikkariConfigMod(loader.Module):
             if isinstance(query, str) and (
                 "Transferring value" in query
                 or "will be deleted automatically" in query
-                or query in {"<emoji document_id=5258200195589504369>🔄</emoji>", "<emoji document_id=5283176512747507510>✨</emoji>"}
+                or query in {"🔄", "✨"}
             ):
                 await call.edit(
                     self.strings.get(
                         "validation_error",
-                        "<emoji document_id=5240241223632954241>🚫</emoji> <b>Invalid value</b>",
+                        "🚫 <b>Invalid value</b>",
                     ).format("empty or transfer placeholder — type the value in the inline field and send it"),
                     reply_markup={
                         "text": self.strings.get("try_again", "Try again"),
@@ -474,7 +449,7 @@ class HikkariConfigMod(loader.Module):
             reply_markup=self._generate_bool_markup(mod, option, obj_type),
         )
 
-        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
+        await call.answer("✅")
 
     def _generate_bool_markup(
         self,
@@ -487,7 +462,7 @@ class HikkariConfigMod(loader.Module):
                 *(
                     [
                         {
-                            "text": f"👎 {self.strings['set']} `False`",
+                            "text": f"❌ {self.strings['set']} `False`",
                             "callback": self.inline__set_bool,
                             "args": (mod, option, False),
                             "kwargs": {"obj_type": obj_type},
@@ -496,7 +471,7 @@ class HikkariConfigMod(loader.Module):
                     if self.lookup(mod).config[option]
                     else [
                         {
-                            "text": f"⤵️ {self.strings['set']} `True`",
+                            "text": f"✅ {self.strings['set']} `True`",
                             "callback": self.inline__set_bool,
                             "args": (mod, option, True),
                             "kwargs": {"obj_type": obj_type},
@@ -780,7 +755,7 @@ class HikkariConfigMod(loader.Module):
             ],
         )
 
-        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
+        await call.answer("✅")
 
     async def _multi_choice_set_value(
         self,
@@ -811,7 +786,7 @@ class HikkariConfigMod(loader.Module):
         await self.inline__configure_option(
             call, mod=mod, config_opt=option, force_hidden=False, obj_type=obj_type
         )
-        await call.answer("<emoji document_id=5256182535917940722>⤵️</emoji>")
+        await call.answer("✅")
 
     def _generate_choice_markup(
         self,
@@ -839,7 +814,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": (
-                            f"{'<emoji document_id=5256182535917940722>⤵️</emoji>️' if self.lookup(mod).config[option] == value else '🔘'} "
+                            f"{'☑️' if self.lookup(mod).config[option] == value else '🔘'} "
                             f"{value if len(str(value)) < 20 else str(value)[:20]}"
                         ),
                         "callback": self._choice_set_value,
@@ -913,7 +888,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": (
-                            f"{'<emoji document_id=5256182535917940722>⤵️</emoji>️' if value in self.lookup(mod).config[option] else '◻️'} "
+                            f"{'☑️' if value in self.lookup(mod).config[option] else '◻️'} "
                             f"{value if len(str(value)) < 20 else str(value)[:20]}"
                         ),
                         "callback": self._multi_choice_set_value,
@@ -1187,7 +1162,7 @@ class HikkariConfigMod(loader.Module):
             with contextlib.suppress(Exception):
                 await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
             with contextlib.suppress(Exception):
-                await call.answer("<emoji document_id=5447644880824181073>⚠️</emoji> text truncated", show_alert=False)
+                await call.answer("⚠️ text truncated", show_alert=False)
 
     async def inline__configure_page(
         self,
@@ -1864,6 +1839,62 @@ class HikkariConfigMod(loader.Module):
 
         await utils.answer(message, "\n".join(lines))
 
+
+    _BANNER_OPTS = frozenset({
+        "banner_url", "banner", "media", "media_url", "photo", "pic",
+    })
+
+    @staticmethod
+    def _is_banner_option(option: str) -> bool:
+        o = (option or "").lower()
+        if o in HikkariConfigMod._BANNER_OPTS:
+            return True
+        return "banner" in o
+
+    @staticmethod
+    def _reply_has_audio(reply) -> bool:
+        if not reply:
+            return False
+        if getattr(reply, "audio", None) or getattr(reply, "voice", None):
+            return True
+        doc = getattr(reply, "document", None)
+        if not doc:
+            return False
+        for attr in getattr(doc, "attributes", []) or []:
+            name = type(attr).__name__
+            if name == "DocumentAttributeAudio":
+                return True
+        mime = getattr(doc, "mime_type", "") or ""
+        return mime.startswith("audio/")
+
+    async def _save_reply_audio_banner(self, reply, mod: str, option: str) -> str | None:
+        """Download replied track into assets/banners and return absolute path."""
+        from pathlib import Path as _P
+        try:
+            from .. import main as _main
+            base = _P(getattr(_main, "BASE_PATH", _P.cwd()))
+        except Exception:
+            base = _P.cwd()
+        dest_dir = base / "assets" / "banners"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        ext = ".ogg"
+        with contextlib.suppress(Exception):
+            if getattr(reply, "file", None) and getattr(reply.file, "ext", None):
+                ext = reply.file.ext if reply.file.ext.startswith(".") else f".{reply.file.ext}"
+        safe_mod = re.sub(r"[^\w\-]+", "_", str(mod))[:40]
+        safe_opt = re.sub(r"[^\w\-]+", "_", str(option))[:40]
+        path = dest_dir / f"{safe_mod}_{safe_opt}_{getattr(reply, 'id', 0)}{ext}"
+        try:
+            await reply.download_media(file=str(path))
+        except Exception:
+            logger.exception("audio banner download failed")
+            return None
+        if not path.is_file() or path.stat().st_size <= 0:
+            return None
+        return str(path.resolve())
+
+
     async def _configcmd_impl(self, message: Message):
         raw = utils.get_args_raw(message).strip()
         args_s = raw.split()
@@ -1880,6 +1911,41 @@ class HikkariConfigMod(loader.Module):
         parts = [part.strip() for part in raw.split("&&") if part.strip()]
         reply = await message.get_reply_message()
         reply_text = reply.raw_text if reply and reply.raw_text else None
+
+        # Reply to audio/track → set banner_url (or any *banner* option) to that track
+        # Usage: reply to music → .fcfg Tester banner_url
+        if (
+            reply
+            and len(args_s) >= 2
+            and args_s[1] in instance.config
+            and self._is_banner_option(args_s[1])
+            and self._reply_has_audio(reply)
+        ):
+            option = args_s[1]
+            path = await self._save_reply_audio_banner(reply, mod_name, option)
+            if not path:
+                await utils.answer(
+                    message,
+                    "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
+                    "<b>Не удалось сохранить трек</b>",
+                )
+                return
+            try:
+                instance.config[option] = f"audio:{path}"
+            except loader.validators.ValidationError as e:
+                await utils.answer(
+                message,
+                (
+                    "<tg-emoji emoji-id=5256182535917940722>✅</tg-emoji> "
+                    f"<b>{utils.escape_html(option)}</b> module "
+                    f"<code>{utils.escape_html(mod_name)}</code> "
+                    "- track saved as banner\n"
+                    f"<code>audio:{utils.escape_html(path)}</code>\n"
+                    "<i>This track will be sent instead of the banner image</i>"
+                ),
+            )
+            return
+
         first_update = self._parse_config_update(
             instance,
             parts[0],

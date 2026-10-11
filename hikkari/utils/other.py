@@ -397,6 +397,24 @@ def ensure_builtin_asset(name: str):
         return None
 
 
+
+def is_audio_banner(banner) -> bool:
+    """True if banner config points to an audio track."""
+    if not banner:
+        return False
+    if isinstance(banner, (list, tuple)) and banner:
+        import random
+        try:
+            banner = random.choice(list(banner))
+        except Exception:
+            return False
+    s = str(banner).strip()
+    if s.startswith("audio:"):
+        return True
+    p = Path(s)
+    return p.suffix.lower() in {".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus"}
+
+
 def resolve_banner_media(banner):
     """Resolve config banner → local file path or remote webpage media."""
     if not banner:
@@ -413,6 +431,15 @@ def resolve_banner_media(banner):
     s = str(banner).strip()
     if not s:
         return None
+
+    # Audio track saved via .fcfg reply to music
+    if s.startswith("audio:"):
+        path = Path(s[6:].strip())
+        return str(path) if path.is_file() else None
+    if Path(s).is_file() and Path(s).suffix.lower() in {
+        ".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus",
+    }:
+        return s
 
     if s.startswith("local:"):
         name = s[6:].strip()

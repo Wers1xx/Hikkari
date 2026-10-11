@@ -416,6 +416,26 @@ class Link(Validator):
             if not name or ".." in name or "/" in name or "\\" in name:
                 raise ValidationError(f"Passed value ({value}) is not a valid local asset")
             return value
+        # Audio track as banner (.fcfg reply to music)
+        if value.startswith("audio:"):
+            path = value[6:].strip()
+            if not path:
+                raise ValidationError(f"Passed value ({value}) is not a valid audio path")
+            return value
+        from pathlib import Path as _P
+        p = _P(value)
+        if p.is_file() and p.suffix.lower() in {
+            ".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus",
+            ".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm",
+        }:
+            return value
+        try:
+            if not utils.check_url(value):
+                raise Exception("Invalid URL")
+        except Exception:
+            raise ValidationError(f"Passed value ({value}) is not a valid URL")
+
+        return value
         try:
             if not utils.check_url(value):
                 raise Exception("Invalid URL")
