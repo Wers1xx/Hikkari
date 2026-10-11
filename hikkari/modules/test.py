@@ -348,11 +348,15 @@ class TestMod(loader.Module):
         """- Find out your userbot ping"""
         start = time.perf_counter_ns()
         from ..utils.rich import can_use_rich
-        _rich = can_use_rich(self._client, self._db) and getattr(
-            self.inline, "init_complete", False
+        from ..utils.other import is_audio_banner
+        _audio_banner = is_audio_banner(self.config.get("banner_url"))
+        _rich = (
+            not _audio_banner
+            and can_use_rich(self._client, self._db)
+            and getattr(self.inline, "init_complete", False)
         )
         # Rich mode: no intermediate emoji (message goes via @bot as Rich)
-        # Classic: one timing emoji then edit to result
+        # Classic / audio track: one timing emoji then edit to result
         if not _rich:
             message = await utils.answer(
                 message, self.config["ping_emoji"], skip_rich=True
@@ -420,8 +424,10 @@ class TestMod(loader.Module):
                 parse_rich_url_buttons,
                 try_send_rich,
             )
-            if can_use_rich(self._client, self._db) and getattr(
-                self.inline, "init_complete", False
+            if (
+                not _audio_banner
+                and can_use_rich(self._client, self._db)
+                and getattr(self.inline, "init_complete", False)
             ):
                 burl = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")

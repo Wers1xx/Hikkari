@@ -1906,6 +1906,14 @@ class HikkariConfigMod(loader.Module):
                 ext = reply.file.ext if reply.file.ext.startswith(".") else f".{reply.file.ext}"
         safe_mod = re.sub(r"[^\w\-]+", "_", str(mod))[:40]
         safe_opt = re.sub(r"[^\w\-]+", "_", str(option))[:40]
+
+        # Drop previous tracks for this module + option
+        prefix = f"{safe_mod}_{safe_opt}_"
+        for old_f in list(dest_dir.glob(prefix + "*")):
+            with contextlib.suppress(Exception):
+                if old_f.is_file():
+                    old_f.unlink()
+
         path = dest_dir / f"{safe_mod}_{safe_opt}_{getattr(reply, 'id', 0)}{ext}"
         try:
             await reply.download_media(file=str(path))
