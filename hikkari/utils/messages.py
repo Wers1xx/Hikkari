@@ -729,8 +729,29 @@ async def answer(
                             **extra,
                         )
         elif file is not None:
-            if edit:
-                # Edit with media; on FilePartsInvalid / bad media fall back to text
+            def _media_path_size(f):
+                try:
+                    from pathlib import Path as _P
+                    if isinstance(f, (str, _P)):
+                        p = _P(f)
+                        if p.is_file():
+                            return p.stat().st_size, str(p)
+                except Exception:
+                    pass
+                return 0, None
+
+            size, path = _media_path_size(file)
+            # Large local video/media: Telegram edit often fails (FilePartsInvalid)
+            # Prefer full send_file with streaming; skip broken InputMediaWebPage for big files
+            large = size > 15 * 1024 * 1024  # ~15MB+
+            send_kw = dict(kwargs)
+            # Prefer streaming for video-like files
+            if path and path.lower().endswith((".mp4", ".mov", ".webm", ".mkv", ".avi")):
+                send_kw.setdefault("supports_streaming", True)
+            if large:
+                send_kw.pop("link_preview", None)
+
+            if edit and not large:
                 try:
                     result = await message.edit(
                         text,
@@ -739,38 +760,62 @@ async def answer(
                         **kwargs,
                     )
                 except Exception as e:
-                    logger.debug("edit with file failed (%s), text-only / resend", e)
+                    logger.debug("edit with file failed (%s), resend", e)
                     try:
+                        reply_to = getattr(message, "reply_to_msg_id", None) or get_topic(message)
+                        result = await message.client.send_file(
+                            message.peer_id,
+                            file,
+                            caption=text,
+                            parse_mode=lambda t: (t, entities),
+                            reply_to=reply_to,
+                            **send_kw,
+                        )
+                        if message.out:
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                    except Exception as e2:
+                        logger.debug("resend with file failed (%s), text only", e2)
                         result = await message.edit(
                             text,
                             parse_mode=lambda t: (t, entities),
                             link_preview=False,
                         )
-                    except Exception:
-                        # last resort: new message
+            else:
+                # New message OR large media (always fresh upload)
+                try:
+                    reply_to = (
+                        None
+                        if edit
+                        else (getattr(message, "reply_to_msg_id", None) or get_topic(message))
+                    )
+                    result = await message.client.send_file(
+                        message.peer_id,
+                        file if not path else path,
+                        caption=text,
+                        parse_mode=lambda t: (t, entities),
+                        reply_to=reply_to,
+                        **send_kw,
+                    )
+                    if edit and message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                except Exception as e:
+                    logger.debug("send_file media failed (%s)", e)
+                    # last: text only
+                    if edit:
+                        result = await message.edit(
+                            text,
+                            parse_mode=lambda t: (t, entities),
+                            link_preview=False,
+                        )
+                    else:
                         result = await message.respond(
                             text,
                             parse_mode=lambda t: (t, entities),
                             link_preview=False,
                         )
-                        if getattr(message, "out", False):
-                            with contextlib.suppress(Exception):
-                                await message.delete()
-            else:
-                reply_to = kwargs.pop(
-                    "reply_to",
-                    getattr(message, "reply_to_msg_id", get_topic(message)),
-                )
-                result = await message.client.send_file(
-                    message.peer_id,
-                    file,
-                    caption=text,
-                    parse_mode=lambda t: (t, entities),
-                    reply_to=reply_to,
-                    **kwargs,
-                )
-                if message.out:
-                    await message.delete()
+
         elif edit:
             result = await message.edit(
                 text,

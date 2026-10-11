@@ -21,6 +21,7 @@ import time
 import re
 import psutil
 import logging
+import re
 import hikkaritl
 
 from hikkaritl.errors import WebpageMediaEmptyError
@@ -118,26 +119,26 @@ class HikkariInfoMod(loader.Module):
         platform_emoji = utils.get_named_platform_emoji()
 
         for emoji, icon in [
-            ("<emoji document_id=5242197817459494910>🍊</emoji>", '<tg-emoji emoji-id="5449599833973203438">🧡</tg-emoji>'),
-            ("<emoji document_id=5346099823743346885>🍇</emoji>", '<tg-emoji emoji-id="5449468596952507859">💜</tg-emoji>'),
+            ("🍊", '<tg-emoji emoji-id="5449599833973203438">🧡</tg-emoji>'),
+            ("🍇", '<tg-emoji emoji-id="5449468596952507859">💜</tg-emoji>'),
             ("😶‍🌫️", '<tg-emoji emoji-id="5370547013815376328">😶‍🌫️</tg-emoji>'),
-            ("<emoji document_id=5436113877181941026>❓</emoji>", '<tg-emoji emoji-id="5407025283456835913">📱</tg-emoji>'),
-            ("<emoji document_id=5794422138031055619>🍀</emoji>", '<tg-emoji emoji-id="5395325195542078574">🍀</tg-emoji>'),
+            ("❓", '<tg-emoji emoji-id="5407025283456835913">📱</tg-emoji>'),
+            ("🍀", '<tg-emoji emoji-id="5395325195542078574">🍀</tg-emoji>'),
             ("🦾", '<tg-emoji emoji-id="5386766919154016047">🦾</tg-emoji>'),
             ("🚂", '<tg-emoji emoji-id="5359595190807962128">🚂</tg-emoji>'),
-            ("<emoji document_id=5431815452437257407>🐳</emoji>", '<tg-emoji emoji-id="5431815452437257407">🐳</tg-emoji>'),
+            ("🐳", '<tg-emoji emoji-id="5431815452437257407">🐳</tg-emoji>'),
             ("🕶", '<tg-emoji emoji-id="5407025283456835913">📱</tg-emoji>'),
             ("🐈‍⬛", '<tg-emoji emoji-id="6334750507294262724">🐈‍⬛</tg-emoji>'),
             ("✌️", '<tg-emoji emoji-id="5469986291380657759">✌️</tg-emoji>'),
-            ("<emoji document_id=5427168083074628963>💎</emoji>", '<tg-emoji emoji-id="5471952986970267163">💎</tg-emoji>'),
-            ("<emoji document_id=5778423822940114949>🛡</emoji>", '<tg-emoji emoji-id="5282731554135615450">🌩</tg-emoji>'),
-            ("<emoji document_id=5370731117588523522>🌼</emoji>", '<tg-emoji emoji-id="5224219153077914783">❤️</tg-emoji>'),
+            ("💎", '<tg-emoji emoji-id="5471952986970267163">💎</tg-emoji>'),
+            ("🛡", '<tg-emoji emoji-id="5282731554135615450">🌩</tg-emoji>'),
+            ("🌼", '<tg-emoji emoji-id="5224219153077914783">❤️</tg-emoji>'),
             ("🎡", '<tg-emoji emoji-id="5226711870492126219">🎡</tg-emoji>'),
-            ("<emoji document_id=5361541227604878624>🐧</emoji>", '<tg-emoji emoji-id="5361541227604878624">🐧</tg-emoji>'),
+            ("🐧", '<tg-emoji emoji-id="5361541227604878624">🐧</tg-emoji>'),
             ("🧃", '<tg-emoji emoji-id="5422884965593397853">🧃</tg-emoji>'),
             ("🦅", '<tg-emoji emoji-id="5427286516797831670">🦅</tg-emoji>'),
-            ("<emoji document_id=5282843764451195532>🖥</emoji>", '<tg-emoji emoji-id="5469825590884310445">💻</tg-emoji>'),
-            ("<emoji document_id=5935989710420709120>🍎</emoji>", '<tg-emoji emoji-id="5372908412604525258">🍏</tg-emoji>'),
+            ("💻", '<tg-emoji emoji-id="5469825590884310445">💻</tg-emoji>'),
+            ("🍏", '<tg-emoji emoji-id="5372908412604525258">🍏</tg-emoji>'),
         ]:
             platform_emoji = platform_emoji.replace(emoji, icon)
         data = {
@@ -215,7 +216,7 @@ class HikkariInfoMod(loader.Module):
                 (
                     utils.get_platform_emoji()
                     if self._client.hikkari_me.premium
-                    else "<emoji document_id=5283176512747507510>✨</emoji> Hikkari"
+                    else "✨ Hikkari"
                 ),
                 me=me,
                 version=_version,
@@ -388,6 +389,25 @@ class HikkariInfoMod(loader.Module):
                         thumbnail_url=banner_url,
                         silent=True,
                     )
+                    if not m and banner_url:
+                        # Heavy video banner often kills Rich — text-only retry
+                        html2 = html
+                        if html2.lower().startswith("<figure") or "<figure" in html2.lower()[:200]:
+                            html2 = re.sub(
+                                r"<figure\b[^>]*>.*?</figure>\s*",
+                                "",
+                                html2,
+                                count=1,
+                                flags=re.I | re.S,
+                            )
+                        m = await self.inline.rich(
+                            message,
+                            html2,
+                            title="Hikkari Info",
+                            description="Rich info",
+                            thumbnail_url=None,
+                            silent=True,
+                        )
                     if m:
                         return
                 # Bot API sendRichMessage — keeps <table> and <tg-button>

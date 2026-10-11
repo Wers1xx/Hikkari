@@ -109,45 +109,27 @@ class Help(loader.Module):
         return match.group(1).strip() if match else None
 
     def _get_module_developer(self, module) -> str | None:
-        """Extract developer only from explicit # meta developer (never from license ©️)."""
-        # Built-in / core modules: never show a developer line
-        origin = str(getattr(module, "__origin__", "") or "")
-        if origin.startswith("<core"):
-            return None
+        """Extract developer/author from module source meta comments."""
         source = getattr(module, "__source__", None) or ""
         if not source:
             with contextlib.suppress(Exception):
                 source = inspect.getsource(module.__class__)
         if not source:
             return None
-        # Only official module meta — license headers (# ©️ ...) are NOT developers
-        m = re.search(r"# ?meta developer: ?(.+)", source, flags=re.I)
-        if m:
-            dev = m.group(1).strip().strip('"').strip("'")
-            if dev:
-                return dev
-        return None
-
-    @staticmethod
-    def _get_module_version(module) -> str | None:
-        """Version from __version__ or # meta version: — None if absent."""
-        ver = getattr(module, "__version__", None)
-        if isinstance(ver, tuple) and ver:
-            return ".".join(map(str, ver))
-        if isinstance(ver, (int, float)):
-            return str(ver)
-        if isinstance(ver, str) and ver.strip():
-            return ver.strip()
-        source = getattr(module, "__source__", None) or ""
-        if not source:
-            with contextlib.suppress(Exception):
-                source = inspect.getsource(module.__class__)
-        if source:
-            m = re.search(r"# ?meta version: ?(.+)", source, flags=re.I)
+        for pattern in (
+            r"# ?meta developer: ?(.+)",
+            r"# ?Author: ?(.+)",
+            r"# ?author: ?(.+)",
+            r"# ?©️ ?(.+?)(?:,|\n)",
+        ):
+            m = re.search(pattern, source, flags=re.I)
             if m:
-                v = m.group(1).strip().strip('"').strip("'")
-                if v:
-                    return v
+                dev = m.group(1).strip().strip('"').strip("'")
+                # drop trailing year ranges like 2025-2026 for ©️ lines
+                if pattern.startswith(r"# ?©️"):
+                    dev = re.sub(r",?\s*\d{4}.*$", "", dev).strip()
+                if dev:
+                    return dev
         return None
 
     @staticmethod
@@ -208,8 +190,8 @@ class Help(loader.Module):
             self.strings["hidden_shown"].format(
                 len(hidden),
                 len(shown),
-                "\n".join([f"<emoji document_id=5294271804842469571>👁</emoji>‍🗨 <i>{m}</i>" for m in hidden]),
-                "\n".join([f"<emoji document_id=5294271804842469571>👁</emoji> <i>{m}</i>" for m in shown]),
+                "\n".join([f"👁‍🗨 <i>{m}</i>" for m in hidden]),
+                "\n".join([f"👁 <i>{m}</i>" for m in shown]),
             ),
         )
 
@@ -332,17 +314,12 @@ class Help(loader.Module):
                 )
             )
         cmds = "\n".join(lines)
-        # Core modules: no Developer at all (license is not author meta)
-        is_core = str(getattr(module, "__origin__", "") or "").startswith("<core")
-        dev_text = None
-        if not is_core:
-            developer = re.search(
-                r"# ?meta developer: ?(.+)",
-                getattr(module, "__source__", None) or "",
-            )
-            dev_text = developer.group(1).strip() if developer else None
-            if not dev_text:
-                dev_text = self._get_module_developer(module)
+        developer = re.search(
+            r"# ?meta developer: ?(.+)", getattr(module, "__source__", None) or ""
+        )
+        dev_text = developer.group(1).strip() if developer else None
+        if not dev_text:
+            dev_text = self._get_module_developer(module)
         placeholders = "\n".join(
             utils.help_placeholders(module.__class__.__name__, self)
         )
@@ -362,8 +339,8 @@ class Help(loader.Module):
                 pass
 
 
-        # Prefer meta developer if regex missed (external modules only)
-        if not is_core and not dev_text:
+        # Prefer meta developer if regex missed
+        if not dev_text:
             dev_text = self._get_module_developer(module)
 
         # Rich single-module help (commands in <details>)
@@ -416,16 +393,10 @@ class Help(loader.Module):
                             f"<details><summary>Placeholders</summary>"
                             f"<p>{html_mod.escape(ph)}</p></details>"
                         )
-                ver_text = self._get_module_version(module)
-                if ver_text:
-                    parts.append(
-                        f"<p><emoji document_id=5341715473882955310>⚙️</emoji> <b>Version:</b> "
-                        f"<code>{html_mod.escape(str(ver_text))}</code></p>"
-                    )
                 if dev_text:
                     # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p><emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍<emoji document_id=5282843764451195532>🖥</emoji> <b>Developer:</b> "
+                        f"<p>🧑‍💻 <b>Developer:</b> "
                         f"<code>{html_mod.escape(str(dev_text))}</code></p>"
                     )
                 if getattr(module, "__origin__", "").startswith("<core"):
@@ -433,7 +404,7 @@ class Help(loader.Module):
                         self.strings.get("core_notice"),
                         "Built-in module",
                     )
-                    parts.append(f"<p><emoji document_id=5778423822940114949>🛡</emoji> {html_mod.escape(core_n)}</p>")
+                    parts.append(f"<p>🛡 {html_mod.escape(core_n)}</p>")
 
                 # Meta banner of THIS module first, then Help config banner
                 meta_b = None
@@ -459,7 +430,6 @@ class Help(loader.Module):
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
-        _mod_ver = self._get_module_version(module)
         await utils.answer(
             message,
             f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
@@ -468,7 +438,6 @@ class Help(loader.Module):
                 if placeholders
                 else ""
             )
-            + (f"\n\n⚙️ <b>Version:</b> <code>{_mod_ver}</code>" if _mod_ver else "")
             + (f"\n\n{self.strings['developer']}".format(dev_text) if dev_text else "")
             + (f"\n\n{self.strings['not_exact']}" if not exact else "")
             + (
@@ -514,10 +483,26 @@ class Help(loader.Module):
         banner_url_str = raw_banner or None
         banner = None
         if banner_url_str:
-            if self.config["media_quote"] is True or (
-                self.client.hikkari_me.premium is False
-            ):
-                banner = InputMediaWebPage(banner_url_str)
+            # Local path / file → send as file (supports large video >20MB)
+            local_path = None
+            try:
+                from pathlib import Path as _P
+                p = _P(banner_url_str)
+                if p.is_file():
+                    local_path = str(p)
+            except Exception:
+                pass
+            if local_path:
+                banner = local_path
+                banner_url_str = local_path
+            elif banner_url_str.startswith(("http://", "https://")):
+                if self.config["media_quote"] is True or (
+                    getattr(self.client, "hikkari_me", None)
+                    and self.client.hikkari_me.premium is False
+                ):
+                    banner = InputMediaWebPage(banner_url_str)
+                else:
+                    banner = banner_url_str
             else:
                 banner = banner_url_str
 
@@ -543,16 +528,18 @@ class Help(loader.Module):
             return
 
         hidden = self.get("hide", [])
-        hidden_count = (
-            0
-            if force
-            else sum(
-                module.__class__.__name__ in hidden
-                for module in self.allmodules.modules
-            )
+
+        reply = self.strings["all_header"].format(
+            len(self.allmodules.modules),
+            (
+                0
+                if force
+                else sum(
+                    module.__class__.__name__ in hidden
+                    for module in self.allmodules.modules
+                )
+            ),
         )
-        # Header filled AFTER lists are built so counts match Core+Loaded
-        reply = None
         shown_warn = False
 
         plain_ = []
@@ -634,10 +621,10 @@ class Help(loader.Module):
 
             for cmd in icommands:
                 if first:
-                    tmp += f": ( <emoji document_id=5985780596268339498>🤖</emoji> {cmd}"
+                    tmp += f": ( 🤖 {cmd}"
                     first = False
                 else:
-                    tmp += f" | <emoji document_id=5985780596268339498>🤖</emoji> {cmd}"
+                    tmp += f" | 🤖 {cmd}"
 
             for placeholder in placeholders:
                 if first:
@@ -663,10 +650,6 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
-        # What is actually shown in help (same as sections below)
-        shown_loaded = plain_ + (no_commands_ if force else [])
-        shown_total = len(core_) + len(shown_loaded)
-        reply = self.strings["all_header"].format(shown_total, hidden_count)
 
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
             """
@@ -833,6 +816,28 @@ class Help(loader.Module):
                     pages=pages if real_total > 1 else None,
                     page=0,
                 )
+                # Large video banner can break Rich → retry without media
+                if not m and banner_url:
+                    plain_html = pages[0]
+                    if plain_html.lower().startswith("<figure"):
+                        import re as _re
+                        plain_html = _re.sub(
+                            r"<figure\b[^>]*>.*?</figure>\s*",
+                            "",
+                            plain_html,
+                            count=1,
+                            flags=_re.I | _re.S,
+                        )
+                    m = await self.inline.rich(
+                        message,
+                        plain_html,
+                        title="Hikkari Help",
+                        description=text_header[:80],
+                        thumbnail_url=None,
+                        silent=True,
+                        pages=None,
+                        page=0,
+                    )
                 return bool(m)
             except Exception:
                 logger.debug("help rich failed", exc_info=True)
@@ -840,9 +845,11 @@ class Help(loader.Module):
 
 
         async def _send_help_pages(text_header: str, sections: list[tuple[str, list[str]]]) -> bool:
-            """Paginated form for large module lists. sections: (title, list of line html)"""
+            """
+            Rich (if on) or classic message.
+            Inline pagination ONLY when classic text would exceed Telegram ~4096 limit.
+            """
             try:
-                # flatten entries as (section, line)
                 entries = []
                 for sec, lines in sections:
                     for ln in lines:
@@ -850,6 +857,30 @@ class Help(loader.Module):
                             entries.append((sec, ln.strip()))
                 if not entries:
                     return False
+
+                # Prefer Rich when enabled (own limit ~28k; nav only if multi-page inside rich)
+                if await _send_help_rich(
+                    text_header,
+                    [(s, "\n".join(ls)) for s, ls in sections],
+                ):
+                    return True
+
+                # Build full classic body (same structure as utils.answer fallback)
+                bodies = []
+                for sec, lines in sections:
+                    joined = "".join(lines)
+                    if joined.strip():
+                        bodies.append(joined)
+                # Approximate plain length (strip tags for limit check)
+                raw_html = text_header + "\n" + "\n".join(bodies)
+                plain_approx = re.sub(r"<[^>]+>", "", raw_html)
+                TG_LIMIT = 4000  # leave margin under 4096
+
+                # Under limit → let caller send normal message (no inline, no fake pages)
+                if len(plain_approx) <= TG_LIMIT:
+                    return False
+
+                # Over limit → paginated inline form
                 per_page = 12
                 total_pages = max(1, (len(entries) + per_page - 1) // per_page)
 
@@ -859,7 +890,7 @@ class Help(loader.Module):
                     body = "\n".join(ln for _, ln in chunk)
                     return (
                         f"{text_header}\n"
-                        f"<i>стр. {page + 1}/{total_pages}</i>\n"
+                        f"<i>{page + 1}/{total_pages}</i>\n"
                         f"<blockquote expandable>{body}</blockquote>"
                     )
 
@@ -873,23 +904,18 @@ class Help(loader.Module):
                     if page < total_pages - 1:
                         nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
                     btns.append(nav)
-                    btns.append([{"text": "⬇️ Close", "action": "close"}])
+                    btns.append([{"text": "🔻 Close", "action": "close"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
-                # Always prefer official Rich (tables + <details> + <tg-button-row> nav)
-                if await _send_help_rich(
-                    text_header,
-                    [(s, "\n".join(ls)) for s, ls in sections],
-                ):
-                    return True
+                if not getattr(self.inline, "init_complete", False):
+                    return False
 
-                # Rich unavailable → classic form with nav
                 first_btns = []
                 nav = [{"text": f"1/{total_pages}", "data": "noop"}]
                 if total_pages > 1:
                     nav.append({"text": "▶️", "callback": goto, "args": (1,)})
                 first_btns.append(nav)
-                first_btns.append([{"text": "⬇️ Close", "action": "close"}])
+                first_btns.append([{"text": "🔻 Close", "action": "close"}])
                 await self.inline.form(
                     page_text(0),
                     message=message if message.out else utils.get_chat_id(message),
@@ -900,6 +926,7 @@ class Help(loader.Module):
             except Exception:
                 logger.debug("help pages failed", exc_info=True)
                 return False
+
 
 
         match True:
