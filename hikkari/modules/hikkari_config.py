@@ -612,13 +612,35 @@ class HikkariConfigMod(loader.Module):
 
             query = list(map(str, query))
 
-            old_config_len = len(self.lookup(mod).config[option])
+            old_config = list(self.lookup(mod).config[option])
+            old_config_len = len(old_config)
 
-            self.lookup(mod).config[option] = [
-                i for i in self.lookup(mod).config[option] if str(i) not in query
-            ]
+            # Long audio_ref values often get truncated in UI — remove by prefix
+            drop_audio = any(
+                q.startswith("audio_ref:") or q.startswith("audio:") for q in query
+            )
 
-            if old_config_len == len(self.lookup(mod).config[option]):
+            def _keep(item) -> bool:
+                s = str(item)
+                if s in query:
+                    return False
+                if drop_audio and (
+                    s.startswith("audio_ref:") or s.startswith("audio:")
+                ):
+                    return False
+                # partial match for truncated audio_ref in user input
+                for q in query:
+                    if len(q) >= 24 and (s.startswith(q) or q.startswith(s[:40])):
+                        return False
+                return True
+
+            new_list = [i for i in old_config if _keep(i)]
+            self.lookup(mod).config[option] = new_list
+
+            if drop_audio:
+                self._cleanup_audio_banner_files(mod, str(option), old_config)
+
+            if old_config_len == len(self.lookup(mod).config[option]) and not drop_audio:
                 raise loader.validators.ValidationError(
                     f"Nothing from passed value ({self.prep_value(query)}) is not in"
                     " target list"
