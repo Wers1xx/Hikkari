@@ -277,7 +277,7 @@ class Utils(InlineUnit):
             with contextlib.suppress(Exception):
                 await self._bot_client.edit_message(
                     inline_msg_id,
-                    "<emoji document_id=5985346521103604145>❌</emoji>️",
+                    "✖️",
                     parse_mode="HTML",
                     buttons=None,
                     link_preview=False,
@@ -286,7 +286,7 @@ class Utils(InlineUnit):
         if not cleared:
             with contextlib.suppress(Exception):
                 if hasattr(call, "edit"):
-                    await call.edit("<emoji document_id=5985346521103604145>❌</emoji>️", reply_markup=None)
+                    await call.edit("✖️", reply_markup=None)
                     cleared = True
 
         # B) Delete message via bot
@@ -390,20 +390,49 @@ class Utils(InlineUnit):
         text: str | None,
         *,
         has_media: bool = False,
+        hard_limit: int | None = None,
     ) -> str | None:
-        """Telegram limits: 1024 caption with media, 4096 plain text."""
+        """Telegram limits: 1024 caption with media, 4096 plain text.
+
+        TG counts UTF-16 code units of the *parsed* caption; HTML tags inflate
+        the raw string, so we clip conservatively on both raw and plain length.
+        """
         if text is None:
             return None
         if not isinstance(text, str):
             text = str(text)
-        limit = 1024 if has_media else 4096
-        if len(text) <= limit:
+        limit = hard_limit if hard_limit is not None else (1024 if has_media else 4096)
+        # Soft margin so markup + entities stay under the hard API cap
+        soft = max(64, limit - 32)
+
+        def _plain(s: str) -> str:
+            import re as _re
+            s = _re.sub(r"<tg-emoji\b[^>]*>.*?</tg-emoji>", "X", s, flags=_re.I | _re.S)
+            s = _re.sub(r"<[^>]+>", "", s)
+            return s
+
+        if len(text) <= soft and len(_plain(text)) <= soft:
             return text
-        # Prefer cutting at tag boundary roughly
-        cut = text[: max(0, limit - 1)]
-        # avoid broken trailing partial tag
+
+        # Prefer smart_split if available (entity-safe)
+        try:
+            from .. import utils as _u
+            from hikkaritl.extensions import html as _html
+
+            plain, ents = _html.parse(text)
+            pages = list(_u.smart_split(plain, ents, soft))
+            if pages:
+                return pages[0]
+        except Exception:
+            pass
+
+        cut = text[:soft]
         if "<" in cut and cut.rfind("<") > cut.rfind(">"):
             cut = cut[: cut.rfind("<")]
+        # Keep closing a few common tags if we broke them
+        for tag in ("blockquote", "b", "i", "code", "pre", "a"):
+            if f"<{tag}" in cut.lower() and f"</{tag}>" not in cut.lower():
+                cut += f"</{tag}>"
         return cut + "…"
 
     def sanitise_text(self: "InlineManager", text: str) -> str:

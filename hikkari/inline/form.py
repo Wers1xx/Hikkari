@@ -1,4 +1,3 @@
-from ..utils.emoji_prem import prem_btn_text
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -46,16 +45,16 @@ logger = logging.getLogger(__name__)
 
 VERIFICATION_EMOJIES = list(
     grapheme.graphemes(
-        "👨‍🏫👩‍🏫👨‍🎤<emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍🎤👩‍🎤👨‍<emoji document_id=5296631769112525274>🎩</emoji>👩‍<emoji document_id=5296631769112525274>🎩</emoji>👩‍🍳👩‍🌾👩‍⚕️🕵️‍♀️💂‍♀️👷‍♂️👮‍♂️👴<emoji document_id=5994521125298638350>🧑‍🎄</emoji>‍🦳👩‍🦳👱‍♀️👩‍🦰👨‍🦱👩‍⚖️🧙‍♂️🧝‍♀️🧛‍♀️"
+        "👨‍🏫👩‍🏫👨‍🎤🧑‍🎤👩‍🎤👨‍🎓👩‍🎓👩‍🍳👩‍🌾👩‍⚕️🕵️‍♀️💂‍♀️👷‍♂️👮‍♂️👴🧑‍🦳👩‍🦳👱‍♀️👩‍🦰👨‍🦱👩‍⚖️🧙‍♂️🧝‍♀️🧛‍♀️"
         "🎅🧚‍♂️🙆‍♀️🙍‍♂️👩‍👦🧶🪢🪡🧵🩲👖👕👚🦺👗👙🩱👘🥻🩴🥿🧦🥾👟👞"
         "👢👡👠🪖👑💍👝👛👜💼🌂🥽🕶👓🧳🎒🐶🐱🐭🐹🐰🦊🐻🐷🐮"
-        "🦁🐯🐨🐻‍<emoji document_id=5449449325434266744>❄️</emoji>🐼🐽🐸🐵🙈🙉🙊🐒🦆🐥🐣🐤🐦<emoji document_id=5361541227604878624>🐧</emoji>🐔🦅🦉🦇🐺🐗🐴"
+        "🦁🐯🐨🐻‍❄️🐼🐽🐸🐵🙈🙉🙊🐒🦆🐥🐣🐤🐦🐧🐔🦅🦉🦇🐺🐗🐴"
         "🦄🐜🐞🐌🦋🐛🪱🐝🪰🪲🪳🦟🦗🕷🕸🐙🦕🦖🦎🐍🐢🦂🦑🦐🦞"
-        "🦀🐡🐠🐟🐅🐊🦭🦈🐋<emoji document_id=5431815452437257407>🐳</emoji>🐬🐆🦓🦍🦧🦣🐘🦛🐃🦬🦘🦒🐫🐪🦏"
+        "🦀🐡🐠🐟🐅🐊🦭🦈🐋🐳🐬🐆🦓🦍🦧🦣🐘🦛🐃🦬🦘🦒🐫🐪🦏"
         "🐂🐄🐎🐖🐏🐑🦙🐈🐕‍🦺🦮🐩🐕🦌🐐🐈‍⬛🪶🐓🦃🦤🦚🦜🦡🦨🦝🐇"
         "🕊🦩🦢🦫🦦🦥🐁🐀🐿🦔🌳🌲🌵🐲🐉🐾🎋🍂🍁🍄🐚🌾🪨💐🌷"
-        "🥀🌺🌸🌻🌞🌜🌘🌗🌎<emoji document_id=5283176512747507510>✨</emoji><emoji document_id=5294430452344434288>😵‍💫</emoji><emoji document_id=5438496463044752972>⭐️</emoji><emoji document_id=5283176512747507510>✨</emoji><emoji document_id=5456140674028019486>⚡️</emoji>☄️💥☀️🌪<emoji document_id=5424972470023104089>🔥</emoji>🌈🌤⛅️<emoji document_id=5449449325434266744>❄️</emoji>⛄️🌊"
-        "☂️<emoji document_id=5935989710420709120>🍎</emoji><emoji document_id=5935989710420709120>🍎</emoji>🍐<emoji document_id=5242197817459494910>🍊</emoji>🍋🍌🍉🥭🍑🍒🍈🫐🍓<emoji document_id=5346099823743346885>🍇</emoji>🍍🥥🥝🍅🥑🥦🧔‍♂️"
+        "🥀🌺🌸🌻🌞🌜🌘🌗🌎✨💫⭐️✨⚡️☄️💥☀️🌪🔥🌈🌤⛅️❄️⛄️🌊"
+        "☂️🍏🍎🍐🍊🍋🍌🍉🥭🍑🍒🍈🫐🍓🍇🍍🥥🥝🍅🥑🥦🧔‍♂️"
     )
 )
 
@@ -109,7 +108,7 @@ class Form(InlineUnit):
         :param video: Attach a video to the form. URL must be supplied
         :param location: Attach a map point to the form. List/tuple must be supplied (latitude, longitude)
                          Example: (55.749931, 48.742371)
-                         <emoji document_id=5447644880824181073>⚠️</emoji> If you pass this parameter, you'll need to pass empty string to `text` <emoji document_id=5447644880824181073>⚠️</emoji>
+                         ⚠️ If you pass this parameter, you'll need to pass empty string to `text` ⚠️
         :param audio: Attach a audio to the form. Dict or URL must be supplied
         :param silent: Whether the form must be sent silently (w/o "Opening form..." message)
         :return: If form is sent, returns :obj:`InlineMessage`, otherwise returns `False`
@@ -287,7 +286,7 @@ class Form(InlineUnit):
                     (
                         utils.get_platform_emoji()
                         if self._client.hikkari_me.premium
-                        else "<emoji document_id=5283176512747507510>✨</emoji>"
+                        else "✨"
                     )
                     + self.translator.getkey("inline.opening_form"),
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -496,12 +495,12 @@ class Form(InlineUnit):
                 # Same hk|uid|p|N callbacks — events.py answers + editMessageText(rich).
                 nav_row = []
                 if cur > 0:
-                    nav_row.append({"text": "◀️", "data": f"hk|{unit_id}|p|{cur - 1}"})
+                    nav_row.append({"text": "◀", "data": f"hk|{unit_id}|p|{cur - 1}"})
                 nav_row.append(
                     {"text": f"{cur + 1}/{len(page_list)}", "data": f"hk|{unit_id}|p|{cur}"}
                 )
                 if cur < len(page_list) - 1:
-                    nav_row.append({"text": "▶️", "data": f"hk|{unit_id}|p|{cur + 1}"})
+                    nav_row.append({"text": "▶", "data": f"hk|{unit_id}|p|{cur + 1}"})
                 markup = [nav_row] + (markup or [])
             else:
                 # URL / custom buttons only → official in-body <tg-button-row>
@@ -544,7 +543,7 @@ class Form(InlineUnit):
                         utils.get_platform_emoji()
                         if getattr(self._client, "hikkari_me", None)
                         and self._client.hikkari_me.premium
-                        else "<emoji document_id=5283176512747507510>✨</emoji>"
+                        else "✨"
                     )
                     + " <i>Opening rich…</i>",
                     **({"reply_to": utils.get_topic(message)} if message.out else {}),
@@ -555,35 +554,26 @@ class Form(InlineUnit):
         try:
             m = await self._invoke_unit(unit_id, message)
         except Exception as e:
-            if "query results" in str(e).lower():
-                await asyncio.sleep(0.5)
-                try:
-                    m = await self._invoke_unit(unit_id, message)
-                except Exception as e2:
-                    e = e2
-                else:
-                    e = None
-            if e is not None:
-                logger.warning("Can't send rich via inline: %s — trying sendRichMessage", e)
+            logger.warning("Can't send rich via inline: %s — trying sendRichMessage", e)
+            with contextlib.suppress(Exception):
+                del self._units[unit_id]
+            if status_message is not None:
                 with contextlib.suppress(Exception):
-                    del self._units[unit_id]
-                if status_message is not None:
-                    with contextlib.suppress(Exception):
-                        await status_message.delete()
-                try:
-                    from ..utils.rich_api import try_send_rich
-                    chat = None
-                    if isinstance(message, Message):
-                        chat = utils.get_chat_id(message)
-                    ok = await try_send_rich(self._client, chat, html)
-                    if ok:
-                        if isinstance(message, Message) and message.out:
-                            with contextlib.suppress(Exception):
-                                await message.delete()
-                        return True
-                except Exception:
-                    logger.exception("sendRichMessage fallback failed")
-                return False
+                    await status_message.delete()
+            try:
+                from ..utils.rich_api import try_send_rich
+                chat = None
+                if isinstance(message, Message):
+                    chat = utils.get_chat_id(message)
+                ok = await try_send_rich(self._client, chat, html)
+                if ok:
+                    if isinstance(message, Message) and message.out:
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return True
+            except Exception:
+                logger.exception("sendRichMessage fallback failed")
+            return False
 
         self._units[unit_id]["chat"] = utils.get_chat_id(m) if m else None
         self._units[unit_id]["message_id"] = getattr(m, "id", None)
@@ -634,11 +624,11 @@ class Form(InlineUnit):
                                     )
                                 ),
                                 text=(
-                                    "<emoji document_id=5258200195589504369>🔄</emoji> <b>Transferring value to"
+                                    "🔄 <b>Transferring value to"
                                     " userbot...</b>\n<i>This message will be"
                                     " deleted automatically</i>"
                                     if inline_query.from_user.id == self._me
-                                    else "<emoji document_id=5258200195589504369>🔄</emoji> <b>Transferring value to userbot...</b>"
+                                    else "🔄 <b>Transferring value to userbot...</b>"
                                 ),
                                 parse_mode="HTML",
                                 link_preview=False,
@@ -683,10 +673,10 @@ class Form(InlineUnit):
                                 if not isinstance(btn, dict):
                                     continue
                                 if btn.get("url"):
-                                    r.append({"text": prem_btn_text(btn.get("text", "•")), "url": btn["url"]})
+                                    r.append({"text": btn.get("text", "•"), "url": btn["url"]})
                                 elif btn.get("data") or btn.get("callback"):
                                     r.append({
-                                        "text": prem_btn_text(btn.get("text", "•")),
+                                        "text": btn.get("text", "•"),
                                         "callback_data": str(btn.get("data") or "noop")[:64],
                                     })
                             if r:
@@ -716,7 +706,12 @@ class Form(InlineUnit):
                     self._error_events[form["uid"]] = e
                 return
 
-        form_text = form.get("text") or "<emoji document_id=5283176512747507510>✨</emoji>"
+        form_text = form.get("text") or "✨"
+        # Caption limits: media results → 1024, article → 4096
+        _has_media = any(
+            k in form for k in ("photo", "gif", "video", "file", "audio")
+        )
+        form_text = self._clip_inline_text(form_text, has_media=_has_media) or "✨"
 
         try:
             match True:
@@ -839,6 +834,46 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
         except Exception as e:
+            # Caption over limit → hard-clip and retry once
+            ename = type(e).__name__
+            if "CaptionTooLong" in ename or "MEDIA_CAPTION_TOO_LONG" in str(e):
+                try:
+                    form_text2 = self._clip_inline_text(
+                        form.get("text") or "✨",
+                        has_media=_has_media,
+                        hard_limit=900 if _has_media else 3500,
+                    ) or "✨"
+                    form["text"] = form_text2
+                    if "photo" in form:
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.photo(
+                                    form["photo"],
+                                    id=utils.rand(20),
+                                    text=form_text2,
+                                    parse_mode="HTML",
+                                    buttons=self.generate_markup(form["uid"]),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    else:
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    text=form_text2,
+                                    parse_mode="HTML",
+                                    link_preview=False,
+                                    buttons=self.generate_markup(inline_query.query),
+                                    id=utils.rand(20),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    return
+                except Exception as e2:
+                    e = e2
             if form["uid"] in self._error_events:
                 self._error_events[form["uid"]].set()
                 self._error_events[form["uid"]] = e
