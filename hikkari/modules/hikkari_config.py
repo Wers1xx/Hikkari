@@ -1855,17 +1855,39 @@ class HikkariConfigMod(loader.Module):
     def _reply_has_audio(reply) -> bool:
         if not reply:
             return False
+        # Telethon/hikkaritl convenience props
         if getattr(reply, "audio", None) or getattr(reply, "voice", None):
             return True
+        # Any document with audio attribute / mime
         doc = getattr(reply, "document", None)
-        if not doc:
-            return False
-        for attr in getattr(doc, "attributes", []) or []:
-            name = type(attr).__name__
-            if name == "DocumentAttributeAudio":
+        if doc:
+            for attr in getattr(doc, "attributes", []) or []:
+                if "Audio" in type(attr).__name__:
+                    return True
+            mime = (getattr(doc, "mime_type", None) or "").lower()
+            if mime.startswith("audio/"):
                 return True
-        mime = getattr(doc, "mime_type", "") or ""
-        return mime.startswith("audio/")
+        # File wrapper (message.file)
+        f = getattr(reply, "file", None)
+        if f is not None:
+            mime = (getattr(f, "mime_type", None) or "").lower()
+            if mime.startswith("audio/"):
+                return True
+            name = (getattr(f, "name", None) or "").lower()
+            if any(name.endswith(ext) for ext in (".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus")):
+                return True
+        # media object
+        media = getattr(reply, "media", None)
+        if media is not None:
+            doc2 = getattr(media, "document", None)
+            if doc2:
+                for attr in getattr(doc2, "attributes", []) or []:
+                    if "Audio" in type(attr).__name__:
+                        return True
+                mime = (getattr(doc2, "mime_type", None) or "").lower()
+                if mime.startswith("audio/"):
+                    return True
+        return False
 
     async def _save_reply_audio_banner(self, reply, mod: str, option: str) -> str | None:
         """Download replied track into assets/banners and return absolute path."""
@@ -1913,38 +1935,50 @@ class HikkariConfigMod(loader.Module):
         reply_text = reply.raw_text if reply and reply.raw_text else None
 
         # Reply to audio/track → set banner_url (or any *banner* option) to that track
-        # Usage: reply to music → .fcfg Tester banner_url
-        if (
-            reply
-            and len(args_s) >= 2
-            and args_s[1] in instance.config
-            and self._is_banner_option(args_s[1])
-            and self._reply_has_audio(reply)
-        ):
-            option = args_s[1]
-            path = await self._save_reply_audio_banner(reply, mod_name, option)
-            if not path:
+        # Usage: reply to music → .fcfg Tester banner_url   (prefix e.g. 1fcfg)
+        if reply and len(args_s) >= 2:
+            # case-insensitive option match
+            opt_arg = args_s[1]
+            option = next(
+                (k for k in instance.config.keys() if str(k).lower() == opt_arg.lower()),
+                None,
+            )
+            if (
+                option is not None
+                and self._is_banner_option(str(option))
+                and self._reply_has_audio(reply)
+            ):
+                path = await self._save_reply_audio_banner(reply, mod_name, str(option))
+                if not path:
+                    await utils.answer(
+                        message,
+                        "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
+                        "<b>Не удалось скачать трек</b>\n"
+                        "<i>Убедись что реплай именно на аудио/музыку</i>",
+                    )
+                    return
+                try:
+                    # RandomLink accepts list or single string via Series
+                    instance.config[option] = f"audio:{path}"
+                except Exception as e:
+                    # force via internal set if validator still rejects
+                    try:
+                        instance.config[option] = [f"audio:{path}"]
+                    except Exception as e2:
+                        await utils.answer(
+                            message,
+                            "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
+                            f"<b>Не сохранено:</b> <code>{utils.escape_html(str(e2) or str(e))}</code>",
+                        )
+                        return
                 await utils.answer(
                     message,
-                    "<tg-emoji emoji-id=5240241223632954241>🚫</tg-emoji> "
-                    "<b>Не удалось сохранить трек</b>",
+                    "<tg-emoji emoji-id=5256182535917940722>✅</tg-emoji> "
+                    f"<b>{utils.escape_html(str(option))}</b> → трек как баннер\n"
+                    f"<code>{utils.escape_html(mod_name)}</code>\n"
+                    f"<code>audio:{utils.escape_html(path)}</code>",
                 )
                 return
-            try:
-                instance.config[option] = f"audio:{path}"
-            except loader.validators.ValidationError as e:
-                await utils.answer(
-                message,
-                (
-                    "<tg-emoji emoji-id=5256182535917940722>✅</tg-emoji> "
-                    f"<b>{utils.escape_html(option)}</b> module "
-                    f"<code>{utils.escape_html(mod_name)}</code> "
-                    "- track saved as banner\n"
-                    f"<code>audio:{utils.escape_html(path)}</code>\n"
-                    "<i>This track will be sent instead of the banner image</i>"
-                ),
-            )
-            return
 
         first_update = self._parse_config_update(
             instance,
