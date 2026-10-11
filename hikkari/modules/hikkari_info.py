@@ -312,7 +312,11 @@ class HikkariInfoMod(loader.Module):
                 parse_rich_url_buttons,
                 try_send_rich,
             )
-            if can_use_rich(self._client, getattr(self, "_db", None)):
+            from ..utils.other import is_audio_banner as _is_audio_b
+            if (
+                not _is_audio_b(self.config.get("banner_url"))
+                and can_use_rich(self._client, getattr(self, "_db", None))
+            ):
                 banner_url = pick_banner_url(self.config.get("banner_url"))
                 custom = self.config.get("custom_message")
                 if custom and str(custom).strip():
