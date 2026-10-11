@@ -803,7 +803,8 @@ async def answer(
                         reply_to=reply_to,
                         **send_kw,
                     )
-                    if edit and message.out:
+                    # Always remove original command when we sent a new media message
+                    if message.out:
                         with contextlib.suppress(Exception):
                             await message.delete()
                 except Exception as e:

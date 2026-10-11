@@ -505,6 +505,10 @@ class TestMod(loader.Module):
                     skip_rich=True,
                     **akw,
                 )
+                # belt: delete command if answer left it
+                with contextlib.suppress(Exception):
+                    if getattr(message, "out", False):
+                        await message.delete()
                 return
             # fallback: local audio: path from resolve
             if isinstance(banner, str) and banner.startswith("audio_ref:"):
