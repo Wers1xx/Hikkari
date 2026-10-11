@@ -528,25 +528,23 @@ class Help(loader.Module):
             return
 
         hidden = self.get("hide", [])
-
-        reply = self.strings["all_header"].format(
-            len(self.allmodules.modules),
-            (
-                0
-                if force
-                else sum(
-                    module.__class__.__name__ in hidden
-                    for module in self.allmodules.modules
-                )
-            ),
-        )
         shown_warn = False
 
         plain_ = []
         core_ = []
         no_commands_ = []
 
+        # Deduplicate by class name — prevents phantom double modules in help
+        seen_cls: set[str] = set()
+        mods_iter = []
         for mod in self.allmodules.modules:
+            cls = mod.__class__.__name__
+            if cls in seen_cls:
+                continue
+            seen_cls.add(cls)
+            mods_iter.append(mod)
+
+        for mod in mods_iter:
             if not hasattr(mod, "commands"):
                 logger.debug("Module %s is not inited yet", mod.__class__.__name__)
                 continue
@@ -650,6 +648,11 @@ class Help(loader.Module):
         core_.sort(key=str.lower)
         no_commands_.sort(key=str.lower)
 
+        shown_count = len(core_) + len(plain_) + (len(no_commands_) if force else 0)
+        hidden_count = 0 if force else sum(
+            1 for m in mods_iter if m.__class__.__name__ in hidden
+        )
+        reply = self.strings["all_header"].format(shown_count, hidden_count)
 
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
             """
@@ -723,12 +726,9 @@ class Help(loader.Module):
                     if with_banner and banner_url:
                         parts.append(f'<figure><img src="{banner_url}"/></figure>')
                     head = f"<h2>{text_header}</h2>"
+                    # Header already has module count — only show page when multi-page
                     if pages_total and pages_total > 1 and page is not None:
-                        head += (
-                            f"<p><i>{page + 1}/{pages_total} · {total_mods} modules</i></p>"
-                        )
-                    else:
-                        head += f"<p><i>{total_mods} modules</i></p>"
+                        head += f"<p><i>{page + 1}/{pages_total}</i></p>"
                     parts.append(head)
                     for title, rows in chunks:
                         blk = _details_block(title, rows)
