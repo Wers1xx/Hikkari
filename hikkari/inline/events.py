@@ -371,10 +371,10 @@ class Events(InlineUnit):
                             from ..utils.rich_api import API
                             nav_row = []
                             if new_page > 0:
-                                nav_row.append({"text": "◀️", "callback_data": f"hk|{uid}|p|{new_page - 1}"})
+                                nav_row.append({"text": "◀", "callback_data": f"hk|{uid}|p|{new_page - 1}"})
                             nav_row.append({"text": f"{new_page + 1}/{len(pages)}", "callback_data": f"hk|{uid}|p|{new_page}"})
                             if new_page < len(pages) - 1:
-                                nav_row.append({"text": "▶️", "callback_data": f"hk|{uid}|p|{new_page + 1}"})
+                                nav_row.append({"text": "▶", "callback_data": f"hk|{uid}|p|{new_page + 1}"})
                             rm = {"inline_keyboard": [nav_row]}
                             payload = {"reply_markup": rm}
                             if imid:
@@ -449,6 +449,10 @@ class Events(InlineUnit):
                             )
                             return
 
+                    # Answer ASAP so the button does not spin forever
+                    with contextlib.suppress(Exception):
+                        await call.answer()
+
                     try:
                         result = await button["callback"](
                             (InlineCall if call.via_inline else BotInlineCall)(
@@ -459,13 +463,11 @@ class Events(InlineUnit):
                         )
                     except Exception:
                         logger.exception("Error on running callback watcher!")
-                        await call.answer(
-                            (
-                                "Error occurred while processing request. More info in"
-                                " logs"
-                            ),
-                            alert=True,
-                        )
+                        with contextlib.suppress(Exception):
+                            await call.answer(
+                                "Error occurred while processing request. More info in logs",
+                                alert=True,
+                            )
                         return
 
                     return result

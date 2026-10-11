@@ -959,13 +959,35 @@ class HikkariConfigMod(loader.Module):
             ],
         ]
 
-    def _clip_cfg_text(self, text: str, limit: int = 900) -> str:
+    def _clip_cfg_text(self, text: str, limit: int = 950) -> str:
         if not text or len(text) <= limit:
             return text
         cut = text[: max(0, limit - 1)]
         if "<" in cut and cut.rfind("<") > cut.rfind(">"):
             cut = cut[: cut.rfind("<")]
         return cut + "…"
+
+
+    async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
+        """Edit config form; always clip for media caption and never hang on error."""
+        try:
+            with contextlib.suppress(Exception):
+                await call.answer()
+        except Exception:
+            pass
+        text = self._clip_cfg_text(text, 950)
+        try:
+            return await call.edit(text, reply_markup=reply_markup, **kwargs)
+        except Exception:
+            logger.debug("cfg edit failed, hard clip", exc_info=True)
+            with contextlib.suppress(Exception):
+                return await call.edit(
+                    self._clip_cfg_text(text, 500),
+                    reply_markup=reply_markup,
+                    **kwargs,
+                )
+            return False
+
 
     async def inline__configure_option(
         self,

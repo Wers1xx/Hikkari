@@ -505,7 +505,14 @@ class Utils(InlineUnit):
 
         if isinstance(text, str):
             text = self.sanitise_text(text)
-            _has_media = bool(photo or file or video or audio or gif)
+            # Existing unit may already be a photo/gif form → caption limit 1024
+            _unit_media = False
+            if unit_id is not None and unit_id in self._units:
+                u = self._units[unit_id]
+                _unit_media = any(
+                    u.get(k) for k in ("photo", "gif", "video", "file", "audio")
+                )
+            _has_media = bool(photo or file or video or audio or gif) or _unit_media
             text = self._clip_inline_text(text, has_media=_has_media)
 
         media_params = [
@@ -655,6 +662,30 @@ class Utils(InlineUnit):
                 return await self._edit_unit(**utils.get_kwargs())
             except RPCError as e:
                 err_s = str(e)
+                # Caption too long on media form → hard-clip and retry once
+                if "CAPTION_TOO_LONG" in err_s or "MediaCaptionTooLong" in type(e).__name__:
+                    try:
+                        text2 = self._clip_inline_text(
+                            text, has_media=True, hard_limit=900
+                        )
+                        await self._bot_client.edit_message(
+                            inline_message_id or chat_id,
+                            None if inline_message_id else message_id,
+                            text2,
+                            parse_mode="HTML",
+                            link_preview=not disable_web_page_preview,
+                            buttons=self.generate_markup(
+                                reply_markup
+                                if isinstance(reply_markup, list)
+                                else unit.get("buttons", [])
+                            ),
+                        )
+                        if text2 is not None:
+                            pending_unit_update["text"] = text2
+                        commit_unit_update()
+                        return True
+                    except Exception:
+                        logger.debug("caption hard-clip retry failed", exc_info=True)
                 if "document file was invalid" in err_s.lower() or "MEDIA_EMPTY" in err_s:
                     logger.debug(
                         "Inline edit media rejected (%s); fallback via chat_id + message_id",
