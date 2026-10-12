@@ -120,7 +120,6 @@ class Help(loader.Module):
             r"# ?meta developer: ?(.+)",
             r"# ?Author: ?(.+)",
             r"# ?author: ?(.+)",
-            r"# ?©️ ?(.+?)(?:,|\n)",
         ):
             m = re.search(pattern, source, flags=re.I)
             if m:
@@ -351,6 +350,9 @@ class Help(loader.Module):
         dev_text = developer.group(1).strip() if developer else None
         if not dev_text:
             dev_text = self._get_module_developer(module)
+        # never show author from license on built-in modules
+        if str(getattr(module, "__origin__", "") or "").startswith("<core"):
+            dev_text = None
         placeholders = "\n".join(
             utils.help_placeholders(module.__class__.__name__, self)
         )
@@ -433,8 +435,7 @@ class Help(loader.Module):
                 if dev_text:
                     # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>🧑‍💻 <b>Developer:</b> "
-                        f"<code>{html_mod.escape(str(dev_text))}</code></p>"
+                        f"<p>{self.strings.get('developer', '🧑‍💻 Developer: {}').format('<code>' + html_mod.escape(str(dev_text)) + '</code>')}</p>"
                     )
                 if getattr(module, "__origin__", "").startswith("<core"):
                     core_n = self._plain_doc(
