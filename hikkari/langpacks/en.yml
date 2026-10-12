@@ -483,7 +483,6 @@ hikkari_config:
   _cls_doc: "Interactive configurator for Hikkari Userbot"
 
   _cmd_doc_cfg: "[module] [option] [value] — open config / set option (alias: fcfg)"
-  _cmd_doc_config: "Configure modules"
   _cmd_doc_cat: "<module> <option> — show config value (or .txt if too long)"
   _cmd_doc_uploadcfg: "<module> — export module config to .txt"
   _cmd_doc_loadcfg: "reply to .txt from uploadcfg — import module config"
