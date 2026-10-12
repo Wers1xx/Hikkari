@@ -2258,17 +2258,19 @@ class HikkariConfigMod(loader.Module):
         await self.inline__choose_category(message)
 
     async def configcmd(self, message: Message):
+        """Настроить модули / configure modules"""
         await self._configcmd_impl(message)
 
     @loader.command(alias="fcfg")
     async def cfgcmd(self, message: Message):
+        """Настроить модули / configure modules"""
         await self._configcmd_impl(message)
 
 
 
     @loader.command()
     async def uploadcfg(self, message: Message):
-        """<module> — export module config to .txt"""
+        """<module> — экспорт конфига в .txt / export module config"""
         import json
         from io import BytesIO
         name = (utils.get_args_raw(message) or "").strip()
@@ -2313,7 +2315,7 @@ class HikkariConfigMod(loader.Module):
 
     @loader.command()
     async def loadcfg(self, message: Message):
-        """reply to .txt from uploadcfg — import module config"""
+        """reply на .txt — импорт конфига модуля / import config from uploadcfg"""
         import json
         reply = await message.get_reply_message()
         if not reply or not reply.document:
@@ -2365,7 +2367,7 @@ class HikkariConfigMod(loader.Module):
 
     @loader.command()
     async def catcmd(self, message: Message):
-        """<module> <option> — show config value (or .txt if too long)"""
+        """<module> <option> — показать значение опции / show config value"""
         args = utils.get_args_raw(message) or ""
         parts = args.split(None, 1)
         if len(parts) < 2:
