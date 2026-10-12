@@ -374,6 +374,10 @@ class Help(loader.Module):
         if not dev_text:
             dev_text = self._get_module_developer(module)
 
+        # Built-in modules never show developer/author from license headers
+        if getattr(module, "__origin__", "").startswith("<core"):
+            dev_text = None
+
         # Rich single-module help (commands in <details>)
         try:
             from ..utils.rich import can_use_rich
@@ -471,7 +475,7 @@ class Help(loader.Module):
                 if placeholders
                 else ""
             )
-            + (f"\n\n{self.strings['developer']}".format(dev_text) if dev_text else "")
+            + (f"\n\n{self.strings['developer']}".format(dev_text) if (dev_text and not getattr(module, "__origin__", "").startswith("<core")) else "")
             + (f"\n\n{self.strings['not_exact']}" if not exact else "")
             + (
                 f"\n{self.strings['core_notice']}"
