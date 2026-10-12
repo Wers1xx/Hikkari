@@ -247,7 +247,10 @@ class InlineStuff(loader.Module):
             await utils.answer(
                 message,
                 "<emoji document_id=5436113877181941026>❓</emoji> "
-                self.strings["logs_usage"].format(self.get_prefix()),
+                + self.strings.get(
+                    "logs_usage",
+                    "<code>{}set_logs_group &lt;id|@chat&gt;</code> — private logs group",
+                ).format(self.get_prefix()),
             )
             return
 
@@ -257,21 +260,21 @@ class InlineStuff(loader.Module):
         except Exception as e:
             await utils.answer(
                 message,
-                self.strings["logs_not_found"].format(utils.escape_html(str(e)[:120])),
+                self.strings.get("logs_not_found", "<emoji document_id=5447644880824181073>⚠️</emoji> Not found: <code>{}</code>").format(utils.escape_html(str(e)[:120])),
             )
             return
 
         if not isinstance(entity, Channel) or not entity.megagroup:
             await utils.answer(
                 message,
-                self.strings["logs_need_supergroup"],
+                self.strings.get("logs_need_supergroup", "<emoji document_id=5447644880824181073>⚠️</emoji> Need a private <b>supergroup</b>"),
             )
             return
 
         if getattr(entity, "username", None):
             await utils.answer(
                 message,
-                self.strings["logs_need_private"],
+                self.strings.get("logs_need_private", "<emoji document_id=5447644880824181073>⚠️</emoji> Group must be <b>private</b>"),
             )
             return
 
@@ -281,7 +284,7 @@ class InlineStuff(loader.Module):
         except UserNotParticipantError:
             await utils.answer(
                 message,
-                self.strings["logs_join_first"],
+                self.strings.get("logs_join_first", "<emoji document_id=5447644880824181073>⚠️</emoji> Join the group first"),
             )
             return
         except Exception as e:
@@ -305,7 +308,7 @@ class InlineStuff(loader.Module):
         if not ok_rights:
             await utils.answer(
                 message,
-                self.strings["logs_need_admin"],
+                self.strings.get("logs_need_admin", "<emoji document_id=5447644880824181073>⚠️</emoji> Need owner or full admin"),
             )
             return
 
@@ -340,7 +343,7 @@ class InlineStuff(loader.Module):
 
         await utils.answer(
             message,
-            self.strings["logs_ok"].format(chat_id),
+            self.strings.get("logs_ok", "<emoji document_id=5256182535917940722>⤵️</emoji> <b>Group linked</b>\nID: <code>{}</code>").format(chat_id),
         )
 
 
