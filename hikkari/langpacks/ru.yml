@@ -436,6 +436,22 @@ hikkari_config:
   _cmd_doc_fconfig: "<модуль> <настройка> <значение> - установить значение конфига для модуля"
 
   name: HikkariConfig
+  _cmd_doc_cfg: "[модуль] [опция] [значение] — открыть конфиг / задать опцию (алиас: fcfg)"
+  _cmd_doc_config: "Настроить модули"
+  _cmd_doc_cat: "<модуль> <опция> — показать значение конфига (или .txt при лимите)"
+  _cmd_doc_uploadcfg: "<модуль> — экспорт конфига модуля в .txt"
+  _cmd_doc_loadcfg: "reply на .txt от uploadcfg — импорт конфига модуля"
+  uploadcfg_usage: "<emoji document_id=5436113877181941026>❓</emoji> <code>{}uploadcfg ModuleName</code>"
+  uploadcfg_no_mod: "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль не найден или без конфига"
+  loadcfg_need_reply: "<emoji document_id=5447644880824181073>⚠️</emoji> Reply на .txt от <code>uploadcfg</code>"
+  loadcfg_bad: "<emoji document_id=5447644880824181073>⚠️</emoji> Неверный JSON / файл конфига"
+  loadcfg_marker: "<emoji document_id=5447644880824181073>⚠️</emoji> Нет маркера <code>__hikkari_cfg__</code>"
+  loadcfg_no_mod: "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль <code>{}</code> не загружен — конфиг не применён"
+  loadcfg_ok: "<emoji document_id=5256182535917940722>⤵️</emoji> Конфиг <b>{}</b> применён ({} опций)"
+  banner_too_big: "<emoji document_id=5447644880824181073>⚠️</emoji> Баннер <b>&gt; 20 МБ</b>. Quote/invert и превью не сработают. Дай файл легче."
+  banner_x0_fail: "<emoji document_id=5447644880824181073>⚠️</emoji> Не удалось загрузить на x0.at"
+  banner_set: "<emoji document_id=5256182535917940722>⤵️</emoji> banner → <code>{}</code>"
+
 inline_stuff:
   bot_username_invalid: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Неправильный ник бота. Он должен заканчиваться на</b> <code>bot</code> <b>и быть не короче чем 5 символов</b>"
   token_invalid: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Указанный токен бота недействителен. Он должен содержать 8-10 цифр, </b><code>:</code> <b>и 34-36 символов</b>"
@@ -451,6 +467,26 @@ inline_stuff:
   name: InlineStuff
   _cls_doc: Настройка inline-бота
   _cmd_doc_ch_bot_token: <token> - Изменить токен inline-бота
+
+  _cmd_doc_yesbot: "— создать нового инлайн-бота через BotFather"
+  _cmd_doc_nobot: "— отключить инлайн-бота"
+  _cmd_doc_set_logs_group: "<id|@чат> — указать частную группу для логов и бэкапов"
+  yesbot_ok: "<emoji document_id=5283176512747507510>✨</emoji> <b>Ок!</b> Создаю инлайн-бота через @BotFather…\nЭто займёт ~15–30 сек, не закрывай юзербот."
+  yesbot_created: "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот создан!</b>\nПерезапуск для подключения…"
+  yesbot_ready: "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот готов!</b>\nПерезапуск…"
+  yesbot_fail: "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Не удалось создать бота через @BotFather</b>\n(SpamBan / лимит ботов / ошибка диалога).\n\nСоздай бота вручную в @BotFather и укажи токен:\n<code>{}ch_bot_token &lt;token&gt;</code>"
+  yesbot_error: "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Ошибка создания бота:</b> <code>{}</code>\n\nУкажи токен вручную: <code>{}ch_bot_token &lt;token&gt;</code>"
+  nobot_ok: "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн отключён.</b>\nМожно включить позже: <code>{}yesbot</code> или <code>{}ch_bot_token &lt;token&gt;</code>"
+  logs_usage: "<emoji document_id=5436113877181941026>❓</emoji> <code>{}set_logs_group &lt;id|@username&gt;</code>\nГруппа должна быть <b>частной</b>; нужен владелец или полный админ."
+  logs_not_found: "<emoji document_id=5447644880824181073>⚠️</emoji> Чат не найден: <code>{}</code>"
+  logs_need_supergroup: "<emoji document_id=5447644880824181073>⚠️</emoji> Нужна <b>супергруппа</b> (не канал и не ЛС)."
+  logs_need_private: "<emoji document_id=5447644880824181073>⚠️</emoji> Группа должна быть <b>частной</b> (без @username)."
+  logs_join_first: "<emoji document_id=5447644880824181073>⚠️</emoji> Сначала вступи в группу."
+  logs_rights_check: "<emoji document_id=5447644880824181073>⚠️</emoji> Не проверить права: <code>{}</code>"
+  logs_need_admin: "<emoji document_id=5447644880824181073>⚠️</emoji> Нужен <b>владелец</b> или полная админка (кроме анонимности). Группа не будет использована."
+  logs_ok: "<emoji document_id=5256182535917940722>⤵️</emoji> <b>Группа подключена</b>\nID: <code>{}</code>\nЛоги / бэкапы / ассеты будут идти сюда. Имя → <b>Hikkari</b>."
+  restarting: "<emoji document_id=5258200195589504369>🔄</emoji> <b>Перезапуск…</b>"
+
 test:
   set_loglevel: "<tg-emoji emoji-id=5355133243773435190>🚫</tg-emoji> <b>Укажи уровень логов числом или строкой</b>"
   no_logs: "<tg-emoji emoji-id=5355133243773435190>🤷‍♀️</tg-emoji> <b>У тебя нет логов уровня</b> <code>{}</code><b>.</b>"
