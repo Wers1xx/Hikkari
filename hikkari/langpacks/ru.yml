@@ -437,7 +437,6 @@ hikkari_config:
 
   name: HikkariConfig
   _cmd_doc_cfg: "[модуль] [опция] [значение] — открыть конфиг / задать опцию (алиас: fcfg)"
-  _cmd_doc_config: "Настроить модули"
   _cmd_doc_cat: "<модуль> <опция> — показать значение конфига (или .txt при лимите)"
   _cmd_doc_uploadcfg: "<модуль> — экспорт конфига модуля в .txt"
   _cmd_doc_loadcfg: "reply на .txt от uploadcfg — импорт конфига модуля"
