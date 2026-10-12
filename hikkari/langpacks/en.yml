@@ -482,6 +482,22 @@ hikkari_config:
   _cmd_doc_fconfig: "<module_name> <property_name> <config_value> - set the config value for the module"
   _cls_doc: "Interactive configurator for Hikkari Userbot"
 
+  _cmd_doc_cfg: "[module] [option] [value] — open config / set option (alias: fcfg)"
+  _cmd_doc_config: "Configure modules"
+  _cmd_doc_cat: "<module> <option> — show config value (or .txt if too long)"
+  _cmd_doc_uploadcfg: "<module> — export module config to .txt"
+  _cmd_doc_loadcfg: "reply to .txt from uploadcfg — import module config"
+  uploadcfg_usage: "<emoji document_id=5436113877181941026>❓</emoji> <code>{}uploadcfg ModuleName</code>"
+  uploadcfg_no_mod: "<emoji document_id=5447644880824181073>⚠️</emoji> Module not found or has no config"
+  loadcfg_need_reply: "<emoji document_id=5447644880824181073>⚠️</emoji> Reply to a .txt from <code>uploadcfg</code>"
+  loadcfg_bad: "<emoji document_id=5447644880824181073>⚠️</emoji> Invalid JSON / config file"
+  loadcfg_marker: "<emoji document_id=5447644880824181073>⚠️</emoji> Missing <code>__hikkari_cfg__</code> marker"
+  loadcfg_no_mod: "<emoji document_id=5447644880824181073>⚠️</emoji> Module <code>{}</code> is not loaded — config not applied"
+  loadcfg_ok: "<emoji document_id=5256182535917940722>⤵️</emoji> Config <b>{}</b> applied ({} options)"
+  banner_too_big: "<emoji document_id=5447644880824181073>⚠️</emoji> Banner <b>&gt; 20 MB</b>. Quote/invert and preview will not work. Use a smaller file."
+  banner_x0_fail: "<emoji document_id=5447644880824181073>⚠️</emoji> Failed to upload to x0.at"
+  banner_set: "<emoji document_id=5256182535917940722>⤵️</emoji> banner → <code>{}</code>"
+
 inline_stuff:
   name: "InlineStuff"
   bot_username_invalid: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Specified bot username is invalid. It must end with</b> <code>bot</code> <b>and contain at least 4 symbols</b>"
@@ -497,6 +513,26 @@ inline_stuff:
   _cls_doc: "Provides support for inline stuff"
 
   _cmd_doc_ch_bot_token: <token> - Change inline bot token
+
+  _cmd_doc_yesbot: "— create a new inline bot via BotFather"
+  _cmd_doc_nobot: "— skip inline bot (Hikkari without inline)"
+  _cmd_doc_set_logs_group: "<id|@chat> — set private group for logs/backups"
+  yesbot_ok: "<emoji document_id=5283176512747507510>✨</emoji> <b>OK!</b> Creating inline bot via @BotFather…\nThis takes ~15–30s, do not close the userbot."
+  yesbot_created: "<emoji document_id=5283176512747507510>✨</emoji> <b>Inline bot created!</b>\nRestarting to connect…"
+  yesbot_ready: "<emoji document_id=5283176512747507510>✨</emoji> <b>Inline bot ready!</b>\nRestarting…"
+  yesbot_fail: "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Could not create bot via @BotFather</b>\n(SpamBan / bot limit / dialog error).\n\nCreate a bot manually in @BotFather and set token:\n<code>{}ch_bot_token &lt;token&gt;</code>"
+  yesbot_error: "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Bot create error:</b> <code>{}</code>\n\nSet token manually: <code>{}ch_bot_token &lt;token&gt;</code>"
+  nobot_ok: "<emoji document_id=5283176512747507510>✨</emoji> <b>Inline disabled.</b>\nEnable later: <code>{}yesbot</code> or <code>{}ch_bot_token &lt;token&gt;</code>"
+  logs_usage: "<emoji document_id=5436113877181941026>❓</emoji> <code>{}set_logs_group &lt;id|@username&gt;</code>\nGroup must be <b>private</b>; you must be owner or full admin."
+  logs_not_found: "<emoji document_id=5447644880824181073>⚠️</emoji> Chat not found: <code>{}</code>"
+  logs_need_supergroup: "<emoji document_id=5447644880824181073>⚠️</emoji> Need a <b>supergroup</b> (not channel / not PM)."
+  logs_need_private: "<emoji document_id=5447644880824181073>⚠️</emoji> Group must be <b>private</b> (no @username)."
+  logs_join_first: "<emoji document_id=5447644880824181073>⚠️</emoji> Join the group first."
+  logs_rights_check: "<emoji document_id=5447644880824181073>⚠️</emoji> Cannot check rights: <code>{}</code>"
+  logs_need_admin: "<emoji document_id=5447644880824181073>⚠️</emoji> Need <b>owner</b> or full admin rights (except anonymity). Group will not be used."
+  logs_ok: "<emoji document_id=5256182535917940722>⤵️</emoji> <b>Group connected</b>\nID: <code>{}</code>\nLogs / backups / assets will go here. Title → <b>Hikkari</b>."
+  restarting: "<emoji document_id=5258200195589504369>🔄</emoji> <b>Restarting…</b>"
+
 test:
   name: "Tester"
   set_loglevel: "<tg-emoji emoji-id=5355133243773435190>🚫</tg-emoji> <b>Please specify verbosity as an integer or string</b>"
