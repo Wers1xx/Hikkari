@@ -2099,6 +2099,48 @@ class HikkariConfigMod(loader.Module):
         if reply and len(args_s) >= 2:
             # case-insensitive option match
             opt_arg = args_s[1]
+
+            # Photo / video / document banner → x0.at (max 20MB)
+            _opt_l = str(opt_arg).lower()
+            if _opt_l in self._BANNER_OPTS or _opt_l == "banner_url":
+                has_vis = bool(getattr(reply, "photo", None) or getattr(reply, "video", None) or getattr(reply, "document", None))
+                is_audio = bool(getattr(reply, "audio", None) or getattr(reply, "voice", None))
+                if has_vis and not is_audio:
+                    url = await self._upload_banner_x0(reply)
+                    if url == "__TOO_BIG__":
+                        await utils.answer(
+                            message,
+                            "<emoji document_id=5447644880824181073>⚠️</emoji> Баннер <b>&gt; 20 МБ</b>. "
+                            "Quote/invert и превью не сработают. Дай файл легче.",
+                        )
+                        return
+                    if not url:
+                        await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Не удалось загрузить на x0.at")
+                        return
+                    mod = None
+                    for m in self.allmodules.modules:
+                        n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
+                        if str(n).lower() == str(args_s[0]).lower() or type(m).__name__.lower() == str(args_s[0]).lower():
+                            mod = m
+                            break
+                    if not mod or not getattr(mod, "config", None):
+                        await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль не найден")
+                        return
+                    try:
+                        mod.config[opt_arg] = url
+                    except Exception:
+                        try:
+                            mod.config["banner_url"] = url
+                        except Exception as e:
+                            await utils.answer(message, f"⚠️ {e}")
+                            return
+                    with contextlib.suppress(Exception):
+                        self._db.save()
+                    await utils.answer(
+                        message,
+                        f"<emoji document_id=5256182535917940722>⤵️</emoji> banner → <code>{utils.escape_html(url)}</code>",
+                    )
+                    return
             option = next(
                 (k for k in instance.config.keys() if str(k).lower() == opt_arg.lower()),
                 None,
