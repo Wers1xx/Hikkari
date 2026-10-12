@@ -2041,6 +2041,42 @@ class HikkariConfigMod(loader.Module):
         return str(path.resolve())
 
 
+
+    async def _upload_banner_x0(self, reply) -> str | None:
+        """Download replied media, reject >20MB, upload to x0.at, return URL."""
+        import os
+        import aiohttp
+        size = 0
+        with contextlib.suppress(Exception):
+            doc = getattr(reply, "document", None)
+            if doc is not None:
+                size = int(getattr(doc, "size", 0) or 0)
+            if getattr(reply, "video", None) is not None:
+                size = int(getattr(reply.video, "size", 0) or size)
+            if getattr(reply, "file", None) is not None:
+                size = int(getattr(reply.file, "size", 0) or size)
+        if size and size > 20 * 1024 * 1024:
+            return "__TOO_BIG__"
+        path = await reply.download_media()
+        if not path:
+            return None
+        try:
+            async with aiohttp.ClientSession() as s:
+                with open(path, "rb") as fh:
+                    data = aiohttp.FormData()
+                    data.add_field("file", fh, filename=os.path.basename(path))
+                    async with s.post("https://x0.at", data=data, timeout=aiohttp.ClientTimeout(total=120)) as r:
+                        url = (await r.text()).strip()
+            if url and url.startswith("http"):
+                return url
+        except Exception:
+            return None
+        finally:
+            with contextlib.suppress(Exception):
+                os.unlink(path)
+        return None
+
+
     async def _configcmd_impl(self, message: Message):
         raw = utils.get_args_raw(message).strip()
         args_s = raw.split()
@@ -2185,6 +2221,105 @@ class HikkariConfigMod(loader.Module):
     @loader.command(alias="fcfg")
     async def cfgcmd(self, message: Message):
         await self._configcmd_impl(message)
+
+
+
+    @loader.command()
+    async def uploadcfg(self, message: Message):
+        """<module> — export module config to .txt"""
+        import json
+        from io import BytesIO
+        name = (utils.get_args_raw(message) or "").strip()
+        if not name:
+            await utils.answer(
+                message,
+                f"<emoji document_id=5436113877181941026>❓</emoji> <code>{self.get_prefix()}uploadcfg ModuleName</code>",
+            )
+            return
+        mod = None
+        for m in self.allmodules.modules:
+            n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
+            if str(n).lower() == name.lower() or type(m).__name__.lower() == name.lower():
+                mod = m
+                break
+        if not mod or not getattr(mod, "config", None):
+            await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль не найден или без конфига")
+            return
+        keys = list(getattr(mod.config, "_config", {}) or {})
+        if not keys:
+            try:
+                keys = list(mod.config.keys())
+            except Exception:
+                keys = []
+        options = {}
+        for k in keys:
+            with contextlib.suppress(Exception):
+                options[k] = mod.config[k]
+        data = {
+            "__hikkari_cfg__": 1,
+            "module": (getattr(mod, "strings", {}) or {}).get("name") or type(mod).__name__,
+            "options": options,
+        }
+        raw = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        bio = BytesIO(raw.encode("utf-8"))
+        bio.name = f"{data['module']}_config.txt"
+        await message.client.send_file(
+            message.peer_id,
+            bio,
+            caption=f"<emoji document_id=5283176512747507510>✨</emoji> cfg · <b>{utils.escape_html(data['module'])}</b>",
+        )
+
+    @loader.command()
+    async def loadcfg(self, message: Message):
+        """reply to .txt from uploadcfg — import module config"""
+        import json
+        reply = await message.get_reply_message()
+        if not reply or not reply.document:
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Reply на .txt от <code>uploadcfg</code>",
+            )
+            return
+        path = await reply.download_media()
+        try:
+            data = json.loads(open(path, encoding="utf-8").read())
+        except Exception:
+            await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Не JSON/конфиг")
+            return
+        if not isinstance(data, dict) or data.get("__hikkari_cfg__") != 1:
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Нет маркера <code>__hikkari_cfg__</code>",
+            )
+            return
+        mod_name = data.get("module")
+        opts = data.get("options") or {}
+        mod = None
+        for m in self.allmodules.modules:
+            n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
+            if str(n).lower() == str(mod_name).lower():
+                mod = m
+                break
+        if not mod or not getattr(mod, "config", None):
+            await utils.answer(
+                message,
+                f"<emoji document_id=5447644880824181073>⚠️</emoji> Модуль <code>{utils.escape_html(str(mod_name))}</code> не загружен — конфиг не применён",
+            )
+            return
+        applied = 0
+        for k, v in opts.items():
+            try:
+                mod.config[k] = v
+                applied += 1
+            except Exception:
+                continue
+        with contextlib.suppress(Exception):
+            self._db.save()
+        await utils.answer(
+            message,
+            f"<emoji document_id=5256182535917940722>⤵️</emoji> Конфиг <b>{utils.escape_html(str(mod_name))}</b> применён ({applied} опций)",
+        )
+
 
     @loader.command()
     async def catcmd(self, message: Message):
