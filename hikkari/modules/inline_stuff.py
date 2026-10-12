@@ -63,7 +63,7 @@ class InlineStuff(loader.Module):
         """Soft restart without requiring RestartMod."""
         if message is not None:
             with contextlib.suppress(Exception):
-                await utils.answer(message, "<emoji document_id=5258200195589504369>🔄</emoji> <b>Restarting…</b>")
+                await utils.answer(message, self.strings.get("restarting", self.strings.get("restart", "🔄 Restarting…")))
         # database.save() is SYNC — must not await
         with contextlib.suppress(Exception):
             if hasattr(self, "_db") and hasattr(self._db, "save"):
@@ -186,11 +186,7 @@ class InlineStuff(loader.Module):
         with contextlib.suppress(Exception):
             self._db.save()
 
-        await utils.answer(
-            message,
-            "<emoji document_id=5283176512747507510>✨</emoji> <b>Ок!</b> Создаю инлайн-бота через @BotFather…\n"
-            "Это займёт ~15–30 сек, не закрывай юзербот.",
-        )
+        await utils.answer(message, self.strings["yesbot_ok"])
 
         try:
             im = self.inline
@@ -198,40 +194,27 @@ class InlineStuff(loader.Module):
             ok = await im._create_bot()
             if ok and im._db.get("hikkari.inline", "bot_token"):
                 im._token = im._db.get("hikkari.inline", "bot_token")
-                await utils.answer(
-                    message,
-                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот создан!</b>\n"
-                    "Перезапуск для подключения…",
-                )
+                await utils.answer(message, self.strings["yesbot_created"])
                 await self._restart_userbot(message)
                 return
 
             ok = await im._assert_token(create_new_if_needed=True)
             if ok and im._db.get("hikkari.inline", "bot_token"):
-                await utils.answer(
-                    message,
-                    "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн-бот готов!</b>\nПерезапуск…",
-                )
+                await utils.answer(message, self.strings["yesbot_ready"])
                 await self._restart_userbot(message)
                 return
 
             prefix = self.get_prefix()
-            await utils.answer(
-                message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> <b>Не удалось создать бота через @BotFather</b>\n"
-                "(SpamBan / лимит ботов / ошибка диалога).\n\n"
-                f"Создай бота вручную в @BotFather и укажи токен:\n"
-                f"<code>{prefix}ch_bot_token &lt;token&gt;</code>",
-            )
+            await utils.answer(message, self.strings["yesbot_fail"].format(prefix))
         except Exception as e:
             import logging
             logging.getLogger(__name__).exception("yesbot create failed")
             prefix = self.get_prefix()
             await utils.answer(
                 message,
-                f"<emoji document_id=5447644880824181073>⚠️</emoji> <b>Ошибка создания бота:</b> "
-                f"<code>{utils.escape_html(str(e)[:200])}</code>\n\n"
-                f"Укажи токен вручную: <code>{prefix}ch_bot_token &lt;token&gt;</code>",
+                self.strings["yesbot_error"].format(
+                    utils.escape_html(str(e)[:200]), prefix
+                ),
             )
 
 
@@ -244,11 +227,7 @@ class InlineStuff(loader.Module):
         # Keep bot_token in DB/files for restore without BotFather
         await utils.answer(
             message,
-            "<emoji document_id=5283176512747507510>✨</emoji> <b>Инлайн отключён.</b>\n"
-            "Можно включить позже: <code>{}yesbot</code> или "
-            "<code>{}ch_bot_token &lt;token&gt;</code>".format(
-                self.get_prefix(), self.get_prefix()
-            ),
+            self.strings["nobot_ok"].format(self.get_prefix(), self.get_prefix()),
         )
         await self._restart_userbot(message)
 
@@ -268,8 +247,7 @@ class InlineStuff(loader.Module):
             await utils.answer(
                 message,
                 "<emoji document_id=5436113877181941026>❓</emoji> "
-                f"<code>{self.get_prefix()}set_logs_group &lt;id|@username&gt;</code>\n"
-                "Группа должна быть <b>private</b>, ты — владелец или полный админ.",
+                self.strings["logs_usage"].format(self.get_prefix()),
             )
             return
 
@@ -279,22 +257,21 @@ class InlineStuff(loader.Module):
         except Exception as e:
             await utils.answer(
                 message,
-                f"<emoji document_id=5447644880824181073>⚠️</emoji> Не найден чат: "
-                f"<code>{utils.escape_html(str(e)[:120])}</code>",
+                self.strings["logs_not_found"].format(utils.escape_html(str(e)[:120])),
             )
             return
 
         if not isinstance(entity, Channel) or not entity.megagroup:
             await utils.answer(
                 message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Нужна <b>супергруппа</b> (не канал и не ЛС).",
+                self.strings["logs_need_supergroup"],
             )
             return
 
         if getattr(entity, "username", None):
             await utils.answer(
                 message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Группа должна быть <b>частной</b> (без @username).",
+                self.strings["logs_need_private"],
             )
             return
 
@@ -304,14 +281,13 @@ class InlineStuff(loader.Module):
         except UserNotParticipantError:
             await utils.answer(
                 message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Сначала вступи в группу.",
+                self.strings["logs_join_first"],
             )
             return
         except Exception as e:
             await utils.answer(
                 message,
-                f"<emoji document_id=5447644880824181073>⚠️</emoji> Не проверить права: "
-                f"<code>{utils.escape_html(str(e)[:100])}</code>",
+                self.strings["logs_rights_check"].format(utils.escape_html(str(e)[:100])),
             )
             return
 
@@ -329,8 +305,7 @@ class InlineStuff(loader.Module):
         if not ok_rights:
             await utils.answer(
                 message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Нужен <b>владелец</b> или админка "
-                "со всеми правами (кроме анонимности). Группа не будет использована.",
+                self.strings["logs_need_admin"],
             )
             return
 
@@ -365,9 +340,7 @@ class InlineStuff(loader.Module):
 
         await utils.answer(
             message,
-            "<emoji document_id=5256182535917940722>⤵️</emoji> <b>Группа подключена</b>\n"
-            f"ID: <code>{chat_id}</code>\n"
-            "Логи / бэкапы / ассеты будут идти сюда. Имя → <b>Hikkari</b>.",
+            self.strings["logs_ok"].format(chat_id),
         )
 
 
