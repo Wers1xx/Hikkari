@@ -314,10 +314,29 @@ def create_app(module: Any) -> web.Application:
                     value = json.loads(value)
                 except Exception:
                     pass
+            # coerce common JSON types
+            try:
+                meta = mod.config._config.get(key) if hasattr(mod.config, "_config") else None
+                if meta is not None and hasattr(meta, "validator") and meta.validator:
+                    with contextlib.suppress(Exception):
+                        value = meta.validator.validate(value)
+            except Exception:
+                pass
             mod.config[key] = value
+            # persist to userbot DB (WebApp was not flushing)
+            try:
+                db = getattr(st, "db", None) or getattr(mod, "_db", None) or getattr(mod, "db", None)
+                if db is not None and hasattr(db, "save"):
+                    db.save()
+            except Exception:
+                pass
+            try:
+                saved = mod.config[key]
+            except Exception:
+                saved = value
         except Exception as e:
             return _json({"ok": False, "error": str(e)}, 400)
-        return _json({"ok": True, "key": key, "value": mod.config[key]})
+        return _json({"ok": True, "key": key, "value": saved})
 
     @require_admin
     async def api_run_command(request: web.Request) -> web.Response:
