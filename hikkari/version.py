@@ -1,27 +1,27 @@
-# ©️ Dan Gazizullin (hikariatama), 2021-2023
+# Â©ï¸ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
-# 🌐 https://github.com/hikariatama/Hikka
+# ð https://github.com/hikariatama/Hikka
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
-# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+# ð https://www.gnu.org/licenses/agpl-3.0.html
 #
-# ©️ Codrago, 2024-2030
+# Â©ï¸ Codrago, 2024-2030
 # This file is a part of Heroku Userbot
-# 🌐 https://github.com/coddrago/Heroku
+# ð https://github.com/coddrago/Heroku
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
-# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+# ð https://www.gnu.org/licenses/agpl-3.0.html
 #
-# ©️ Wers1xx, 2025-2026
+# Â©ï¸ Wers1xx, 2025-2026
 # This file is a part of Hikkari Userbot
-# 🌐 https://github.com/Wers1xx/Hikkari
+# ð https://github.com/Wers1xx/Hikkari
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
-# 🔑 https://www.gnu.org/licenses/agpl-3.0.html
+# ð https://www.gnu.org/licenses/agpl-3.0.html
 
 """Represents current userbot version.
 
-Rule: fix/patch → +0.0.1; new feature → +0.1.0.
+Rule: fix/patch â +0.0.1; new feature â +0.1.0.
 """
 
-__version__ = (1, 9, 66)
+__version__ = (1, 10, 0)
 
 import os
 
