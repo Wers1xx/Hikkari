@@ -21,15 +21,20 @@
 Rule: fix/patch â +0.0.1; new feature â +0.1.0.
 """
 
-__version__ = (1, 10, 2)
+__version__ = (1, 10, 3)
 
 import os
 
 NO_GIT = os.environ.get("HIKKARI_NO_GIT") == "1"
+git = None
 if not NO_GIT:
-    import git
-else:
-    git = None
+    try:
+        import git as _git  # GitPython
+        git = _git
+    except ImportError:
+        # GitPython not installed yet — continue without git features
+        NO_GIT = True
+        git = None
 from ._internal import (check_commit_ancestor, get_branch_name,
                         reset_to_master, restart, restore_worktree)
 
