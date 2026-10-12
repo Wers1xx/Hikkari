@@ -33,7 +33,30 @@ from ..inline.types import BotInlineMessage, InlineCall
 class InlineStuff(loader.Module):
     """Provides support for inline stuff"""
 
-    strings = {"name": "InlineStuff"}
+    strings = {
+        "name": "InlineStuff",
+        "yesbot_doc": "Create inline bot via BotFather",
+        "nobot_doc": "Skip inline bot",
+        "ch_bot_token_doc": "<token> — set custom inline bot token",
+        "ch_hikkari_bot_doc": "Change inline bot username",
+        "set_logs_group_doc": "<id|@chat> — private logs/backups group",
+    }
+    strings_ru = {
+        "name": "InlineStuff",
+        "yesbot_doc": "Создать inline-бота через @BotFather",
+        "nobot_doc": "Отключить inline-бота",
+        "ch_bot_token_doc": "<token> — указать токен inline-бота",
+        "ch_hikkari_bot_doc": "Изменить юзернейм inline-бота",
+        "set_logs_group_doc": "<id|@chat> — группа логов и бэкапов (private)",
+    }
+    strings_ua = {
+        "name": "InlineStuff",
+        "yesbot_doc": "Створити inline-бота через @BotFather",
+        "nobot_doc": "Вимкнути inline-бота",
+        "ch_bot_token_doc": "<token> — вказати токен inline-бота",
+        "ch_hikkari_bot_doc": "Змінити юзернейм inline-бота",
+        "set_logs_group_doc": "<id|@chat> — група логів і бекапів (private)",
+    }
 
 
     async def _restart_userbot(self, message: Message = None):
@@ -95,6 +118,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def ch_hikkari_bot(self, message: Message):
+        """Изменить юзернейм inline-бота / change inline bot username"""
         args = utils.get_args_raw(message).strip("@")
 
         if not args:
@@ -130,7 +154,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def ch_bot_token(self, message: Message):
-        """<token> — set custom inline bot token"""
+        """<token> — токен inline-бота / set custom inline bot token"""
         args = utils.get_args_raw(message)
         if not args or not re.match(r"[0-9]{8,10}:[a-zA-Z0-9_-]{35,}", args):
             await utils.answer(message, self.strings["token_invalid"])
@@ -151,7 +175,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def yesbot(self, message: Message):
-        """— create a new inline bot via BotFather"""
+        """Создать inline-бота через @BotFather / create inline bot via BotFather"""
         self._db.set("hikkari.inline", "skip_inline", False)
         self._db.set("hikkari.inline", "allow_auto_create", True)
         self._db.set("hikkari.inline", "setup_prompted", True)
@@ -213,7 +237,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def nobot(self, message: Message):
-        """— skip inline bot (Hikkari without inline)"""
+        """Отключить inline-бота / skip inline bot"""
         self._db.set("hikkari.inline", "skip_inline", True)
         self._db.set("hikkari.inline", "allow_auto_create", False)
         self._db.set("hikkari.inline", "setup_prompted", True)
@@ -232,7 +256,7 @@ class InlineStuff(loader.Module):
 
     @loader.command()
     async def set_logs_group(self, message: Message):
-        """<id|@chat> — private group for logs/backups (owner or full admin)"""
+        """<id|@chat> — группа логов/бэкапов (private, owner/full admin) / logs group"""
         import logging
         from hikkaritl.tl.functions.channels import EditTitleRequest, ToggleForumRequest, GetParticipantRequest
         from hikkaritl.tl.types import Channel, ChannelParticipantCreator, ChannelParticipantAdmin
