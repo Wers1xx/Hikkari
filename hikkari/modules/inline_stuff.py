@@ -228,6 +228,125 @@ class InlineStuff(loader.Module):
         )
         await self._restart_userbot(message)
 
+
+
+    @loader.command()
+    async def set_logs_group(self, message: Message):
+        """<id|@chat> — private group for logs/backups (owner or full admin)"""
+        import logging
+        from hikkaritl.tl.functions.channels import EditTitleRequest, ToggleForumRequest, GetParticipantRequest
+        from hikkaritl.tl.types import Channel, ChannelParticipantCreator, ChannelParticipantAdmin
+        from hikkaritl.errors.rpcerrorlist import UserNotParticipantError
+
+        logger = logging.getLogger(__name__)
+        args = utils.get_args_raw(message).strip()
+        if not args:
+            await utils.answer(
+                message,
+                "<emoji document_id=5436113877181941026>❓</emoji> "
+                f"<code>{self.get_prefix()}set_logs_group &lt;id|@username&gt;</code>\n"
+                "Группа должна быть <b>private</b>, ты — владелец или полный админ.",
+            )
+            return
+
+        try:
+            peer = int(args) if args.lstrip("-").isdigit() else args
+            entity = await self._client.get_entity(peer)
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"<emoji document_id=5447644880824181073>⚠️</emoji> Не найден чат: "
+                f"<code>{utils.escape_html(str(e)[:120])}</code>",
+            )
+            return
+
+        if not isinstance(entity, Channel) or not entity.megagroup:
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Нужна <b>супергруппа</b> (не канал и не ЛС).",
+            )
+            return
+
+        if getattr(entity, "username", None):
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Группа должна быть <b>частной</b> (без @username).",
+            )
+            return
+
+        try:
+            part = await self._client(GetParticipantRequest(entity, "me"))
+            p = part.participant
+        except UserNotParticipantError:
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Сначала вступи в группу.",
+            )
+            return
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"<emoji document_id=5447644880824181073>⚠️</emoji> Не проверить права: "
+                f"<code>{utils.escape_html(str(e)[:100])}</code>",
+            )
+            return
+
+        ok_rights = False
+        if isinstance(p, ChannelParticipantCreator):
+            ok_rights = True
+        elif isinstance(p, ChannelParticipantAdmin) and p.admin_rights:
+            r = p.admin_rights
+            ok_rights = bool(
+                r.change_info and r.delete_messages and r.ban_users
+                and r.invite_users and r.pin_messages and r.add_admins
+                and (r.manage_topics is None or r.manage_topics)
+            )
+
+        if not ok_rights:
+            await utils.answer(
+                message,
+                "<emoji document_id=5447644880824181073>⚠️</emoji> Нужен <b>владелец</b> или админка "
+                "со всеми правами (кроме анонимности). Группа не будет использована.",
+            )
+            return
+
+        try:
+            if not getattr(entity, "forum", False):
+                await self._client(ToggleForumRequest(channel=entity, enabled=True))
+                entity = await self._client.get_entity(entity)
+        except Exception as e:
+            logger.warning("ToggleForum failed: %s", e)
+
+        try:
+            await self._client(EditTitleRequest(channel=entity, title="Hikkari"))
+        except Exception as e:
+            logger.warning("EditTitle: %s", e)
+
+        try:
+            from pathlib import Path
+            from ..utils.other import ensure_builtin_asset
+            from ..utils.entity import set_avatar
+            av = ensure_builtin_asset("bot_avatar.png") or ensure_builtin_asset("11168.png")
+            if av and Path(av).is_file():
+                await set_avatar(self._client, entity, str(av))
+        except Exception as e:
+            logger.warning("set_avatar logs group: %s", e)
+
+        chat_id = utils.get_entity_id(entity)
+        self._db.set("hikkari.main", "logchat", chat_id)
+        self._db.set("hikkari.main", "content_channel", chat_id)
+        self._db.set("hikkari.inline", "logs_group", chat_id)
+        with contextlib.suppress(Exception):
+            self._db.save()
+
+        await utils.answer(
+            message,
+            "<emoji document_id=5256182535917940722>⤵️</emoji> <b>Группа подключена</b>\n"
+            f"ID: <code>{chat_id}</code>\n"
+            "Логи / бэкапы / ассеты будут идти сюда. Имя → <b>Hikkari</b>.",
+        )
+
+
     async def bot_watcher(self, message: BotInlineMessage):
         match message.text:
             case "/start":
