@@ -29,7 +29,7 @@ from hikkaritl.types import InputMediaWebPage
 from hikkaritl.tl.types import Message
 from hikkaritl.utils import get_display_name
 from .. import loader, utils
-from ..utils.placeholders import apply_placeholders, version
+from ..utils.placeholders import apply_placeholders
 import platform as lib_platform
 import getpass
 
