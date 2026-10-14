@@ -346,7 +346,7 @@ class Events(InlineUnit):
                         return
                     if not self._inline_user_allowed(user_id, unit):
                         await call.answer("⛔")
-                            return
+                        return
                     pages = unit.get("pages") or []
                     if not pages:
                         await call.answer()
