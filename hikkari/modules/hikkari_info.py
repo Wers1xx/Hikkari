@@ -397,9 +397,10 @@ class HikkariInfoMod(loader.Module):
                     if not m and banner_url:
                         # Heavy video banner often kills Rich — text-only retry
                         html2 = html
-                        if html2.lower().startswith("<figure") or "<figure" in html2.lower()[:200]:
-                        or "<audio" in str(custom).lower()
-                        or "<tg-slideshow" in str(custom).lower()
+                        if (
+                            html2.lower().startswith("<figure")
+                            or "<figure" in html2.lower()[:200]
+                        ):
                             html2 = re.sub(
                                 r"<figure\b[^>]*>.*?</figure>\s*",
                                 "",
