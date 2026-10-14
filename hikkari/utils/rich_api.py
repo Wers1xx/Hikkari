@@ -75,17 +75,38 @@ def pick_banner_url(banner) -> str | None:
 
 
 def inject_banner_html(html: str, banner_url: str | None, *, force: bool = True) -> str:
-    """Ensure Rich HTML starts with <figure> banner from config."""
+    """Ensure Rich HTML starts with <figure><img> banner from config.
+
+    Never removes <figure> blocks that contain <audio>/<video> — only pure image
+    banners. If custom HTML already has tg-slideshow / audio / multiple figures,
+    skip injection unless force and no media slideshow present.
+    """
     if not banner_url or not str(banner_url).startswith(("http://", "https://")):
         return html or ""
     html = html or ""
-    if not force and "<figure" in html.lower():
+    low = html.lower()
+    # Custom already has rich media playlist / slideshow — do not touch figures
+    if (
+        "<tg-slideshow" in low
+        or "<audio" in low
+        or "<video" in low
+        or low.count("<figure") >= 2
+    ):
         return html
-    # strip existing figure so config banner wins
-    if force and "<figure" in html.lower():
+    if not force and "<figure" in low:
+        return html
+    # Strip only the first IMAGE banner figure (img without audio/video)
+    if force and "<figure" in low:
+        def _strip_img_fig(m: re.Match) -> str:
+            body = m.group(0).lower()
+            if "<audio" in body or "<video" in body:
+                return m.group(0)
+            if "<img" in body:
+                return ""
+            return m.group(0)
         html = re.sub(
             r"<figure\b[^>]*>.*?</figure>",
-            "",
+            _strip_img_fig,
             html,
             count=1,
             flags=re.I | re.S,
@@ -93,6 +114,31 @@ def inject_banner_html(html: str, banner_url: str | None, *, force: bool = True)
     fig = f'<figure><img src="{banner_url}"/></figure>\n'
     return fig + html
 
+def ensure_audio_figcaptions(html: str) -> str:
+    """Telegram often drops <figure><audio> without figcaption — add a fallback."""
+    if not html or "<audio" not in html.lower():
+        return html or ""
+
+    def _fix(m: re.Match) -> str:
+        full = m.group(0)
+        if re.search(r"<figcaption\b", full, flags=re.I):
+            return full
+        src_m = re.search(r'src=["\']([^"\']+)["\']', full, flags=re.I)
+        name = "Track"
+        if src_m:
+            name = src_m.group(1).rstrip("/").split("/")[-1] or name
+        return full.replace(
+            "</figure>",
+            f"<figcaption><b>{name}</b></figcaption></figure>",
+            1,
+        )
+
+    return re.sub(
+        r"<figure\b[^>]*>\s*<audio\b[^>]*>\s*</audio>\s*</figure>",
+        _fix,
+        html,
+        flags=re.I | re.S,
+    )
 
 def tg_button(
     text: str,
