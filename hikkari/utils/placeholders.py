@@ -139,28 +139,38 @@ _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
 def apply_placeholders(template: str | None, data: dict | None) -> str:
-    """Replace only known {name} tokens. Never uses str.format — safe for Rich HTML
-    (<figure>, <audio>, <tg-slideshow>, tables, etc.). Unknown {tokens} are kept as-is.
+    """Replace {name} tokens safely (no str.format). Supports Rich HTML.
+    Longest keys first. Normalizes fullwidth braces. Unknown tokens kept.
     """
     if template is None:
         return ""
     text = str(template)
+    # fullwidth / fancy braces → ascii
+    text = (
+        text.replace("\uff5b", "{")
+        .replace("\uff5d", "}")
+        .replace("\u007b", "{")
+        .replace("\u007d", "}")
+    )
+    # also common accidental double-brace leftovers from .format templates
     if not data:
         return text
     flat: dict[str, str] = {}
     for k, v in data.items():
         key = str(k)
-        if v is None:
-            flat[key] = ""
-        else:
-            flat[key] = str(v)
-
+        flat[key] = "" if v is None else str(v)
+    # longest keys first so {build_plain} before {build}
+    for key in sorted(flat.keys(), key=len, reverse=True):
+        token = "{" + key + "}"
+        if token in text:
+            text = text.replace(token, flat[key])
+    # regex pass for any remaining simple {ident}
     def _repl(m: re.Match) -> str:
         key = m.group(1)
         if key in flat:
             return flat[key]
         return m.group(0)
-
-    return _PLACEHOLDER_RE.sub(_repl, text)
+    text = _PLACEHOLDER_RE.sub(_repl, text)
+    return text
 
 
