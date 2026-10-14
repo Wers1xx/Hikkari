@@ -443,6 +443,10 @@ class TestMod(loader.Module):
                         or "<details" in str(custom).lower()
                         or "<tg-button" in str(custom).lower()
                         or "<figure" in str(custom).lower()
+                        or "<audio" in str(custom).lower()
+                        or "<video" in str(custom).lower()
+                        or "<tg-slideshow" in str(custom).lower()
+                        or "<slideshow" in str(custom).lower()
                     )
                 )
                 if use_raw:
