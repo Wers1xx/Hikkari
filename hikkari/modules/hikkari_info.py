@@ -30,6 +30,7 @@ from hikkaritl.tl.types import Message
 from hikkaritl.utils import get_display_name
 from .. import loader, utils
 from ..utils.placeholders import apply_placeholders
+from .. import version
 import platform as lib_platform
 import getpass
 
