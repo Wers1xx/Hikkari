@@ -1,3 +1,4 @@
+from ..utils.placeholders import apply_placeholders
 import re
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
@@ -410,7 +411,7 @@ class TestMod(loader.Module):
         }
         data = await utils.get_placeholders(data, self.config["custom_message"])
         try:
-            placeholders_msg = self.config["custom_message"].format(**data)
+            placeholders_msg = apply_placeholders(self.config["custom_message"], data)
         except KeyError:
             logger.exception("Missing placeholder in custom_message")
             placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
