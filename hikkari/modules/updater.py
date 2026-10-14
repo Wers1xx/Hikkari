@@ -335,7 +335,7 @@ class UpdaterMod(loader.Module):
             with contextlib.suppress(Exception):
                 self._fetch_branch()
             with contextlib.suppress(Exception):
-                await self.poller()
+                await self._poll_once()
         asyncio.ensure_future(_boot_check())
 
 
@@ -396,8 +396,7 @@ class UpdaterMod(loader.Module):
             except Exception:
                 pass
 
-    @loader.loop(interval=60, autostart=True)
-    async def poller(self):
+    async def _poll_once(self):
         if NO_GIT:
             return
         try:
@@ -445,6 +444,10 @@ class UpdaterMod(loader.Module):
             self.set("ignore_permanent", False)
             await self._delete_all_upd_messages()
             self.set("upd_msg", m.message_id)
+
+    @loader.loop(interval=60, autostart=True)
+    async def poller(self):
+        await self._poll_once()
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
