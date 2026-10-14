@@ -69,7 +69,7 @@ class Form(InlineUnit):
         message: Message | int,
         reply_markup: HikkariReplyMarkup | None = None,
         *,
-        force_me: bool = False,
+        force_me: bool = True,  # owner/co-owners only by default
         always_allow: list[int] | None = None,
         manual_security: bool = False,
         disable_security: bool = False,
@@ -528,7 +528,7 @@ class Form(InlineUnit):
             "uid": unit_id,
             "future": Event(),
             "force_me": True,
-            "disable_security": True,
+            "disable_security": False,
             **({"thumbnail_url": thumbnail_url} if thumbnail_url else {}),
             **({"message": message} if isinstance(message, Message) else {}),
         }
