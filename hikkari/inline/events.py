@@ -269,6 +269,47 @@ class Events(InlineUnit):
                     id=utils.rand(20),
                 )
 
+
+    def _inline_allowed_users(
+        self: "InlineManager",
+        unit: dict | None = None,
+        button: dict | None = None,
+    ) -> set[int]:
+        """Owner account + security owners + per-unit/button always_allow."""
+        allowed: set[int] = set()
+        with contextlib.suppress(Exception):
+            if self._me:
+                allowed.add(int(self._me))
+        with contextlib.suppress(Exception):
+            for x in self._client.dispatcher.security._owner or []:
+                allowed.add(int(x))
+        if unit:
+            with contextlib.suppress(Exception):
+                for x in unit.get("always_allow") or []:
+                    allowed.add(int(x))
+        if button:
+            with contextlib.suppress(Exception):
+                for x in button.get("always_allow") or []:
+                    allowed.add(int(x))
+        return allowed
+
+    def _inline_user_allowed(
+        self: "InlineManager",
+        user_id: int,
+        unit: dict | None = None,
+        button: dict | None = None,
+    ) -> bool:
+        """Only account owner and co-owners may use inline forms/buttons by default."""
+        if user_id is None:
+            return False
+        # Explicit public button (rare): both flags must opt-in
+        if button and button.get("allow_public") is True:
+            return True
+        if unit and unit.get("allow_public") is True:
+            return True
+        return int(user_id) in self._inline_allowed_users(unit, button)
+
+
     async def _callback_query_handler(
         self: "InlineManager",
         call,
@@ -303,12 +344,8 @@ class Events(InlineUnit):
                         with contextlib.suppress(Exception):
                             await call.answer("Expired — run .help again")
                         return
-                    if unit.get("force_me") and user_id != self._me:
-                        if user_id not in (
-                            self._client.dispatcher.security._owner
-                            + unit.get("always_allow", [])
-                        ):
-                            await call.answer("⛔")
+                    if not self._inline_user_allowed(user_id, unit):
+                        await call.answer("⛔")
                             return
                     pages = unit.get("pages") or []
                     if not pages:
@@ -420,34 +457,15 @@ class Events(InlineUnit):
                     continue
 
                 if button.get("_callback_data") == call_data:
-                    match True:
-                        case _ if (
-                            button.get("disable_security", False)
-                            or unit.get("disable_security", False)
-                            or (unit.get("force_me", False) and user_id == self._me)
-                            or not unit.get("force_me", False)
-                            and (
-                                await self.check_inline_security(
-                                    func=unit.get(
-                                        "perms_map",
-                                        lambda: self._client.dispatcher.security._default,
-                                    )(),
-                                    user=user_id,
-                                )
-                                if "message" in unit
-                                else False
-                            )
-                        ):
-                            pass
-                        case _ if user_id not in (
-                            self._client.dispatcher.security._owner
-                            + unit.get("always_allow", [])
-                            + button.get("always_allow", [])
-                        ):
+                    # Strict: only account owner + co-owners (unless allow_public)
+                    if not self._inline_user_allowed(user_id, unit, button):
+                        with contextlib.suppress(Exception):
                             await call.answer(
                                 self.translator.getkey("inline.button403")
+                                if hasattr(self, "translator")
+                                else "⛔"
                             )
-                            return
+                        return
 
                     # Answer ASAP so the button does not spin forever
                     with contextlib.suppress(Exception):
@@ -480,8 +498,8 @@ class Events(InlineUnit):
             with contextlib.suppress(Exception):
                 owners |= {int(x) for x in (self._client.dispatcher.security._owner or [])}
 
-            allowed = bool(entry.get("disable_security", False))
-            if not allowed and user_id in owners:
+            allowed = self._inline_user_allowed(user_id, entry if isinstance(entry, dict) else None)
+            if entry.get("allow_public") is True:
                 allowed = True
             if not allowed and user_id in (entry.get("always_allow") or []):
                 allowed = True
