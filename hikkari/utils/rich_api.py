@@ -531,14 +531,7 @@ async def try_send_rich(
     if cid is not None:
         candidates.append(cid)
 
-    # Fallback: DM with bot (user must have /start'ed the bot)
-    try:
-        me = getattr(client, "hikkari_me", None) or await client.get_me()
-        uid = getattr(me, "id", None)
-        if isinstance(uid, int) and uid not in candidates:
-            candidates.append(uid)
-    except Exception:
-        pass
+    # Do NOT fall back to bot DM — that spamms owner PM when Rich fails in chat.
 
     last_ok = False
     for target in candidates:
