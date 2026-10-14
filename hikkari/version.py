@@ -21,7 +21,7 @@
 Rule: fix/patch â +0.0.1; new feature â +0.1.0.
 """
 
-__version__ = (1, 10, 11)
+__version__ = (1, 10, 12)
 
 import os
 
