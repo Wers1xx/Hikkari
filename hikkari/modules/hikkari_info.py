@@ -28,7 +28,8 @@ from hikkaritl.errors import WebpageMediaEmptyError
 from hikkaritl.types import InputMediaWebPage
 from hikkaritl.tl.types import Message
 from hikkaritl.utils import get_display_name
-from .. import loader, utils, version
+from .. import loader, utils
+from ..utils.placeholders import apply_placeholders, version
 import platform as lib_platform
 import getpass
 
@@ -166,7 +167,7 @@ class HikkariInfoMod(loader.Module):
         data = await utils.get_placeholders(data, self.config["custom_message"])
         if self.config["custom_message"]:
             try:
-                return self.config["custom_message"].format(**data)
+                return apply_placeholders(self.config["custom_message"], data)
             except KeyError:
                 logger.exception("Missing placeholder in custom_message")
                 return (
@@ -326,7 +327,7 @@ class HikkariInfoMod(loader.Module):
                         def __missing__(self, key):
                             return "{" + key + "}"
                     try:
-                        html = str(custom).format_map(_Safe(**data))
+                        html = apply_placeholders(str(custom), data)
                     except Exception:
                         logger.exception("custom_message format failed")
                         html = str(custom)
