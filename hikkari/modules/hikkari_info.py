@@ -293,6 +293,17 @@ class HikkariInfoMod(loader.Module):
         return data
 
     @loader.command()
+    def _bot_ready_for_rich(self) -> bool:
+        try:
+            inline = getattr(self, "inline", None)
+            if not inline or not getattr(inline, "init_complete", False):
+                return False
+            if getattr(inline, "bot", None) is None:
+                return False
+            return True
+        except Exception:
+            return False
+
     async def infocmd(self, message: Message):
         """Show userbot info (Heroku-compatible quote_media)"""
         start = time.perf_counter_ns()
@@ -384,9 +395,7 @@ class HikkariInfoMod(loader.Module):
 
                 logger.info("info rich html length=%s", len(html))
                 m = None
-                if getattr(self, "inline", None) and getattr(
-                    self.inline, "init_complete", False
-                ):
+                if self._bot_ready_for_rich():
                     m = await self.inline.rich(
                         message,
                         html,
