@@ -397,8 +397,6 @@ class UpdaterMod(loader.Module):
                 pass
 
     @loader.loop(interval=60, autostart=True)
-
-    @loader.loop(interval=60, autostart=True)
     async def poller(self):
         if NO_GIT:
             return
