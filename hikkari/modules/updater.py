@@ -354,8 +354,7 @@ class UpdaterMod(loader.Module):
                         announcement = (await r.text()).strip()
                         previous = self.get("announcement", "")
                         if announcement and announcement != previous:
-                            await self.inline.bot.send_message(
-                                self.tg_id,
+                            await self._notify_owner(
                                 self.strings["announcement"].format(announcement),
                             )
                             self.set("announcement", announcement)
@@ -365,6 +364,38 @@ class UpdaterMod(loader.Module):
                 pass
 
     @loader.loop(interval=60, autostart=True)
+
+    def _inline_bot_ok(self) -> bool:
+        """True if inline bot client is ready (token valid + connected)."""
+        try:
+            bot = getattr(getattr(self, "inline", None), "bot", None)
+            return bot is not None
+        except Exception:
+            return False
+
+    async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
+        """Send update notice via inline bot if available, else user client to Saved Messages."""
+        disable_preview = kwargs.pop("disable_web_page_preview", True)
+        if self._inline_bot_ok():
+            try:
+                return await self._notify_owner(
+                    text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=disable_preview,
+                    **kwargs,
+                )
+            except Exception:
+                logger.exception("inline bot notify failed, fallback to client")
+        try:
+            return await self._client.send_message(
+                self.tg_id,
+                text,
+                link_preview=not disable_preview,
+            )
+        except Exception:
+            logger.exception("owner notify failed")
+            return None
+
     async def poller(self):
         if NO_GIT:
             return
@@ -394,8 +425,7 @@ class UpdaterMod(loader.Module):
 
         if self._pending not in {current, self._notified}:
             # Autoupdate removed: only notify, never auto-pull
-            m = await self.inline.bot.send_message(
-                self.tg_id,
+            m = await self._notify_owner(
                 self.strings["update_required"].format(
                     current[:6],
                     '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
@@ -405,9 +435,11 @@ class UpdaterMod(loader.Module):
                     ),
                     changelog,
                 ),
-                reply_markup=self._markup(),
+                reply_markup=self._markup() if self._inline_bot_ok() else None,
                 disable_web_page_preview=True,
             )
+            if not m:
+                return
             self._notified = self._pending
             self.set("ignore_permanent", False)
             await self._delete_all_upd_messages()
@@ -416,7 +448,9 @@ class UpdaterMod(loader.Module):
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
             with contextlib.suppress(Exception):
-                await client.loader.inline.bot.delete_message(
+                bot = getattr(getattr(client.loader, "inline", None), "bot", None)
+                if bot is not None:
+                    await bot.delete_message(
                     client.tg_id,
                     client.loader.db.get("Updater", "upd_msg"),
                 )
@@ -1306,8 +1340,7 @@ class UpdaterMod(loader.Module):
                 old = rb.read_text(encoding="utf-8").strip()
                 rb.unlink(missing_ok=True)
                 self._clear_pre_update()
-                await self.inline.bot.send_message(
-                    self.tg_id,
+                await self._notify_owner(
                     self.strings.get(
                         "update_auto_rollback",
                         "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
