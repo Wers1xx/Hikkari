@@ -16,7 +16,9 @@
 # You can redistribute it and/or modify it under the terms of the GNU AGPLv3
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
+import re
 import typing
+
 
 custom_placeholders = {}
 
@@ -131,3 +133,34 @@ def debug_placeholders():
     Just for debug purposes
     """
     return custom_placeholders
+
+
+_PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def apply_placeholders(template: str | None, data: dict | None) -> str:
+    """Replace only known {name} tokens. Never uses str.format — safe for Rich HTML
+    (<figure>, <audio>, <tg-slideshow>, tables, etc.). Unknown {tokens} are kept as-is.
+    """
+    if template is None:
+        return ""
+    text = str(template)
+    if not data:
+        return text
+    flat: dict[str, str] = {}
+    for k, v in data.items():
+        key = str(k)
+        if v is None:
+            flat[key] = ""
+        else:
+            flat[key] = str(v)
+
+    def _repl(m: re.Match) -> str:
+        key = m.group(1)
+        if key in flat:
+            return flat[key]
+        return m.group(0)
+
+    return _PLACEHOLDER_RE.sub(_repl, text)
+
+
