@@ -421,7 +421,7 @@ class HikkariInfoMod(loader.Module):
                         return
                 # Bot API sendRichMessage — keeps <table> and <tg-button>
                 chat = utils.get_chat_id(message)
-                if await try_send_rich(self._client, chat, html):
+                if chat and await try_send_rich(self._client, chat, html):
                     with contextlib.suppress(Exception):
                         if message.out:
                             await message.delete()
