@@ -573,7 +573,7 @@ class InlineManager(
             raise exception  # skipcq: PYL-E0702
 
         if not q:
-            logger.error(
+            logger.warning(
                 "No query results for unit=%s bot=%s init=%s units=%s",
                 unit_id,
                 bot_un,
