@@ -338,6 +338,39 @@ class UpdaterMod(loader.Module):
                 await self.poller()
         asyncio.ensure_future(_boot_check())
 
+
+    def _inline_bot_ok(self) -> bool:
+        """True if inline bot client is ready (token valid + connected)."""
+        try:
+            bot = getattr(getattr(self, "inline", None), "bot", None)
+            return bot is not None
+        except Exception:
+            return False
+
+    async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
+        """Send update notice via inline bot if available, else user client to Saved Messages."""
+        disable_preview = kwargs.pop("disable_web_page_preview", True)
+        if self._inline_bot_ok():
+            try:
+                return await self.inline.bot.send_message(
+                    self.tg_id,
+                    text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=disable_preview,
+                    **kwargs,
+                )
+            except Exception:
+                logger.exception("inline bot notify failed, fallback to client")
+        try:
+            return await self._client.send_message(
+                self.tg_id,
+                text,
+                link_preview=not disable_preview,
+            )
+        except Exception:
+            logger.exception("owner notify failed")
+            return None
+
     @loader.loop(interval=60, autostart=True)
     async def poller_announcement(self):
         async with aiohttp.ClientSession() as session:
@@ -365,37 +398,7 @@ class UpdaterMod(loader.Module):
 
     @loader.loop(interval=60, autostart=True)
 
-    def _inline_bot_ok(self) -> bool:
-        """True if inline bot client is ready (token valid + connected)."""
-        try:
-            bot = getattr(getattr(self, "inline", None), "bot", None)
-            return bot is not None
-        except Exception:
-            return False
-
-    async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
-        """Send update notice via inline bot if available, else user client to Saved Messages."""
-        disable_preview = kwargs.pop("disable_web_page_preview", True)
-        if self._inline_bot_ok():
-            try:
-                return await self._notify_owner(
-                    text,
-                    reply_markup=reply_markup,
-                    disable_web_page_preview=disable_preview,
-                    **kwargs,
-                )
-            except Exception:
-                logger.exception("inline bot notify failed, fallback to client")
-        try:
-            return await self._client.send_message(
-                self.tg_id,
-                text,
-                link_preview=not disable_preview,
-            )
-        except Exception:
-            logger.exception("owner notify failed")
-            return None
-
+    @loader.loop(interval=60, autostart=True)
     async def poller(self):
         if NO_GIT:
             return
