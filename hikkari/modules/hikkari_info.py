@@ -321,6 +321,7 @@ class HikkariInfoMod(loader.Module):
                 build_info_html,
                 pick_banner_url,
                 inject_banner_html,
+                ensure_audio_figcaptions,
                 to_rich_compatible,
                 parse_rich_url_buttons,
                 try_send_rich,
@@ -344,7 +345,9 @@ class HikkariInfoMod(loader.Module):
                         logger.exception("custom_message format failed")
                         html = str(custom)
                     html = to_rich_compatible(html)
-                    html = inject_banner_html(html, banner_url, force=True)
+                    html = ensure_audio_figcaptions(html)
+                    # force=False: never eat audio/slideshow figures from custom_message
+                    html = inject_banner_html(html, banner_url, force=False)
                 else:
                     rows = [
                         (
