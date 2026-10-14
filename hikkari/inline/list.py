@@ -46,7 +46,7 @@ class List(InlineUnit):
         message: Message | int,
         strings: list[str],
         *,
-        force_me: bool = False,
+        force_me: bool = True,  # owner/co-owners only by default
         always_allow: list[int] | None = None,
         manual_security: bool = False,
         disable_security: bool = False,
