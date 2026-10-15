@@ -96,10 +96,10 @@ _ALREADY = re.compile(
 
 
 def prem(char: str, fallback: Optional[str] = None) -> str:
-    """Single premium emoji as HTML for message / caption body."""
+    """Single premium emoji — Bot API HTML (<tg-emoji>). Also ok for Telethon after convert."""
     if char in PREMIUM_MAP:
         did, fb = PREMIUM_MAP[char]
-        return f"<emoji document_id={did}>{fallback or fb}</emoji>"
+        return f'<tg-emoji emoji-id="{did}">{fallback or fb}</tg-emoji>'
     return fallback or char
 
 
@@ -132,7 +132,7 @@ def _upgrade_chunk(chunk: str) -> str:
     def repl(m: re.Match) -> str:
         ch = m.group(0)
         did, fb = PREMIUM_MAP[ch]
-        return f"<emoji document_id={did}>{fb}</emoji>"
+        return f'<tg-emoji emoji-id="{did}">{fb}</tg-emoji>'
 
     return _PATTERN.sub(repl, chunk)
 
@@ -165,3 +165,38 @@ def button_icon_id(char: str) -> Optional[int]:
     if char in PREMIUM_MAP:
         return PREMIUM_MAP[char][0]
     return None
+
+
+_DOC_EMOJI_RE = re.compile(
+    r'<emoji\s+document_id\s*=\s*["\']?(\d+)["\']?\s*>(.*?)</emoji>',
+    re.I | re.S,
+)
+_TG_EMOJI_RE = re.compile(
+    r'<tg-emoji\b[^>]*\bemoji-id\s*=\s*["\']?(\d+)["\']?[^>]*>(.*?)</tg-emoji>',
+    re.I | re.S,
+)
+
+
+def emoji_for_bot_api(text: str) -> str:
+    """Convert Telethon-style <emoji document_id> to Bot API <tg-emoji emoji-id>.
+
+    Official Bot API (HTML parse_mode):
+      <tg-emoji emoji-id="5368324170671202286">👍</tg-emoji>
+    Inline forms / answerInlineQuery go through the bot → need this format.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    return _DOC_EMOJI_RE.sub(
+        lambda m: f'<tg-emoji emoji-id="{m.group(1)}">{m.group(2)}</tg-emoji>',
+        text,
+    )
+
+
+def emoji_for_user_client(text: str) -> str:
+    """Convert Bot API <tg-emoji> to Telethon <emoji document_id> for user-account sends."""
+    if not text or not isinstance(text, str):
+        return text
+    return _TG_EMOJI_RE.sub(
+        lambda m: f'<emoji document_id={m.group(1)}>{m.group(2)}</emoji>',
+        text,
+    )
