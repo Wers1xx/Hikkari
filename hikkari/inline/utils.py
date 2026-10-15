@@ -70,12 +70,18 @@ class Utils(InlineUnit):
         return None
 
     def _get_button_emoji_id(self, button: dict) -> str | None:
-        """Extract button custom emoji ID (for premium emoji support)"""
-
-        emoji_id = button.get("emoji_id")
-
+        """Extract button custom emoji ID (explicit or from <emoji document_id=…> in text)."""
+        emoji_id = button.get("emoji_id") or button.get("icon") or button.get("icon_custom_emoji_id")
         if emoji_id:
             return str(emoji_id).strip()
+        text = str(button.get("text") or "")
+        m = re.search(
+            r"(?:document_id|emoji-id|emoji_id)\s*=\s*["']?(\d{5,})",
+            text,
+            flags=re.I,
+        )
+        if m:
+            return m.group(1)
         return None
 
     def _generate_markup(
@@ -146,13 +152,29 @@ class Utils(InlineUnit):
             line = []
             for button in row:
                 try:
-                    btn_kwargs = {"text": str(button["text"])}
+                    # Buttons cannot render HTML — strip tags, keep unicode fallback
+                    raw_btn_text = str(button.get("text") or "•")
+                    try:
+                        from ..utils.emoji_prem import prem_btn_text
+                        safe_text = prem_btn_text(raw_btn_text)
+                    except Exception:
+                        safe_text = re.sub(
+                            r"<emoji\b[^>]*>(.*?)</emoji>|<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
+                            lambda m: m.group(1) or m.group(2) or "",
+                            raw_btn_text,
+                            flags=re.I | re.S,
+                        )
+                    btn_kwargs = {"text": safe_text or "•"}
 
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
 
                     if emoji_id := self._get_button_emoji_id(button):
-                        btn_kwargs["icon"] = int(emoji_id)
+                        # Custom emoji icon on button (Premium clients)
+                        try:
+                            btn_kwargs["icon"] = int(emoji_id)
+                        except Exception:
+                            pass
 
                     match True:
                         case _ if "url" in button:
