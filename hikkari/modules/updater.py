@@ -475,7 +475,7 @@ class UpdaterMod(loader.Module):
 
         await self._delete_all_upd_messages()
 
-        # Keep message visible — show restart status in bot PM / on the button msg
+        # Restart status ONLY in bot PM (edit the update notification) — no Saved Messages
         with contextlib.suppress(Exception):
             await call.answer("Updating…")
         caption = self.strings["restarting_caption"].format(
@@ -484,17 +484,14 @@ class UpdaterMod(loader.Module):
             and self._client.hikkari_me.premium
             else "Hikkari"
         )
-        # Prefer edit of the update notification in bot PM
-        edited = False
         with contextlib.suppress(Exception):
             await call.edit(caption)
-            edited = True
-        # Always also post to owner's Saved Messages so status is never lost
-        status_msg = None
-        with contextlib.suppress(Exception):
-            status_msg = await self._client.send_message(self.tg_id, caption)
-        # Pass a real Message to inline_update when possible
-        await self.inline_update(status_msg or call)
+        # Remember bot message so after restart we edit it there (not Избранное)
+        chat_id = getattr(call, "chat_id", None)
+        msg_id = getattr(call, "message_id", None) or getattr(call, "id", None)
+        if chat_id is not None and msg_id is not None:
+            self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
+        await self.inline_update(call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
@@ -670,15 +667,33 @@ class UpdaterMod(loader.Module):
             return None
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
+        # Prefer already stored bot: ref from update_call
+        existing = self.get("selfupdatemsg")
+        if isinstance(existing, str) and existing.startswith("bot:"):
+            return
         inline_message_id = getattr(msg_obj, "inline_message_id", None)
-        self.set(
-            "selfupdatemsg",
-            (
-                self._serialize_inline_message_id(inline_message_id)
-                if inline_message_id is not None
-                else f"{utils.get_chat_id(msg_obj)}:{msg_obj.id}"
-            ),
+        if inline_message_id is not None:
+            self.set(
+                "selfupdatemsg",
+                self._serialize_inline_message_id(inline_message_id),
+            )
+            return
+        chat_id = getattr(msg_obj, "chat_id", None)
+        if chat_id is None:
+            with contextlib.suppress(Exception):
+                chat_id = utils.get_chat_id(msg_obj)
+        msg_id = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
+        is_bot_call = type(msg_obj).__name__ in (
+            "BotInlineCall",
+            "InlineCall",
+            "BotInlineMessage",
+            "ChosenInlineCall",
         )
+        if is_bot_call and chat_id is not None and msg_id is not None:
+            self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
+            return
+        if chat_id is not None and msg_id is not None:
+            self.set("selfupdatemsg", f"{int(chat_id)}:{int(msg_id)}")
 
     async def restart_common(
         self,
@@ -706,26 +721,28 @@ class UpdaterMod(loader.Module):
             and self._client.hikkari_me.premium
             else "Hikkari"
         )
-        # 1) try edit/answer on the source message
-        new_msg = None
-        try:
-            new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
-        except Exception as e:
-            logger.warning("restart caption edit failed (%s)", e)
-        # 2) BotInlineCall / deleted msg / bot PM — force new message to owner
         is_call = type(msg_obj).__name__ in (
             "InlineCall",
             "BotInlineCall",
             "ChosenInlineCall",
+            "BotInlineMessage",
         )
-        if new_msg is None or is_call or not getattr(new_msg, "id", None):
+        if is_call:
+            # Bot PM only — edit the bot message, NEVER send to Saved Messages
             with contextlib.suppress(Exception):
-                new_msg = await self._client.send_message(self.tg_id, caption)
-        if new_msg is not None:
-            msg_obj = new_msg
-
-        with contextlib.suppress(Exception):
-            await self.process_restart_message(msg_obj)
+                await msg_obj.edit(caption)
+            with contextlib.suppress(Exception):
+                await self.process_restart_message(msg_obj)
+        else:
+            new_msg = None
+            try:
+                new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
+            except Exception as e:
+                logger.warning("restart caption edit failed (%s)", e)
+            if new_msg is not None:
+                msg_obj = new_msg
+            with contextlib.suppress(Exception):
+                await self.process_restart_message(msg_obj)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
@@ -1559,6 +1576,28 @@ class UpdaterMod(loader.Module):
         # Keep modules_count in sync so next restart does not false-fail
         with contextlib.suppress(Exception):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
+
+        # bot:{chat_id}:{message_id} — message lives in bot PM, edit via bot API
+        if isinstance(ms, str) and ms.startswith("bot:"):
+            try:
+                _, chat_s, msg_s = ms.split(":", 2)
+                chat_id, message_id = int(chat_s), int(msg_s)
+            except Exception:
+                chat_id = message_id = None
+            if chat_id is not None and message_id is not None:
+                try:
+                    await self.inline.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=self.inline.sanitise_text(msg),
+                    )
+                except Exception as e:
+                    logger.warning("bot PM full_restart edit failed (%s)", e)
+                    with contextlib.suppress(Exception):
+                        await self.inline.bot.send_message(
+                            chat_id, self.inline.sanitise_text(msg)
+                        )
+            return
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
