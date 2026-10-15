@@ -588,6 +588,60 @@ async def try_send_rich(
     return last_ok
 
 
+
+def strip_external_media_for_inline(html: str) -> str:
+    """
+    answerInlineQuery + InputRichMessageContent rejects many external media
+    (EXTERNAL_MEDIA_NOT_SUPPORTED): remote <img>, <audio>, <video>, tg-slideshow.
+    Keep structure (tables, details, text) so Rich still works via @bot.
+    """
+    if not html:
+        return html
+    text = str(html)
+    text = re.sub(
+        r"<tg-slideshow\b[^>]*>.*?</tg-slideshow>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    def _fig_repl(m: re.Match) -> str:
+        body = m.group(0)
+        low = body.lower()
+        if not any(x in low for x in ("<img", "<audio", "<video", "src=")):
+            return body
+        cap = re.search(
+            r"<figcaption\b[^>]*>(.*?)</figcaption>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if cap:
+            return f"<p>{cap.group(1)}</p>"
+        return ""
+
+    text = re.sub(
+        r"<figure\b[^>]*>.*?</figure>",
+        _fig_repl,
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<audio\b[^>]*>.*?</audio>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<video\b[^>]*>.*?</video>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(r"<img\b[^>]*>", "", text, flags=re.IGNORECASE)
+    cleaned = text.strip()
+    return cleaned if cleaned else str(html)
+
+
 async def answer_inline_rich(
     token: str,
     inline_query_id: str | int,
@@ -600,50 +654,82 @@ async def answer_inline_rich(
     thumbnail_url: str | None = None,
 ) -> bool:
     """
-    Answer an inline query with a native Rich Message.
-    When the userbot clicks the result, the message appears with via @bot.
-    Official: answerInlineQuery + InputRichMessageContent.
+    Answer an inline query with a native Rich Message (via @bot).
+    On EXTERNAL_MEDIA_NOT_SUPPORTED automatically retries without external
+    media (audio/img/slideshow) so text/tables still deliver as Rich.
     """
     if not token or not inline_query_id or not html:
         return False
-    rid = result_id or "rich_" + str(abs(hash(html)))[:12]
-    article: dict[str, Any] = {
-        "type": "article",
-        "id": rid,
-        "title": title[:64],
-        "description": (description or "")[:120],
-        "input_message_content": {
-            "rich_message": {
-                "html": html,
-                "skip_entity_detection": True,
-            }
-        },
-    }
-    if thumbnail_url and str(thumbnail_url).startswith(("http://", "https://")):
-        article["thumbnail_url"] = str(thumbnail_url)
-    if reply_markup is not None:
-        article["reply_markup"] = reply_markup
 
-    payload = {
-        "inline_query_id": str(inline_query_id),
-        "results": [article],
-        "cache_time": 0,
-        "is_personal": True,
-    }
-    url = API.format(token=token, method="answerInlineQuery")
-    try:
-        timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as resp:
-                data = await resp.json(content_type=None)
-                if not data.get("ok"):
-                    logger.warning(
-                        "answerInlineQuery(rich) failed: %s",
-                        data.get("description") or data,
-                    )
-                    return False
-                logger.info("answerInlineQuery(rich) OK id=%s", inline_query_id)
+    async def _post(html_body: str, thumb: str | None, rid_suffix: str = "") -> tuple[bool, str]:
+        rid = (result_id or "rich_" + str(abs(hash(html_body)))[:12]) + rid_suffix
+        rid = rid[:64]
+        article: dict[str, Any] = {
+            "type": "article",
+            "id": rid,
+            "title": (title or "Hikkari")[:64],
+            "description": (description or "")[:120],
+            "input_message_content": {
+                "rich_message": {
+                    "html": html_body,
+                    "skip_entity_detection": True,
+                }
+            },
+        }
+        if thumb and str(thumb).startswith(("http://", "https://")):
+            article["thumbnail_url"] = str(thumb)
+        if reply_markup is not None:
+            article["reply_markup"] = reply_markup
+        payload = {
+            "inline_query_id": str(inline_query_id),
+            "results": [article],
+            "cache_time": 0,
+            "is_personal": True,
+        }
+        url = API.format(token=token, method="answerInlineQuery")
+        try:
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
+                    data = await resp.json(content_type=None)
+                    if data.get("ok"):
+                        return True, ""
+                    desc = str(data.get("description") or data)
+                    return False, desc
+        except Exception as e:
+            return False, str(e)
+
+    # 1) full HTML (no external thumbnail — often triggers EXTERNAL_MEDIA)
+    ok, err = await _post(html, None)
+    if ok:
+        logger.info("answerInlineQuery(rich) OK id=%s", inline_query_id)
+        return True
+
+    # 2) EXTERNAL_MEDIA / media issues → strip media, retry once
+    if "EXTERNAL_MEDIA" in err.upper() or "MEDIA" in err.upper():
+        stripped = strip_external_media_for_inline(html)
+        if stripped and stripped != html:
+            ok2, err2 = await _post(stripped, None, rid_suffix="_nm")
+            if ok2:
+                logger.info(
+                    "answerInlineQuery(rich) OK without external media id=%s",
+                    inline_query_id,
+                )
                 return True
-    except Exception as e:
-        logger.warning("answerInlineQuery(rich) error: %s", e)
-        return False
+            err = err2 or err
+        # 3) last try: no reply_markup
+        if reply_markup is not None:
+            reply_markup = None
+            stripped = strip_external_media_for_inline(html)
+            ok3, err3 = await _post(stripped or html, None, rid_suffix="_nm2")
+            if ok3:
+                logger.info(
+                    "answerInlineQuery(rich) OK stripped+no kb id=%s",
+                    inline_query_id,
+                )
+                return True
+            err = err3 or err
+
+    # single warning (avoid log spam from callers retrying)
+    logger.warning("answerInlineQuery(rich) failed: %s", err)
+    return False
