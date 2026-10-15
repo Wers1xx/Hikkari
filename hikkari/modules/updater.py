@@ -478,7 +478,8 @@ class UpdaterMod(loader.Module):
         with contextlib.suppress(Exception):
             await call.delete()
 
-        await self.invoke("update", "-f", peer=self.inline.bot_username)
+        # Direct path — avoid invoke via bot (invalid message id on edit)
+        await self.inline_update(call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
@@ -684,17 +685,21 @@ class UpdaterMod(loader.Module):
             self._db.set(loader.__name__, "secure_boot", True)
 
         # Never use Rich for restart status (must be editable by user/bot cleanly)
-        msg_obj = await utils.answer(
-            msg_obj,
-            self.strings["restarting_caption"].format(
-                utils.get_platform_emoji()
-                if self._client.hikkari_me.premium
-                else "Hikkari"
-            ),
-            skip_rich=True,
+        caption = self.strings["restarting_caption"].format(
+            utils.get_platform_emoji()
+            if getattr(self._client, "hikkari_me", None)
+            and self._client.hikkari_me.premium
+            else "Hikkari"
         )
+        try:
+            msg_obj = await utils.answer(msg_obj, caption, skip_rich=True)
+        except Exception as e:
+            logger.warning("restart caption edit failed (%s), send new msg", e)
+            with contextlib.suppress(Exception):
+                msg_obj = await self._client.send_message(self.tg_id, caption)
 
-        await self.process_restart_message(msg_obj)
+        with contextlib.suppress(Exception):
+            await self.process_restart_message(msg_obj)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
@@ -863,34 +868,35 @@ class UpdaterMod(loader.Module):
                 upcoming = next(
                     repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
                 ).hexsha
-            if (
-                "-f" in args
-                or not self.inline.init_complete
-                or not await self.inline.form(
-                    message=message,
-                    text=(
-                        self.strings["update_confirm"].format(
-                            current, current[:8], upcoming, upcoming[:8]
-                        )
-                        if upcoming != current
-                        else self.strings["no_update"]
-                    ),
-                    reply_markup=[
-                        {
-                            "text": self.strings["btn_update"],
-                            "callback": self.inline_update,
-                            "style": "primary",
-                        },
-                        {
-                            "text": self.strings["cancel"],
-                            "action": "close",
-                            "style": "danger",
-                        },
-                    ],
-                )
-            ):
-                raise
+            if "-f" in args or not self.inline.init_complete:
+                await self.inline_update(message)
+                return
+            form_ok = await self.inline.form(
+                message=message,
+                text=(
+                    self.strings["update_confirm"].format(
+                        current, current[:8], upcoming, upcoming[:8]
+                    )
+                    if upcoming != current
+                    else self.strings["no_update"]
+                ),
+                reply_markup=[
+                    {
+                        "text": self.strings["btn_update"],
+                        "callback": self.inline_update,
+                        "style": "primary",
+                    },
+                    {
+                        "text": self.strings["cancel"],
+                        "action": "close",
+                        "style": "danger",
+                    },
+                ],
+            )
+            if not form_ok:
+                await self.inline_update(message)
         except Exception:
+            logger.exception("update form failed, force inline_update")
             await self.inline_update(message)
 
     @loader.command()
