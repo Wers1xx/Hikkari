@@ -69,9 +69,9 @@ class HikkariFindMod(loader.Module):
         "searching": "<emoji document_id=5348282577662778261>🔍</emoji> <b>Searching</b> <code>{q}</code>…",
         "nothing": "<emoji document_id=5240241223632954241>🚫</emoji> <b>Nothing found for</b> <code>{q}</code>",
         "header": "<emoji document_id=5283176512747507510>✨</emoji> <b>HikkariFind</b> — {n} result(s) for <code>{q}</code>:\n\n{body}",
-        "item": "<emoji document_id=5256094480498436162>📦</emoji> <b>{name}</b>\n<emoji document_id=5395730077814116850>📝</emoji> {desc}\n<emoji document_id=5271604874419647061>🔗</emoji> <code>{url}</code>\n",
-        "install_btn": "<emoji document_id=5406745015365943482>⬇️</emoji> {name}",
-        "close_btn": "<emoji document_id=5406745015365943482>⬇️</emoji> Close",
+        "item": "<emoji document_id=5256058608931580017>📦</emoji> <b>{name}</b>\n<emoji document_id=5956561916573782596>📄</emoji> {desc}\n<emoji document_id=5253577054137362120>🔗</emoji> <code>{url}</code>\n",
+        "install_btn": "⬇️ {name}",
+        "close_btn": "🔻 Close",
         "installing": "<emoji document_id=5386367538735104399>⌛</emoji> Installing <code>{name}</code>…",
         "installed": "<emoji document_id=5256182535917940722>⤵️</emoji> Installed <code>{name}</code>",
         "failed": "<emoji document_id=5240241223632954241>🚫</emoji> Failed to install <code>{name}</code>\n<code>{err}</code>",
@@ -84,9 +84,9 @@ class HikkariFindMod(loader.Module):
         "searching": "<emoji document_id=5348282577662778261>🔍</emoji> <b>Ищу</b> <code>{q}</code>…",
         "nothing": "<emoji document_id=5240241223632954241>🚫</emoji> <b>Ничего не найдено по</b> <code>{q}</code>",
         "header": "<emoji document_id=5283176512747507510>✨</emoji> <b>HikkariFind</b> — {n} результат(ов) по <code>{q}</code>:\n\n{body}",
-        "item": "<emoji document_id=5256094480498436162>📦</emoji> <b>{name}</b>\n<emoji document_id=5395730077814116850>📝</emoji> {desc}\n<emoji document_id=5271604874419647061>🔗</emoji> <code>{url}</code>\n",
-        "install_btn": "<emoji document_id=5406745015365943482>⬇️</emoji> {name}",
-        "close_btn": "<emoji document_id=5406745015365943482>⬇️</emoji> Закрыть",
+        "item": "<emoji document_id=5256058608931580017>📦</emoji> <b>{name}</b>\n<emoji document_id=5956561916573782596>📄</emoji> {desc}\n<emoji document_id=5253577054137362120>🔗</emoji> <code>{url}</code>\n",
+        "install_btn": "⬇️ {name}",
+        "close_btn": "🔻 Закрыть",
         "installing": "<emoji document_id=5386367538735104399>⌛</emoji> Устанавливаю <code>{name}</code>…",
         "installed": "<emoji document_id=5256182535917940722>⤵️</emoji> Установлен <code>{name}</code>",
         "failed": "<emoji document_id=5240241223632954241>🚫</emoji> Не удалось установить <code>{name}</code>\n<code>{err}</code>",
@@ -314,6 +314,7 @@ class HikkariFindMod(loader.Module):
             [
                 {
                     "text": self.strings["install_btn"].format(name=e["name"][:18]),
+                    "emoji_id": 5406745015365943482,  # ⬇️ premium icon on button
                     "callback": self._install,
                     "args": (
                         e.get("urls") or [e["url"]],
@@ -323,7 +324,15 @@ class HikkariFindMod(loader.Module):
             ]
             for e in matched[:8]
         ]
-        rows.append([{"text": self.strings["close_btn"], "action": "close"}])
+        rows.append(
+            [
+                {
+                    "text": self.strings["close_btn"],
+                    "emoji_id": 5406745015365943482,
+                    "action": "close",
+                }
+            ]
+        )
 
         await self.inline.form(text, message=status, reply_markup=rows, silent=True)
 
