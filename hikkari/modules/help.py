@@ -465,6 +465,15 @@ class Help(loader.Module):
                 )
                 if m:
                     return
+                # Fallback: Bot API sendRichMessage (works even with 1–2 commands)
+                with contextlib.suppress(Exception):
+                    from ..utils.rich_api import try_send_rich
+                    chat = utils.get_chat_id(message)
+                    if chat and await try_send_rich(self._client, chat, html):
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
+                                await message.delete()
+                        return
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
