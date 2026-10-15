@@ -1,3 +1,4 @@
+import re
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -652,16 +653,27 @@ class Form(InlineUnit):
             try:
                 from ..utils.rich_api import answer_inline_rich, _find_bot_token
                 token = _find_bot_token(self._client) or getattr(self, "_token", None)
-                qid = (
-                    getattr(inline_query, "query_id", None)
-                    or getattr(inline_query, "id", None)
-                    or getattr(getattr(inline_query, "query", None), "query_id", None)
-                )
-                if not token or qid is None:
-                    logger.warning("rich inline: missing token or query_id token=%s qid=%s", bool(token), qid)
-                    return
+                # Deep extract query_id (hikkaritl / telethon / wrappers)
+                qid = None
+                for obj in (
+                    inline_query,
+                    getattr(inline_query, "inline_query", None),
+                    getattr(inline_query, "query", None),
+                    getattr(getattr(inline_query, "inline_query", None), "query", None),
+                ):
+                    if obj is None:
+                        continue
+                    for attr in ("query_id", "id"):
+                        v = getattr(obj, attr, None)
+                        if v is not None and str(v).strip() != "":
+                            qid = v
+                            break
+                    if qid is not None:
+                        break
                 html = form.get("rich_html") or form.get("text") or ""
-                # Bot API inline keyboard for article (optional)
+                # Soft length guard — oversized HTML breaks answerInlineQuery
+                if len(html) > 28000:
+                    html = html[:27900] + "\n<p>…</p>"
                 rm = None
                 buttons = form.get("buttons") or []
                 if buttons:
@@ -685,25 +697,73 @@ class Form(InlineUnit):
                             rm = None
                     except Exception:
                         rm = None
-                ok = await answer_inline_rich(
-                    str(token),
-                    qid,
-                    html,
-                    title=form.get("title") or "Hikkari",
-                    description=form.get("description") or "Rich",
-                    result_id=form.get("uid") or utils.rand(16),
-                    reply_markup=rm,
-                    thumbnail_url=form.get("thumbnail_url"),
-                )
-                if not ok and form.get("uid") in self._error_events:
-                    self._error_events[form["uid"]].set()
-                    self._error_events[form["uid"]] = Exception("answerInlineQuery rich failed")
+                ok = False
+                if token and qid is not None:
+                    for attempt in range(3):
+                        ok = await answer_inline_rich(
+                            str(token),
+                            qid,
+                            html,
+                            title=form.get("title") or "Hikkari",
+                            description=form.get("description") or "Rich",
+                            result_id=(form.get("uid") or utils.rand(16))[:64],
+                            reply_markup=rm if attempt == 0 else None,  # retry without kb
+                            thumbnail_url=form.get("thumbnail_url") if attempt == 0 else None,
+                        )
+                        if ok:
+                            break
+                        await asyncio.sleep(0.2 * (attempt + 1))
+                else:
+                    logger.warning(
+                        "rich inline: missing token or query_id token=%s qid=%s",
+                        bool(token),
+                        qid,
+                    )
+                # NEVER leave query unanswered — empty results = classic text fallback
+                if not ok:
+                    try:
+                        plain = re.sub(r"<[^>]+>", " ", html)
+                        plain = re.sub(r"\s+", " ", plain).strip()[:900] or "Hikkari"
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title=form.get("title") or "Hikkari",
+                                    description=form.get("description") or "Rich",
+                                    text=form.get("rich_html") or form.get("text") or plain,
+                                    parse_mode="HTML",
+                                    id=(form.get("uid") or utils.rand(16))[:64],
+                                    thumb=form.get("thumbnail_url"),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                        ok = True
+                    except Exception as fe:
+                        logger.warning("rich telethon fallback answer failed: %s", fe)
+                        if form.get("uid") in self._error_events:
+                            self._error_events[form["uid"]] = Exception(
+                                f"answerInlineQuery rich failed: {fe}"
+                            )
+                            self._error_events[form["uid"]].set()
                 return
             except Exception as e:
                 logger.exception("rich inline handler error")
                 if form.get("uid") in self._error_events:
-                    self._error_events[form["uid"]].set()
                     self._error_events[form["uid"]] = e
+                    with contextlib.suppress(Exception):
+                        self._error_events[form["uid"]].set()
+                # last chance: empty answer avoidance
+                with contextlib.suppress(Exception):
+                    await inline_query.answer(
+                        [
+                            await inline_query.builder.article(
+                                title="Hikkari",
+                                text="✨",
+                                id=utils.rand(16),
+                            )
+                        ],
+                        cache_time=0,
+                    )
                 return
 
         form_text = form.get("text") or "✨"
