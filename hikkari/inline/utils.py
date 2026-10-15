@@ -76,7 +76,7 @@ class Utils(InlineUnit):
             return str(emoji_id).strip()
         text = str(button.get("text") or "")
         m = re.search(
-            r"(?:document_id|emoji-id|emoji_id)\s*=\s*["']?(\d{5,})",
+            r'(?:document_id|emoji-id|emoji_id)\s*=\s*["\']?(\d{5,})',
             text,
             flags=re.I,
         )
