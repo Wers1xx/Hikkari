@@ -283,11 +283,22 @@ class HikkariInfoMod(loader.Module):
             "git_status": (
                 utils.get_git_status() if hasattr(utils, "get_git_status") else ""
             ),
+            "time": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
+            "date": __import__("datetime").datetime.now().strftime("%d.%m.%Y"),
+            "fortune": "",
         }
         try:
             data = await utils.get_placeholders(
                 data, self.config.get("custom_message") or ""
             )
+        except Exception:
+            pass
+        # Ensure every {token} in custom_message has a key (empty if unknown)
+        try:
+            import re as _re
+            custom = str(self.config.get("custom_message") or "")
+            for tok in _re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", custom):
+                data.setdefault(tok, "")
         except Exception:
             pass
         return data
