@@ -475,7 +475,7 @@ class UpdaterMod(loader.Module):
 
         await self._delete_all_upd_messages()
 
-        # Classic flow: only bot PM. Userbot restarts; status stays on THIS bot message.
+        # Status from OWNER account (userbot), NOT from inline bot
         with contextlib.suppress(Exception):
             await call.answer()
         caption = self.strings["restarting_caption"].format(
@@ -484,28 +484,35 @@ class UpdaterMod(loader.Module):
             and self._client.hikkari_me.premium
             else "Hikkari"
         )
+        # Remove bot's update card — status will be owner's message
         with contextlib.suppress(Exception):
-            await call.edit(caption)
+            await call.delete()
 
-        chat_id = getattr(call, "chat_id", None)
-        msg_id = getattr(call, "message_id", None) or getattr(call, "id", None)
-        if chat_id is None:
+        status_msg = None
+        # Prefer same dialog (chat with inline bot) as owner message
+        peer = None
+        with contextlib.suppress(Exception):
+            peer = getattr(self.inline, "bot_id", None)
+        if peer is None:
             with contextlib.suppress(Exception):
-                chat_id = getattr(getattr(call, "message", None), "chat_id", None)
-        if msg_id is None:
-            with contextlib.suppress(Exception):
-                msg_id = getattr(getattr(call, "message", None), "message_id", None)
-        if chat_id is not None and msg_id is not None:
-            self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
-        else:
-            logger.warning(
-                "update_call: no chat/msg id on call type=%s attrs=%s",
-                type(call).__name__,
-                [a for a in ("chat_id", "message_id", "id") if hasattr(call, a)],
+                uname = getattr(self.inline, "bot_username", None)
+                if uname:
+                    peer = uname if str(uname).startswith("@") else f"@{uname}"
+        if peer is None:
+            peer = self.tg_id  # fallback: Saved Messages
+
+        with contextlib.suppress(Exception):
+            status_msg = await self._client.send_message(peer, caption)
+        if status_msg is not None:
+            self.set(
+                "selfupdatemsg",
+                f"{utils.get_chat_id(status_msg)}:{status_msg.id}",
             )
+        else:
+            logger.warning("update_call: failed to send owner restart status")
 
-        # Run update+restart; restart_common must NOT create Saved Messages
-        await self.inline_update(call)
+        # Restart as userbot; restart_common must not re-send status
+        await self.inline_update(status_msg or call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
@@ -743,13 +750,22 @@ class UpdaterMod(loader.Module):
             "BotInlineMessage",
         )
         if isinstance(existing, str) and existing.startswith("bot:"):
-            # Already showing restart in bot PM — do not touch Saved Messages
+            # Legacy bot-ref — convert path no longer used for new updates
+            pass
+        elif isinstance(existing, str) and ":" in existing and not existing.startswith("{"):
+            # Owner status message already posted (update button) — keep it
             pass
         elif is_call:
-            with contextlib.suppress(Exception):
-                await msg_obj.edit(caption)
-            with contextlib.suppress(Exception):
-                await self.process_restart_message(msg_obj)
+            # Should not post as bot; send owner status if missing
+            if not existing:
+                peer = getattr(self.inline, "bot_id", None) or self.tg_id
+                with contextlib.suppress(Exception):
+                    status_msg = await self._client.send_message(peer, caption)
+                    if status_msg is not None:
+                        self.set(
+                            "selfupdatemsg",
+                            f"{utils.get_chat_id(status_msg)}:{status_msg.id}",
+                        )
         else:
             # User invoked .restart / .update from a chat — edit THAT message only
             new_msg = None
