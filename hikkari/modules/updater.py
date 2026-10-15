@@ -708,13 +708,22 @@ class UpdaterMod(loader.Module):
         handler = logging.getLogger().handlers[0]
         handler.setLevel(logging.CRITICAL)
 
+        # Resolve user client: BotInlineCall / InlineCall have no .client
+        main_client = self._client
+        with contextlib.suppress(Exception):
+            if hasattr(message, "client") and message.client is not None:
+                main_client = message.client
+            elif hasattr(msg_obj, "client") and getattr(msg_obj, "client", None):
+                main_client = msg_obj.client
+
         for client in self.allclients:
             # Terminate main loop of all running clients
-            # Won't work if not all clients are ready
-            if client is not message.client:
-                await client.disconnect()
+            if client is not main_client:
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
 
-        await message.client.disconnect()
+        with contextlib.suppress(Exception):
+            await main_client.disconnect()
         restart()
 
     async def download_common(self):
