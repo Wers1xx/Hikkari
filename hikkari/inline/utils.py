@@ -170,8 +170,11 @@ class Utils(InlineUnit):
                         btn_kwargs["style"] = style
 
                     if emoji_id := self._get_button_emoji_id(button):
-                        # Bot API: icon_custom_emoji_id (string). hikkaritl Button.icon accepts str/int.
-                        btn_kwargs["icon"] = str(emoji_id).strip()
+                        # MTProto KeyboardButtonStyle.icon is int64 document_id (not string)
+                        try:
+                            btn_kwargs["icon"] = int(str(emoji_id).strip())
+                        except (TypeError, ValueError):
+                            pass
 
                     match True:
                         case _ if "url" in button:
