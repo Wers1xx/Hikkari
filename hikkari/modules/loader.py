@@ -463,12 +463,12 @@ class LoaderMod(loader.Module):
             description = desc[:80] if desc else "Module loaded"
             thumb = meta_banner if meta_banner else None
 
-            # 1) via @inline bot (preferred)
+            # 1) via @inline bot (preferred) — critical for private chats
             m = None
             if getattr(self.inline, "init_complete", False) or getattr(
                 self.inline, "bot_username", None
             ):
-                for attempt in range(2):
+                for attempt in range(3):
                     try:
                         m = await self.inline.rich(
                             message,
@@ -476,8 +476,8 @@ class LoaderMod(loader.Module):
                             title=title,
                             description=description,
                             silent=True,
-                            reply_markup=subscribe_markup,
-                            thumbnail_url=thumb,
+                            reply_markup=subscribe_markup if attempt == 0 else None,
+                            thumbnail_url=thumb if attempt < 2 else None,
                         )
                         if m:
                             return True
@@ -485,9 +485,37 @@ class LoaderMod(loader.Module):
                         logger.debug(
                             "loader rich via attempt %s failed", attempt, exc_info=True
                         )
-                    await asyncio.sleep(0.35 * (attempt + 1))
+                    await asyncio.sleep(0.3 * (attempt + 1))
+                # Simplified HTML retry (drop details table bulk)
+                try:
+                    simple = f"<h2>{html_mod.escape(name)}</h2>"
+                    if desc:
+                        simple += f"<p><i>{html_mod.escape(desc)}</i></p>"
+                    if clean_rows:
+                        simple += (
+                            f"<p><b>Commands:</b> {len(clean_rows)}</p><ul>"
+                            + "".join(
+                                f"<li><code>{c}</code> — {d}</li>"
+                                for c, d in clean_rows[:15]
+                            )
+                            + "</ul>"
+                        )
+                    if meta_banner and str(meta_banner).startswith(("http://", "https://")):
+                        simple = inject_banner_html(simple, meta_banner, force=True)
+                    m = await self.inline.rich(
+                        message,
+                        simple,
+                        title=title,
+                        description=description,
+                        silent=True,
+                        thumbnail_url=thumb,
+                    )
+                    if m:
+                        return True
+                except Exception:
+                    logger.debug("loader simplified rich failed", exc_info=True)
 
-            # 2) Bot API sendRichMessage fallback (no via, but still Rich)
+            # 2) Bot API sendRichMessage (works in groups / bot-started PMs)
             try:
                 chat = utils.get_chat_id(message)
                 ok = await try_send_rich(self._client, chat, html)
