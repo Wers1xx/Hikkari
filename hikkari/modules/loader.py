@@ -1268,18 +1268,32 @@ class LoaderMod(loader.Module):
         blob_link: bool,
     ):
         await call.edit(self.strings["safety_installing"])
+        # Announce in the SAME chat where install started (not bot PM)
+        original = None
+        try:
+            uid = getattr(call, "unit_id", None)
+            if not uid and isinstance(getattr(call, "form", None), dict):
+                uid = call.form.get("id") or call.form.get("uid")
+            unit = (getattr(self.inline, "_units", None) or {}).get(uid or "")
+            if isinstance(unit, dict):
+                original = unit.get("message")
+        except Exception:
+            original = None
+        target = original if original is not None else call
         ok = await self.load_module(
             doc,
-            call,
+            target,
             name=name,
             origin=origin or "<string>",
             save_fs=save_fs,
             blob_link=blob_link,
             _safety_confirmed=True,
         )
-        # load_module already shows full "loaded" text with commands —
-        # only show short fail text; never replace success with safety_ok
-        if not ok:
+        if ok:
+            # drop hanging "installing…" form; success already in chat via target
+            with contextlib.suppress(Exception):
+                await call.delete()
+        else:
             with contextlib.suppress(Exception):
                 await call.edit(self.strings["load_failed"])
 
