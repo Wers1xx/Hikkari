@@ -699,20 +699,17 @@ class Form(InlineUnit):
                         rm = None
                 ok = False
                 if token and qid is not None:
-                    for attempt in range(3):
-                        ok = await answer_inline_rich(
-                            str(token),
-                            qid,
-                            html,
-                            title=form.get("title") or "Hikkari",
-                            description=form.get("description") or "Rich",
-                            result_id=(form.get("uid") or utils.rand(16))[:64],
-                            reply_markup=rm if attempt == 0 else None,  # retry without kb
-                            thumbnail_url=form.get("thumbnail_url") if attempt == 0 else None,
-                        )
-                        if ok:
-                            break
-                        await asyncio.sleep(0.2 * (attempt + 1))
+                    # answer_inline_rich already retries without external media once
+                    ok = await answer_inline_rich(
+                        str(token),
+                        qid,
+                        html,
+                        title=form.get("title") or "Hikkari",
+                        description=form.get("description") or "Rich",
+                        result_id=(form.get("uid") or utils.rand(16))[:64],
+                        reply_markup=rm,
+                        thumbnail_url=None,  # external thumb → EXTERNAL_MEDIA
+                    )
                 else:
                     logger.warning(
                         "rich inline: missing token or query_id token=%s qid=%s",
