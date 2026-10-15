@@ -85,67 +85,7 @@ class Utils(InlineUnit):
         return None
 
 
-    # Purpose → (document_id, unicode fallback) for buttons without explicit emoji_id
-    _BTN_PURPOSE_ICONS = (
-        (("close", "закрыть", "cancel", "отмен", "удал", "delete", "remove", "🗑", "❌", "✖"), 5237898864433837164, "👎"),
-        (("back", "назад", "prev", "previous", "◀️", "◀", "⬅️"), 5255999157994297240, "◀️"),
-        (("next", "далее", "forward", "вперёд", "вперед", "▶️", "▶", "➡️"), 5256039517801975973, "▶️"),
-        (("install", "скач", "download", "load", "установ", "dlmod", "⬇️", "⬇", "🔻"), 5406745015365943482, "⬇️"),
-        (("ok", "yes", "да", "confirm", "подтверд", "save", "сохран", "✅", "✔"), 5256182535917940722, "⤵️"),
-        (("warn", "⚠", "warning", "риск"), 5447644880824181073, "⚠️"),
-        (("settings", "config", "настрой", "конфиг", "⚙️"), 5341715473882955310, "⚙️"),
-        (("help", "помощ", "info", "инфо", "❓", "ℹ"), 5436113877181941026, "❓"),
-        (("search", "find", "поиск", "🔍"), 5348282577662778261, "🔍"),
-        (("link", "url", "ссыл", "🔗"), 5253577054137362120, "🔗"),
-        (("module", "mod", "📦"), 5256058608931580017, "📦"),
-        (("restart", "update", "обнов", "рестарт", "🔄"), 5258200195589504369, "🔄"),
-        (("stop", "kill", "стоп", "🚫"), 5240241223632954241, "🚫"),
-    )
-    _BTN_DEFAULT_ICON = (5283176512747507510, "✨")  # Hikkari sparkles
-
-    def _resolve_button_icon(self, button: dict, safe_text: str) -> tuple[int, str]:
-        """Always return (document_id, unicode_fallback) for a button."""
-        emoji_id = self._get_button_emoji_id(button)
-        if emoji_id:
-            try:
-                did = int(str(emoji_id).strip())
-                # fallback char from text or default
-                fb = "✨"
-                try:
-                    from ..utils.emoji_prem import PREMIUM_MAP
-                    for ch, (mid, mfb) in PREMIUM_MAP.items():
-                        if mid == did:
-                            fb = mfb
-                            break
-                except Exception:
-                    pass
-                # if text already starts with an emoji, keep that as fb
-                if safe_text:
-                    for ch in safe_text:
-                        if ord(ch) > 0x2000:
-                            fb = ch
-                            break
-                return did, fb
-            except (TypeError, ValueError):
-                pass
-
-        # Map unicode in text via PREMIUM_MAP
-        try:
-            from ..utils.emoji_prem import PREMIUM_MAP
-            for ch, (did, fb) in sorted(PREMIUM_MAP.items(), key=lambda x: -len(x[0])):
-                if ch and ch in (safe_text or ""):
-                    return int(did), fb
-        except Exception:
-            pass
-
-        low = (safe_text or "").lower()
-        for keys, did, fb in self._BTN_PURPOSE_ICONS:
-            if any(k in low for k in keys):
-                return int(did), fb
-
-        return int(self._BTN_DEFAULT_ICON[0]), self._BTN_DEFAULT_ICON[1]
-
-
+    def 
     def _generate_markup(
         self: "InlineManager",
         markup_obj: HikkariReplyMarkup | str | None,
@@ -226,16 +166,17 @@ class Utils(InlineUnit):
                             raw_btn_text,
                             flags=re.I | re.S,
                         )
-                    # Every button gets a premium icon (document_id) + unicode fallback in text
-                    icon_i, fb = self._resolve_button_icon(button, safe_text or "")
-                    label = safe_text or "•"
-                    # Ensure fallback char is present in text (clients that ignore icon still show emoji)
-                    if fb and fb not in label[:4]:
-                        label = f"{fb} {label}".strip()
-                    btn_kwargs = {"text": label, "icon": int(icon_i)}
+                    btn_kwargs = {"text": safe_text or "•"}
 
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
+
+                    # Optional: only if module explicitly set emoji_id / icon (int64)
+                    if emoji_id := self._get_button_emoji_id(button):
+                        try:
+                            btn_kwargs["icon"] = int(str(emoji_id).strip())
+                        except (TypeError, ValueError):
+                            pass
 
                     match True:
                         case _ if "url" in button:
