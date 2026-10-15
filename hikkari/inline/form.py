@@ -722,6 +722,8 @@ class Form(InlineUnit):
                 # NEVER leave query unanswered — empty results = classic text fallback
                 if not ok:
                     try:
+                        # Plain article ONLY — unsupported Rich tags with parse_mode=HTML
+                        # make Telegram return zero results (classic path then kicks in)
                         plain = re.sub(r"<[^>]+>", " ", html)
                         plain = re.sub(r"\s+", " ", plain).strip()[:900] or "Hikkari"
                         await inline_query.answer(
@@ -729,10 +731,9 @@ class Form(InlineUnit):
                                 await inline_query.builder.article(
                                     title=form.get("title") or "Hikkari",
                                     description=form.get("description") or "Rich",
-                                    text=form.get("rich_html") or form.get("text") or plain,
-                                    parse_mode="HTML",
+                                    text=plain,
+                                    parse_mode=None,
                                     id=(form.get("uid") or utils.rand(16))[:64],
-                                    thumb=form.get("thumbnail_url"),
                                 )
                             ],
                             cache_time=0,
