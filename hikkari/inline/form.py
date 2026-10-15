@@ -741,17 +741,20 @@ class Form(InlineUnit):
                     except Exception as fe:
                         logger.warning("rich telethon fallback answer failed: %s", fe)
                         if form.get("uid") in self._error_events:
+                            ev = self._error_events[form["uid"]]
+                            with contextlib.suppress(Exception):
+                                ev.set()
                             self._error_events[form["uid"]] = Exception(
                                 f"answerInlineQuery rich failed: {fe}"
                             )
-                            self._error_events[form["uid"]].set()
                 return
             except Exception as e:
                 logger.exception("rich inline handler error")
                 if form.get("uid") in self._error_events:
-                    self._error_events[form["uid"]] = e
+                    ev = self._error_events[form["uid"]]
                     with contextlib.suppress(Exception):
-                        self._error_events[form["uid"]].set()
+                        ev.set()
+                    self._error_events[form["uid"]] = e
                 # last chance: empty answer avoidance
                 with contextlib.suppress(Exception):
                     await inline_query.answer(
