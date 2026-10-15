@@ -1522,8 +1522,50 @@ class UpdaterMod(loader.Module):
                 )
 
 
-    async def _edit_restart_status(self, ms, msg: str) -> bool:
-        """Edit restart status message. bot:chat:id → bot API only (no Saved Messages)."""
+    async def _schedule_delete_status(
+        self,
+        *,
+        chat_id: int | None = None,
+        message_id: int | None = None,
+        ms: str | None = None,
+        delay: int = 60,
+        via_bot: bool = False,
+    ):
+        """Delete restart status message after delay (default 60s)."""
+
+        async def _later():
+            await asyncio.sleep(max(5, int(delay)))
+            try:
+                if via_bot and chat_id is not None and message_id is not None:
+                    with contextlib.suppress(Exception):
+                        await self.inline.bot.delete_message(chat_id, message_id)
+                    return
+                if chat_id is not None and message_id is not None:
+                    with contextlib.suppress(Exception):
+                        await self._client.delete_messages(chat_id, message_id)
+                    return
+                if ms and not str(ms).startswith("bot:"):
+                    with contextlib.suppress(Exception):
+                        await self.inline.bot.delete_message(
+                            inline_message_id=self._deserialize_inline_message_id(str(ms))
+                        )
+            except Exception:
+                logger.debug("status auto-delete failed", exc_info=True)
+
+        with contextlib.suppress(Exception):
+            asyncio.ensure_future(_later())
+
+    async def _edit_restart_status(
+        self,
+        ms,
+        msg: str,
+        *,
+        delete_after: int | None = None,
+    ) -> bool:
+        """Edit restart status message. bot:chat:id → bot API only (no Saved Messages).
+
+        If delete_after is set (seconds), schedule deletion of that status message.
+        """
         if not ms:
             return False
         text = self.inline.sanitise_text(msg) if getattr(self, "inline", None) else msg
@@ -1534,23 +1576,49 @@ class UpdaterMod(loader.Module):
                 chat_id, message_id = int(chat_s), int(msg_s)
             except Exception:
                 return False
+            ok = False
             try:
                 await self.inline.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=text,
                 )
-                return True
+                ok = True
             except Exception as e:
                 logger.warning("bot PM status edit failed (%s)", e)
                 with contextlib.suppress(Exception):
-                    await self.inline.bot.send_message(chat_id, text)
-                return True
+                    sent = await self.inline.bot.send_message(chat_id, text)
+                    # if we had to send new, delete that one later
+                    if delete_after and sent is not None:
+                        mid = getattr(sent, "id", None) or getattr(sent, "message_id", None)
+                        if mid is not None:
+                            await self._schedule_delete_status(
+                                chat_id=chat_id,
+                                message_id=int(mid),
+                                delay=delete_after,
+                                via_bot=True,
+                            )
+                    return True
+            if ok and delete_after:
+                await self._schedule_delete_status(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    delay=delete_after,
+                    via_bot=True,
+                )
+            return ok
         # legacy chat:message from userbot-owned message (e.g. .restart command)
         if legacy := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy
             try:
                 await self._client.edit_message(chat_id, message_id, msg)
+                if delete_after:
+                    await self._schedule_delete_status(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        delay=delete_after,
+                        via_bot=False,
+                    )
                 return True
             except Exception as e:
                 logger.warning("legacy status edit failed (%s)", e)
@@ -1561,6 +1629,8 @@ class UpdaterMod(loader.Module):
                 inline_message_id=self._deserialize_inline_message_id(str(ms)),
                 text=text,
             )
+            if delete_after:
+                await self._schedule_delete_status(ms=str(ms), delay=delete_after)
             return True
         except Exception:
             logger.debug("inline_message_id status edit failed", exc_info=True)
@@ -1621,8 +1691,8 @@ class UpdaterMod(loader.Module):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
         # ONLY edit the original restart message (bot PM or user .restart msg).
-        # Never spam Saved Messages.
-        await self._edit_restart_status(ms, msg)
+        # Never spam Saved Messages. Auto-delete after 60s (as before).
+        await self._edit_restart_status(ms, msg, delete_after=60)
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
