@@ -406,27 +406,21 @@ class LoaderMod(loader.Module):
                 )
 
             def _build_html(*, simple: bool = False, minimal: bool = False) -> str:
+                # ONLY tags Telegram Rich accepts: h2/p/table/details/blockquote/code/a/b/i
+                # NEVER <ul>/<li> — answerInlineQuery rejects them → empty results → classic text
                 parts = [f"<h2>{html_mod.escape(name)}</h2>"]
                 if desc:
                     parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
                 if clean_rows:
-                    if minimal or len(clean_rows) <= 2:
-                        # 1–2 commands: list, no <details>/<table> (TG sometimes drops them)
-                        parts.append("<p><b>Commands</b></p><ul>")
-                        for c, d in clean_rows:
-                            parts.append(f"<li><code>{c}</code> — {d}</li>")
-                        parts.append("</ul>")
+                    table = html_table(clean_rows, header=("Command", "Description"))
+                    if minimal:
+                        # still a real table (1 row is fine) — same path as multi-cmd modules
+                        parts.append(table)
                     elif simple:
                         parts.append(
-                            f"<p><b>Commands ({len(clean_rows)})</b></p><ul>"
+                            f"<p><b>Commands ({len(clean_rows)})</b></p>\n{table}"
                         )
-                        for c, d in clean_rows[:20]:
-                            parts.append(f"<li><code>{c}</code> — {d}</li>")
-                        parts.append("</ul>")
                     else:
-                        table = html_table(
-                            clean_rows, header=("Command", "Description")
-                        )
                         parts.append(
                             "<details>"
                             f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
