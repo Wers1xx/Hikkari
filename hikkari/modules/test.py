@@ -408,8 +408,20 @@ class TestMod(loader.Module):
             "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) cores",
             "htl_ver": getattr(hikkaritl, "__version__", "?"),
             "git_status": utils.get_git_status() if hasattr(utils, "get_git_status") else "",
+            "me_plain": utils.escape_html(getattr(self._client.hikkari_me, "first_name", "") or ""),
+            "build_plain": re.sub(r"<[^>]+>", "", str(build))[:48] if build else "—",
+            "time": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
+            "date": __import__("datetime").datetime.now().strftime("%d.%m.%Y"),
+            "fortune": "",
+            "upd": "",
         }
         data = await utils.get_placeholders(data, self.config["custom_message"])
+        try:
+            custom = str(self.config.get("custom_message") or "")
+            for tok in re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", custom):
+                data.setdefault(tok, "")
+        except Exception:
+            pass
         try:
             placeholders_msg = apply_placeholders(self.config["custom_message"], data)
         except KeyError:
