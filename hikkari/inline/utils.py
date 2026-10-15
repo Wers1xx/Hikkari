@@ -164,17 +164,28 @@ class Utils(InlineUnit):
                             raw_btn_text,
                             flags=re.I | re.S,
                         )
+                    emoji_id = self._get_button_emoji_id(button)
+                    icon_i = None
+                    if emoji_id:
+                        try:
+                            icon_i = int(str(emoji_id).strip())
+                        except (TypeError, ValueError):
+                            icon_i = None
+                    # If custom icon is set, strip leading unicode emoji from label
+                    # so client shows premium icon instead of plain ⬇️
+                    if icon_i is not None and safe_text:
+                        safe_text = re.sub(
+                            r"^(?:\s|[⬇️⬇🔻✅❌⚠⚠️🚫✨🔄⏳⌛⏱▶️◀️📦🔍📝🔗📁]|<.*?>)+",
+                            "",
+                            safe_text,
+                        ).strip() or safe_text
                     btn_kwargs = {"text": safe_text or "•"}
 
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
 
-                    if emoji_id := self._get_button_emoji_id(button):
-                        # MTProto KeyboardButtonStyle.icon is int64 document_id (not string)
-                        try:
-                            btn_kwargs["icon"] = int(str(emoji_id).strip())
-                        except (TypeError, ValueError):
-                            pass
+                    if icon_i is not None:
+                        btn_kwargs["icon"] = icon_i
 
                     match True:
                         case _ if "url" in button:
