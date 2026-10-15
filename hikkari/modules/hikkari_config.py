@@ -2312,6 +2312,8 @@ class HikkariConfigMod(loader.Module):
             bio,
             caption=f"<emoji document_id=5283176512747507510>✨</emoji> cfg · <b>{utils.escape_html(data['module'])}</b>",
         )
+        with contextlib.suppress(Exception):
+            await message.delete()
 
     @loader.command()
     async def loadcfg(self, message: Message):
