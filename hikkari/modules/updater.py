@@ -475,9 +475,9 @@ class UpdaterMod(loader.Module):
 
         await self._delete_all_upd_messages()
 
-        # Restart status ONLY in bot PM (edit the update notification) — no Saved Messages
+        # Classic flow: only bot PM. Userbot restarts; status stays on THIS bot message.
         with contextlib.suppress(Exception):
-            await call.answer("Updating…")
+            await call.answer()
         caption = self.strings["restarting_caption"].format(
             utils.get_platform_emoji()
             if getattr(self._client, "hikkari_me", None)
@@ -486,11 +486,25 @@ class UpdaterMod(loader.Module):
         )
         with contextlib.suppress(Exception):
             await call.edit(caption)
-        # Remember bot message so after restart we edit it there (not Избранное)
+
         chat_id = getattr(call, "chat_id", None)
         msg_id = getattr(call, "message_id", None) or getattr(call, "id", None)
+        if chat_id is None:
+            with contextlib.suppress(Exception):
+                chat_id = getattr(getattr(call, "message", None), "chat_id", None)
+        if msg_id is None:
+            with contextlib.suppress(Exception):
+                msg_id = getattr(getattr(call, "message", None), "message_id", None)
         if chat_id is not None and msg_id is not None:
             self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
+        else:
+            logger.warning(
+                "update_call: no chat/msg id on call type=%s attrs=%s",
+                type(call).__name__,
+                [a for a in ("chat_id", "message_id", "id") if hasattr(call, a)],
+            )
+
+        # Run update+restart; restart_common must NOT create Saved Messages
         await self.inline_update(call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
@@ -721,19 +735,23 @@ class UpdaterMod(loader.Module):
             and self._client.hikkari_me.premium
             else "Hikkari"
         )
+        existing = self.get("selfupdatemsg")
         is_call = type(msg_obj).__name__ in (
             "InlineCall",
             "BotInlineCall",
             "ChosenInlineCall",
             "BotInlineMessage",
         )
-        if is_call:
-            # Bot PM only — edit the bot message, NEVER send to Saved Messages
+        if isinstance(existing, str) and existing.startswith("bot:"):
+            # Already showing restart in bot PM — do not touch Saved Messages
+            pass
+        elif is_call:
             with contextlib.suppress(Exception):
                 await msg_obj.edit(caption)
             with contextlib.suppress(Exception):
                 await self.process_restart_message(msg_obj)
         else:
+            # User invoked .restart / .update from a chat — edit THAT message only
             new_msg = None
             try:
                 new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
@@ -1503,6 +1521,51 @@ class UpdaterMod(loader.Module):
                     exc_info=True,
                 )
 
+
+    async def _edit_restart_status(self, ms, msg: str) -> bool:
+        """Edit restart status message. bot:chat:id → bot API only (no Saved Messages)."""
+        if not ms:
+            return False
+        text = self.inline.sanitise_text(msg) if getattr(self, "inline", None) else msg
+        # bot PM message owned by inline bot
+        if isinstance(ms, str) and ms.startswith("bot:"):
+            try:
+                _, chat_s, msg_s = ms.split(":", 2)
+                chat_id, message_id = int(chat_s), int(msg_s)
+            except Exception:
+                return False
+            try:
+                await self.inline.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                )
+                return True
+            except Exception as e:
+                logger.warning("bot PM status edit failed (%s)", e)
+                with contextlib.suppress(Exception):
+                    await self.inline.bot.send_message(chat_id, text)
+                return True
+        # legacy chat:message from userbot-owned message (e.g. .restart command)
+        if legacy := self._parse_legacy_update_message_ref(ms):
+            chat_id, message_id = legacy
+            try:
+                await self._client.edit_message(chat_id, message_id, msg)
+                return True
+            except Exception as e:
+                logger.warning("legacy status edit failed (%s)", e)
+                return False
+        # inline_message_id JSON / raw
+        try:
+            await self.inline.bot.edit_message_text(
+                inline_message_id=self._deserialize_inline_message_id(str(ms)),
+                text=text,
+            )
+            return True
+        except Exception:
+            logger.debug("inline_message_id status edit failed", exc_info=True)
+            return False
+
     async def update_complete(self):
         logger.debug("Self update successful! Edit message")
         start = self.get("restart_ts")
@@ -1513,28 +1576,8 @@ class UpdaterMod(loader.Module):
 
         msg = self.strings["success"].format(utils.ascii_face(), took)
         ms = self.get("selfupdatemsg")
-
-        if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
-            chat_id, message_id = legacy_message_ref
-            try:
-                await self._client.edit_message(chat_id, message_id, msg)
-            except Exception as e:
-                # via-bot / InlineBotRequiredError — send new + delete old
-                logger.warning("restart edit failed (%s), fallback send", e)
-                try:
-                    await self._client.send_message(chat_id, msg)
-                    await self._client.delete_messages(chat_id, message_id)
-                except Exception:
-                    logger.debug("restart fallback failed", exc_info=True)
-            return
-
-        try:
-            await self.inline.bot.edit_message_text(
-                inline_message_id=self._deserialize_inline_message_id(str(ms)),
-                text=self.inline.sanitise_text(msg),
-            )
-        except Exception:
-            logger.debug("inline restart edit failed", exc_info=True)
+        # Do NOT clear here — full_restart_complete still needs the same ref
+        await self._edit_restart_status(ms, msg)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -1577,52 +1620,9 @@ class UpdaterMod(loader.Module):
         with contextlib.suppress(Exception):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
-        # bot:{chat_id}:{message_id} — message lives in bot PM, edit via bot API
-        if isinstance(ms, str) and ms.startswith("bot:"):
-            try:
-                _, chat_s, msg_s = ms.split(":", 2)
-                chat_id, message_id = int(chat_s), int(msg_s)
-            except Exception:
-                chat_id = message_id = None
-            if chat_id is not None and message_id is not None:
-                try:
-                    await self.inline.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=self.inline.sanitise_text(msg),
-                    )
-                except Exception as e:
-                    logger.warning("bot PM full_restart edit failed (%s)", e)
-                    with contextlib.suppress(Exception):
-                        await self.inline.bot.send_message(
-                            chat_id, self.inline.sanitise_text(msg)
-                        )
-            return
-
-        if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
-            chat_id, message_id = legacy_message_ref
-            try:
-                await self._client.edit_message(chat_id, message_id, msg)
-            except Exception as e:
-                logger.warning("full_restart edit failed (%s), fallback", e)
-                try:
-                    await self._client.send_message(chat_id, msg)
-                except Exception:
-                    pass
-            try:
-                await asyncio.sleep(60)
-                await self._client.delete_messages(chat_id, message_id)
-            except Exception:
-                pass
-            return
-
-        try:
-            await self.inline.bot.edit_message_text(
-                inline_message_id=self._deserialize_inline_message_id(str(ms)),
-                text=self.inline.sanitise_text(msg),
-            )
-        except Exception:
-            logger.debug("inline full_restart edit failed", exc_info=True)
+        # ONLY edit the original restart message (bot PM or user .restart msg).
+        # Never spam Saved Messages.
+        await self._edit_restart_status(ms, msg)
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
