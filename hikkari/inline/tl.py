@@ -548,7 +548,7 @@ def make_button(
     web_app: str | dict | None = None,
     copy_text: str | None = None,
 ):
-    """Build TL keyboard button. icon must be int64 custom-emoji document_id."""
+    """Build button. icon if set must be int64 custom-emoji document_id."""
     icon_i = None
     if icon is not None:
         try:
@@ -556,67 +556,31 @@ def make_button(
         except (TypeError, ValueError):
             icon_i = None
 
-    style_obj = None
-    if style is not None or icon_i is not None:
-        st = (style or "").lower().strip() or None
-        if st is not None and st not in ("primary", "danger", "success"):
-            st = None
-        kw = {}
-        if st:
-            kw[f"bg_{st}"] = True
-        if icon_i is not None:
-            kw["icon"] = icon_i
-        style_obj = types.KeyboardButtonStyle(**kw)
-
     if url is not None:
-        # KeyboardButtonUrl may support style on newer layers
-        try:
-            return types.KeyboardButtonUrl(text, url, style=style_obj)
-        except TypeError:
-            return types.KeyboardButtonUrl(text, url)
+        return Button.url(text, url, style=style, icon=icon_i)
 
     if data is not None:
-        raw = data if isinstance(data, (bytes, bytearray)) else str(data).encode("utf-8")
-        if len(raw) > 64:
-            raw = raw[:64]
-        try:
-            return types.KeyboardButtonCallback(text, raw, style=style_obj)
-        except TypeError:
-            return types.KeyboardButtonCallback(text, raw)
+        return Button.inline(text, data, style=style, icon=icon_i)
 
     if switch_inline_query_current_chat is not None:
-        try:
-            return types.KeyboardButtonSwitchInline(
-                text, switch_inline_query_current_chat, same_peer=True, style=style_obj
-            )
-        except TypeError:
-            return types.KeyboardButtonSwitchInline(
-                text, switch_inline_query_current_chat, same_peer=True
-            )
+        return Button.switch_inline(
+            text, switch_inline_query_current_chat, same_peer=True, style=style, icon=icon_i
+        )
 
     if switch_inline_query is not None:
-        try:
-            return types.KeyboardButtonSwitchInline(
-                text, switch_inline_query, same_peer=False, style=style_obj
-            )
-        except TypeError:
-            return types.KeyboardButtonSwitchInline(
-                text, switch_inline_query, same_peer=False
-            )
+        return Button.switch_inline(
+            text, switch_inline_query, same_peer=False, style=style, icon=icon_i
+        )
 
     if web_app is not None:
         app_url = web_app if isinstance(web_app, str) else web_app["url"]
-        return types.KeyboardButtonWebView(text, app_url)
+        return Button.web_view(text, app_url)
 
     if copy_text is not None:
         try:
-            return types.KeyboardButtonCopy(text, copy_text)
+            return Button.copy(text, copy_text)
         except Exception:
-            return types.KeyboardButtonCallback(text, b"copy")
+            return Button.inline(text, b"copy")
 
-    raw = text.encode("utf-8")[:64]
-    try:
-        return types.KeyboardButtonCallback(text, raw, style=style_obj)
-    except TypeError:
-        return types.KeyboardButtonCallback(text, raw)
+    return Button.inline(text, text, style=style, icon=icon_i)
 
