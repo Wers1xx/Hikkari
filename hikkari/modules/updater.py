@@ -475,11 +475,26 @@ class UpdaterMod(loader.Module):
 
         await self._delete_all_upd_messages()
 
+        # Keep message visible — show restart status in bot PM / on the button msg
         with contextlib.suppress(Exception):
-            await call.delete()
-
-        # Direct path — avoid invoke via bot (invalid message id on edit)
-        await self.inline_update(call)
+            await call.answer("Updating…")
+        caption = self.strings["restarting_caption"].format(
+            utils.get_platform_emoji()
+            if getattr(self._client, "hikkari_me", None)
+            and self._client.hikkari_me.premium
+            else "Hikkari"
+        )
+        # Prefer edit of the update notification in bot PM
+        edited = False
+        with contextlib.suppress(Exception):
+            await call.edit(caption)
+            edited = True
+        # Always also post to owner's Saved Messages so status is never lost
+        status_msg = None
+        with contextlib.suppress(Exception):
+            status_msg = await self._client.send_message(self.tg_id, caption)
+        # Pass a real Message to inline_update when possible
+        await self.inline_update(status_msg or call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
@@ -691,12 +706,23 @@ class UpdaterMod(loader.Module):
             and self._client.hikkari_me.premium
             else "Hikkari"
         )
+        # 1) try edit/answer on the source message
+        new_msg = None
         try:
-            msg_obj = await utils.answer(msg_obj, caption, skip_rich=True)
+            new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
         except Exception as e:
-            logger.warning("restart caption edit failed (%s), send new msg", e)
+            logger.warning("restart caption edit failed (%s)", e)
+        # 2) BotInlineCall / deleted msg / bot PM — force new message to owner
+        is_call = type(msg_obj).__name__ in (
+            "InlineCall",
+            "BotInlineCall",
+            "ChosenInlineCall",
+        )
+        if new_msg is None or is_call or not getattr(new_msg, "id", None):
             with contextlib.suppress(Exception):
-                msg_obj = await self._client.send_message(self.tg_id, caption)
+                new_msg = await self._client.send_message(self.tg_id, caption)
+        if new_msg is not None:
+            msg_obj = new_msg
 
         with contextlib.suppress(Exception):
             await self.process_restart_message(msg_obj)
