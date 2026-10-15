@@ -356,35 +356,45 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Announce module load as native Rich (via @bot). Works with 0–N commands."""
+        """Announce module load as native Rich (via @bot).
+
+        Keep HTML minimal and media-free: external banners/audio break
+        answerInlineQuery with EXTERNAL_MEDIA_NOT_SUPPORTED and force classic.
+        """
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, inject_banner_html, try_send_rich
+            from ..utils.rich_api import (
+                html_table,
+                strip_external_media_for_inline,
+                try_send_rich,
+            )
             import html as html_mod
 
             if not can_use_rich(self._client, self._db):
                 return False
 
-            # Warm up inline bot — critical for first loads in a session
             if not getattr(self.inline, "init_complete", False) or not getattr(
                 self.inline, "bot_username", None
             ):
                 with contextlib.suppress(Exception):
                     await self.inline.register_manager(ignore_token_checks=True)
-            if not getattr(self.inline, "bot_username", None):
-                # Cannot do via @bot; try_send_rich only (groups / bot-started PM)
-                pass
 
             name = self._plain_cmd_doc(modname, str(modname))[:64]
             desc = self._plain_cmd_doc(mod_doc, "")[:300]
             dev_plain = self._plain_cmd_doc(developer, "")
             dev_plain = re.sub(r"\s+", " ", dev_plain).strip()
             for junk in (
-                "Developer:", "Developers:", "Разработчик:", "Разработчики:",
-                "Entwickler:", "開発者:", "Dev:", "D3v:",
+                "Developer:",
+                "Developers:",
+                "Разработчик:",
+                "Разработчики:",
+                "Entwickler:",
+                "開発者:",
+                "Dev:",
+                "D3v:",
             ):
                 if dev_plain.lower().startswith(junk.lower()):
-                    dev_plain = dev_plain[len(junk):].strip()
+                    dev_plain = dev_plain[len(junk) :].strip()
 
             origin_disp = ""
             origin_url = ""
@@ -405,95 +415,83 @@ class LoaderMod(loader.Module):
                     )
                 )
 
-            def _build_html(*, simple: bool = False, minimal: bool = False) -> str:
-                # ONLY tags Telegram Rich accepts: h2/p/table/details/blockquote/code/a/b/i
-                # NEVER <ul>/<li> — answerInlineQuery rejects them → empty results → classic text
-                parts = [f"<h2>{html_mod.escape(name)}</h2>"]
-                if desc:
-                    parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
-                if clean_rows:
-                    table = html_table(clean_rows, header=("Command", "Description"))
-                    if minimal:
-                        # still a real table (1 row is fine) — same path as multi-cmd modules
-                        parts.append(table)
-                    elif simple:
-                        parts.append(
-                            f"<p><b>Commands ({len(clean_rows)})</b></p>\n{table}"
-                        )
-                    else:
-                        parts.append(
-                            "<details>"
-                            f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
-                            f"{table}\n"
-                            "</details>"
-                        )
-                if version:
-                    parts.append(
-                        f"<p>Version: <code>{html_mod.escape(str(version)[:32])}</code></p>"
-                    )
-                if dev_plain:
-                    parts.append(
-                        f"<p>Developer: <b>{html_mod.escape(dev_plain[:80])}</b></p>"
-                    )
-                if origin_url:
-                    parts.append(
-                        f'<p>Source: <a href="{html_mod.escape(origin_url)}">'
-                        f"{html_mod.escape(origin_disp)}</a></p>"
-                    )
-                elif origin_disp:
-                    parts.append(f"<p>Source: {html_mod.escape(origin_disp)}</p>")
-                html = "\n".join(parts)
-                if meta_banner and str(meta_banner).startswith(("http://", "https://")):
-                    html = inject_banner_html(html, meta_banner, force=True)
-                return html
+            # Proven-safe Rich HTML only (tables work; no figure/banner/details/ul)
+            parts = [f"<h2>{html_mod.escape(name)}</h2>"]
+            if desc:
+                parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
+            if clean_rows:
+                parts.append(html_table(clean_rows, header=("Command", "Description")))
+            if version:
+                parts.append(
+                    f"<p>Version: <code>{html_mod.escape(str(version)[:32])}</code></p>"
+                )
+            if dev_plain:
+                parts.append(
+                    f"<p>Developer: <b>{html_mod.escape(dev_plain[:80])}</b></p>"
+                )
+            if origin_url:
+                parts.append(
+                    f'<p>Source: <a href="{html_mod.escape(origin_url)}">'
+                    f"{html_mod.escape(origin_disp)}</a></p>"
+                )
+            elif origin_disp:
+                parts.append(f"<p>Source: {html_mod.escape(origin_disp)}</p>")
+
+            html = "\n".join(parts)
+            html = strip_external_media_for_inline(html)
 
             title = f"✓ {name}"[:64]
             description = (desc[:80] if desc else "Module loaded")
-            thumb = meta_banner if meta_banner else None
-            variants = [
-                (_build_html(simple=False), subscribe_markup, thumb),
-                (_build_html(simple=True), None, thumb),
-                (_build_html(minimal=True), None, thumb),
-                (_build_html(minimal=True), None, None),
-            ]
 
-            # 1) via @inline bot — required for private peer chats
+            # 1) via @inline bot — required for private chats
             if getattr(self.inline, "bot_username", None):
-                for attempt, (html, markup, th) in enumerate(variants):
-                    try:
-                        m = await self.inline.rich(
-                            message,
-                            html,
-                            title=title,
-                            description=description,
-                            silent=True,
-                            reply_markup=markup,
-                            thumbnail_url=th,
-                        )
-                        if m:
-                            return True
-                    except Exception:
-                        logger.debug(
-                            "loader rich via attempt %s failed", attempt, exc_info=True
-                        )
-                    await asyncio.sleep(0.25 * (attempt + 1))
+                try:
+                    m = await self.inline.rich(
+                        message,
+                        html,
+                        title=title,
+                        description=description,
+                        silent=True,
+                        reply_markup=None,
+                        thumbnail_url=None,
+                    )
+                    if m:
+                        return True
+                except Exception:
+                    logger.debug("loader rich via failed", exc_info=True)
+                # short second try after tiny delay (query race)
+                await asyncio.sleep(0.35)
+                try:
+                    m = await self.inline.rich(
+                        message,
+                        html,
+                        title=title,
+                        description=description,
+                        silent=True,
+                        reply_markup=None,
+                        thumbnail_url=None,
+                    )
+                    if m:
+                        return True
+                except Exception:
+                    logger.debug("loader rich via retry failed", exc_info=True)
 
-            # 2) Bot API sendRichMessage (groups / when bot can write)
+            # 2) Bot API sendRichMessage (only if bot can write to chat)
             try:
                 chat = utils.get_chat_id(message)
-                for html, _, _ in variants[:2]:
-                    ok = await try_send_rich(self._client, chat, html)
-                    if ok:
-                        if isinstance(message, Message) and message.out:
-                            with contextlib.suppress(Exception):
-                                await message.delete()
-                        return True
+                ok = await try_send_rich(self._client, chat, html)
+                if ok:
+                    if isinstance(message, Message) and getattr(message, "out", False):
+                        with contextlib.suppress(Exception):
+                            await message.delete()
+                    return True
             except Exception:
                 logger.debug("loader try_send_rich failed", exc_info=True)
             return False
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
             return False
+
 
 
     async def _rich_batch_loaded(
