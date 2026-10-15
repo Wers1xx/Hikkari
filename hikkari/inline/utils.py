@@ -85,7 +85,6 @@ class Utils(InlineUnit):
         return None
 
 
-    def 
     def _generate_markup(
         self: "InlineManager",
         markup_obj: HikkariReplyMarkup | str | None,
