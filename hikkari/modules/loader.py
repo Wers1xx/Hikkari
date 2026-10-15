@@ -356,7 +356,7 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Clean Rich announce after module install. Retry + Bot API fallback."""
+        """Announce module load as native Rich (via @bot). Works with 0–N commands."""
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import html_table, inject_banner_html, try_send_rich
@@ -364,36 +364,28 @@ class LoaderMod(loader.Module):
 
             if not can_use_rich(self._client, self._db):
                 return False
-            # Ensure inline is ready (lost bot / late init)
-            if not getattr(self.inline, "init_complete", False):
+
+            # Warm up inline bot — critical for first loads in a session
+            if not getattr(self.inline, "init_complete", False) or not getattr(
+                self.inline, "bot_username", None
+            ):
                 with contextlib.suppress(Exception):
                     await self.inline.register_manager(ignore_token_checks=True)
-            if not getattr(self.inline, "init_complete", False) and not getattr(
-                self.inline, "bot_token", None
-            ):
-                # Still try Bot API path below without via
+            if not getattr(self.inline, "bot_username", None):
+                # Cannot do via @bot; try_send_rich only (groups / bot-started PM)
                 pass
 
-            # --- sanitize everything for Rich (no raw tags as text) ---
             name = self._plain_cmd_doc(modname, str(modname))[:64]
             desc = self._plain_cmd_doc(mod_doc, "")[:300]
-            # developer may already be formatted with <tg-emoji>… — strip to plain
             dev_plain = self._plain_cmd_doc(developer, "")
-            # keep only @user or short id/url
             dev_plain = re.sub(r"\s+", " ", dev_plain).strip()
             for junk in (
-                "Developer:",
-                "Developers:",
-                "Разработчик:",
-                "Разработчики:",
-                "Entwickler:",
-                "開発者:",
-                "Dev:",
-                "D3v:",
+                "Developer:", "Developers:", "Разработчик:", "Разработчики:",
+                "Entwickler:", "開発者:", "Dev:", "D3v:",
             ):
                 if dev_plain.lower().startswith(junk.lower()):
-                    dev_plain = dev_plain[len(junk) :].strip()
-            # origin: short display
+                    dev_plain = dev_plain[len(junk):].strip()
+
             origin_disp = ""
             origin_url = ""
             if origin and origin not in ("<string>", "<core>"):
@@ -413,62 +405,67 @@ class LoaderMod(loader.Module):
                     )
                 )
 
-            parts = [f"<h2>{html_mod.escape(name)}</h2>"]
-            if desc:
-                parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
-            if clean_rows:
-                table = html_table(clean_rows, header=("Command", "Description"))
-                parts.append(
-                    "<details>"
-                    f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
-                    f"{table}\n"
-                    "</details>"
-                )
-            # footer table: Version / Developer / Source
-            footer_rows = []
-            ver_plain = (version or "").strip()
-            if ver_plain:
-                footer_rows.append(("Version", html_mod.escape(ver_plain[:32])))
-            if dev_plain:
-                footer_rows.append(
-                    ("Developer", html_mod.escape(dev_plain[:80]))
-                )
-            if origin_url:
-                footer_rows.append(
-                    (
-                        "Source",
-                        f'<a href="{html_mod.escape(origin_url)}">{html_mod.escape(origin_disp)}</a>',
+            def _build_html(*, simple: bool = False, minimal: bool = False) -> str:
+                parts = [f"<h2>{html_mod.escape(name)}</h2>"]
+                if desc:
+                    parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
+                if clean_rows:
+                    if minimal or len(clean_rows) <= 2:
+                        # 1–2 commands: list, no <details>/<table> (TG sometimes drops them)
+                        parts.append("<p><b>Commands</b></p><ul>")
+                        for c, d in clean_rows:
+                            parts.append(f"<li><code>{c}</code> — {d}</li>")
+                        parts.append("</ul>")
+                    elif simple:
+                        parts.append(
+                            f"<p><b>Commands ({len(clean_rows)})</b></p><ul>"
+                        )
+                        for c, d in clean_rows[:20]:
+                            parts.append(f"<li><code>{c}</code> — {d}</li>")
+                        parts.append("</ul>")
+                    else:
+                        table = html_table(
+                            clean_rows, header=("Command", "Description")
+                        )
+                        parts.append(
+                            "<details>"
+                            f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
+                            f"{table}\n"
+                            "</details>"
+                        )
+                if version:
+                    parts.append(
+                        f"<p>Version: <code>{html_mod.escape(str(version)[:32])}</code></p>"
                     )
-                )
-            elif origin_disp:
-                footer_rows.append(("Source", html_mod.escape(origin_disp)))
-            if footer_rows:
-                # html_table escapes cells — so for Source with <a> we build manually
-                foot = [
-                    '<table bordered="1" striped="1">',
-                    "<tr><th>Info</th><th>Value</th></tr>",
-                ]
-                for k, v in footer_rows:
-                    foot.append(
-                        f"<tr><td><b>{html_mod.escape(k)}</b></td><td>{v}</td></tr>"
+                if dev_plain:
+                    parts.append(
+                        f"<p>Developer: <b>{html_mod.escape(dev_plain[:80])}</b></p>"
                     )
-                foot.append("</table>")
-                parts.append("\n".join(foot))
-
-            html = "\n".join(parts)
-            if meta_banner and str(meta_banner).startswith(("http://", "https://")):
-                html = inject_banner_html(html, meta_banner, force=True)
+                if origin_url:
+                    parts.append(
+                        f'<p>Source: <a href="{html_mod.escape(origin_url)}">'
+                        f"{html_mod.escape(origin_disp)}</a></p>"
+                    )
+                elif origin_disp:
+                    parts.append(f"<p>Source: {html_mod.escape(origin_disp)}</p>")
+                html = "\n".join(parts)
+                if meta_banner and str(meta_banner).startswith(("http://", "https://")):
+                    html = inject_banner_html(html, meta_banner, force=True)
+                return html
 
             title = f"✓ {name}"[:64]
-            description = desc[:80] if desc else "Module loaded"
+            description = (desc[:80] if desc else "Module loaded")
             thumb = meta_banner if meta_banner else None
+            variants = [
+                (_build_html(simple=False), subscribe_markup, thumb),
+                (_build_html(simple=True), None, thumb),
+                (_build_html(minimal=True), None, thumb),
+                (_build_html(minimal=True), None, None),
+            ]
 
-            # 1) via @inline bot (preferred) — critical for private chats
-            m = None
-            if getattr(self.inline, "init_complete", False) or getattr(
-                self.inline, "bot_username", None
-            ):
-                for attempt in range(3):
+            # 1) via @inline bot — required for private peer chats
+            if getattr(self.inline, "bot_username", None):
+                for attempt, (html, markup, th) in enumerate(variants):
                     try:
                         m = await self.inline.rich(
                             message,
@@ -476,8 +473,8 @@ class LoaderMod(loader.Module):
                             title=title,
                             description=description,
                             silent=True,
-                            reply_markup=subscribe_markup if attempt == 0 else None,
-                            thumbnail_url=thumb if attempt < 2 else None,
+                            reply_markup=markup,
+                            thumbnail_url=th,
                         )
                         if m:
                             return True
@@ -485,45 +482,18 @@ class LoaderMod(loader.Module):
                         logger.debug(
                             "loader rich via attempt %s failed", attempt, exc_info=True
                         )
-                    await asyncio.sleep(0.3 * (attempt + 1))
-                # Simplified HTML retry (drop details table bulk)
-                try:
-                    simple = f"<h2>{html_mod.escape(name)}</h2>"
-                    if desc:
-                        simple += f"<p><i>{html_mod.escape(desc)}</i></p>"
-                    if clean_rows:
-                        simple += (
-                            f"<p><b>Commands:</b> {len(clean_rows)}</p><ul>"
-                            + "".join(
-                                f"<li><code>{c}</code> — {d}</li>"
-                                for c, d in clean_rows[:15]
-                            )
-                            + "</ul>"
-                        )
-                    if meta_banner and str(meta_banner).startswith(("http://", "https://")):
-                        simple = inject_banner_html(simple, meta_banner, force=True)
-                    m = await self.inline.rich(
-                        message,
-                        simple,
-                        title=title,
-                        description=description,
-                        silent=True,
-                        thumbnail_url=thumb,
-                    )
-                    if m:
-                        return True
-                except Exception:
-                    logger.debug("loader simplified rich failed", exc_info=True)
+                    await asyncio.sleep(0.25 * (attempt + 1))
 
-            # 2) Bot API sendRichMessage (works in groups / bot-started PMs)
+            # 2) Bot API sendRichMessage (groups / when bot can write)
             try:
                 chat = utils.get_chat_id(message)
-                ok = await try_send_rich(self._client, chat, html)
-                if ok:
-                    if isinstance(message, Message) and message.out:
-                        with contextlib.suppress(Exception):
-                            await message.delete()
-                    return True
+                for html, _, _ in variants[:2]:
+                    ok = await try_send_rich(self._client, chat, html)
+                    if ok:
+                        if isinstance(message, Message) and message.out:
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                        return True
             except Exception:
                 logger.debug("loader try_send_rich failed", exc_info=True)
             return False
@@ -1999,13 +1969,14 @@ class LoaderMod(loader.Module):
                 modname=str(modname),
                 mod_doc=mod_doc or "",
                 rows=self._last_loaded.get("rows") or [],
-                subscribe_markup=subscribe_markup,
+                subscribe_markup=None,  # buttons break some rich answers
                 origin=origin,
                 developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_b,
                 version=_ver,
             ):
                 return True
+            # Classic only if rich fully failed
             await utils.answer(
                 message,
                 loaded_msg(),
@@ -2079,10 +2050,11 @@ class LoaderMod(loader.Module):
                 or mod_doc
                 or "",
                 rows=self._last_loaded.get("rows") or [],
-                subscribe_markup=subscribe_markup,  # buttons inside Rich unit
+                subscribe_markup=None,  # subscribe kb after; prefer pure rich first
                 origin=origin,
                 developer=str(developer_raw or developer or "") if (developer_raw or developer) else "",
                 meta_banner=meta_banner,
+                version=self._module_version_str(instance, doc or "") if hasattr(self, "_module_version_str") else "",
             ):
                 return True
         except Exception:
