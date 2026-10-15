@@ -130,10 +130,10 @@ class TelethonBot:
             # Hikka/Hikkari dict button
             text = btn.get("text") or "·"
             style = btn.get("style")
-            icon = btn.get("emoji_id") or btn.get("icon")
+            icon = btn.get("emoji_id") or btn.get("icon") or btn.get("icon_custom_emoji_id")
             if icon is not None:
                 try:
-                    icon = int(icon)
+                    icon = int(str(icon).strip())
                 except Exception:
                     icon = None
 
