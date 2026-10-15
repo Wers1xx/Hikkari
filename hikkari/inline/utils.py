@@ -170,11 +170,8 @@ class Utils(InlineUnit):
                         btn_kwargs["style"] = style
 
                     if emoji_id := self._get_button_emoji_id(button):
-                        # Custom emoji icon on button (Premium clients)
-                        try:
-                            btn_kwargs["icon"] = int(emoji_id)
-                        except Exception:
-                            pass
+                        # Bot API: icon_custom_emoji_id (string). hikkaritl Button.icon accepts str/int.
+                        btn_kwargs["icon"] = str(emoji_id).strip()
 
                     match True:
                         case _ if "url" in button:
@@ -458,16 +455,25 @@ class Utils(InlineUnit):
         return cut + "…"
 
     def sanitise_text(self: "InlineManager", text: str) -> str:
-        # Keep <tg-emoji> for premium so custom emoji render in forms
-        if getattr(getattr(self._client, "hikkari_me", None), "premium", False):
+        """Prepare text for inline bot (Bot API HTML).
+
+        Always convert <emoji document_id> → <tg-emoji emoji-id> so answerInlineQuery
+        renders custom emoji when the bot is allowed (owner Premium / Fragment).
+        Non-premium viewers still see the fallback unicode inside the tag.
+        """
+        if not isinstance(text, str):
             return text
-        text = re.sub(
-            r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
-            r"\\1",
-            text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        return re.sub(r"</?emoji.*?>", "", text)
+        try:
+            from ..utils.emoji_prem import emoji_for_bot_api
+            text = emoji_for_bot_api(text)
+        except Exception:
+            text = re.sub(
+                r'<emoji\s+document_id\s*=\s*["\']?(\d+)["\']?\s*>(.*?)</emoji>',
+                r'<tg-emoji emoji-id="\1">\2</tg-emoji>',
+                text,
+                flags=re.I | re.S,
+            )
+        return text
 
     async def _edit_unit(
         self: "InlineManager",
