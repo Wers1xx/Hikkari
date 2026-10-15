@@ -1113,6 +1113,63 @@ class LoaderMod(loader.Module):
             return False
 
 
+
+    @staticmethod
+    def _module_display_name(
+        doc: str | bytes | None,
+        name: str | None,
+        origin: str | None,
+        message=None,
+    ) -> str:
+        """Best-effort module name for UI (safety warn, logs). Never return '<string>'."""
+        if name and str(name).strip() and str(name) not in ("<string>", "<core>", "None"):
+            return str(name).strip()
+        # Filename from document / reply media
+        try:
+            fn = None
+            if message is not None:
+                f = getattr(message, "file", None)
+                fn = getattr(f, "name", None) if f is not None else None
+                if not fn:
+                    media = getattr(message, "media", None)
+                    docm = getattr(media, "document", None) if media else None
+                    for attr in getattr(docm, "attributes", None) or []:
+                        fn = getattr(attr, "file_name", None)
+                        if fn:
+                            break
+            if fn:
+                base = str(fn).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                if base.lower().endswith(".py"):
+                    base = base[:-3]
+                if base and base not in ("<string>", "<core>"):
+                    return base
+        except Exception:
+            pass
+        # Class inheriting Module from source
+        src = doc
+        if isinstance(src, (bytes, bytearray)):
+            try:
+                src = src.decode("utf-8", errors="ignore")
+            except Exception:
+                src = ""
+        if isinstance(src, str) and src:
+            m = re.search(
+                r"class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*Module",
+                src,
+            )
+            if m:
+                return m.group(1)
+            m = re.search(r"class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:", src)
+            if m and not m.group(1).startswith("_"):
+                return m.group(1)
+        if origin and str(origin) not in ("<string>", "<core>", ""):
+            o = str(origin).strip().rsplit("/", 1)[-1]
+            if o.lower().endswith(".py"):
+                o = o[:-3]
+            if o:
+                return o
+        return "module"
+
     # --- Module safety scanner -------------------------------------------------
     _BLOCK_PATTERNS = [
         (r"\bDeleteAccountRequest\b", "DeleteAccountRequest — удаление аккаунта"),
@@ -1274,7 +1331,8 @@ class LoaderMod(loader.Module):
         _safety_confirmed: bool = False,
         quiet: bool = False,
     ) -> bool:
-        module_label = name or origin
+        # Human-readable label for warnings (not "<string>")
+        module_label = self._module_display_name(doc, name, origin, message)
 
         if isinstance(doc, (bytes, bytearray)):
             try:
