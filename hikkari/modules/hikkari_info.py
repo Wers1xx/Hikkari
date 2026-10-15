@@ -303,7 +303,6 @@ class HikkariInfoMod(loader.Module):
             pass
         return data
 
-    @loader.command()
     def _bot_ready_for_rich(self) -> bool:
         try:
             inline = getattr(self, "inline", None)
