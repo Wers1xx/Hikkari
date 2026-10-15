@@ -678,6 +678,10 @@ def callback_handler(*args, **kwargs):
     return _mark_method("is_callback_handler", *args, **kwargs)
 
 
+# Aliases for Hikka/Heroku external modules compatibility
+callback = callback_handler
+
+
 def raw_handler(*updates: TLObject):
     """
     Decorator that marks function as raw telethon events handler
