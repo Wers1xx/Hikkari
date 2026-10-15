@@ -1230,10 +1230,9 @@ class LoaderMod(loader.Module):
             blob_link=blob_link,
             _safety_confirmed=True,
         )
-        if ok:
-            with contextlib.suppress(Exception):
-                await call.edit(self.strings["safety_installed_ok"])
-        else:
+        # load_module already shows full "loaded" text with commands —
+        # only show short fail text; never replace success with safety_ok
+        if not ok:
             with contextlib.suppress(Exception):
                 await call.edit(self.strings["load_failed"])
 
@@ -1910,12 +1909,16 @@ class LoaderMod(loader.Module):
                     subscribe = self.strings["suggest_subscribe"].format(
                         f"@{utils.escape_html(developer_entity.username)}"
                     )
+                    _sub_peer = (
+                        getattr(developer_entity, "username", None)
+                        and f"@{developer_entity.username}"
+                    ) or developer_entity.id
                     subscribe_markup = [
                         {
                             "text": self.strings["subscribe"],
                             "callback": self._inline__subscribe,
                             "args": (
-                                developer_entity.id,
+                                _sub_peer,
                                 functools.partial(loaded_msg, use_subscribe=False),
                                 True,
                             ),
@@ -2072,19 +2075,40 @@ class LoaderMod(loader.Module):
     async def _inline__subscribe(
         self,
         call: InlineCall,
-        entity: int,
+        entity,
         msg: typing.Callable[[], str],
         subscribe: bool,
     ):
+        text = msg() if callable(msg) else str(msg or "")
         if not subscribe:
-            self.set("do_not_subscribe", self.get("do_not_subscribe", []) + [entity])
-            await utils.answer(call, msg())
-            await call.answer(self.strings["not_subscribed"])
+            key = entity if isinstance(entity, str) else str(entity)
+            lst = list(self.get("do_not_subscribe", []) or [])
+            if key not in lst:
+                lst.append(key)
+            self.set("do_not_subscribe", lst)
+            with contextlib.suppress(Exception):
+                await call.edit(text, reply_markup=[])
+            with contextlib.suppress(Exception):
+                await call.answer(self.strings["not_subscribed"])
             return
 
-        await self._client(JoinChannelRequest(entity))
-        await utils.answer(call, msg())
-        await call.answer(self.strings["subscribed"])
+        try:
+            peer = entity
+            if isinstance(entity, str):
+                peer = await self._client.get_entity(entity)
+            elif isinstance(entity, int):
+                peer = await self._client.get_entity(entity)
+            await self._client(JoinChannelRequest(peer))
+            with contextlib.suppress(Exception):
+                await call.edit(text, reply_markup=[])
+            with contextlib.suppress(Exception):
+                await call.answer(self.strings["subscribed"])
+        except Exception as e:
+            logger.exception("subscribe failed")
+            with contextlib.suppress(Exception):
+                await call.answer(str(e)[:120] or "error", show_alert=True)
+            with contextlib.suppress(Exception):
+                await call.edit(text, reply_markup=[])
 
     @loader.command(alias="ulm")
     async def unloadmod(self, message: Message):
