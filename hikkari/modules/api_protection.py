@@ -139,9 +139,13 @@ class APIRatelimiterMod(loader.Module):
         )
 
     async def _install_protection(self):
-        await asyncio.sleep(8)  # Restart lock (was 30; faster ready on weak hosts)
-        if hasattr(self._client._call, "_old_call_rewritten"):
-            raise loader.SelfUnload("Already installed")
+        await asyncio.sleep(3)  # short delay so client is fully ready
+        # Correct flag lives on client / on the wrapper — never SelfUnload wrongly
+        if getattr(self._client, "_hikkari_api_protect", False) or getattr(
+            getattr(self._client, "_call", None), "_hikkari_overwritten", False
+        ):
+            logger.debug("API protection already installed")
+            return
 
         old_call = self._client._call
 
@@ -173,8 +177,18 @@ class APIRatelimiterMod(loader.Module):
                         True,
                     )
                     and (
-                        r.__module__.rsplit(".", maxsplit=1)[1]
-                        in {"messages", "account", "channels"}
+                        r.__module__.rsplit(".", maxsplit=1)[-1]
+                        in {
+                            "messages",
+                            "account",
+                            "channels",
+                            "photos",
+                            "users",
+                            "contacts",
+                            "stickers",
+                            "bots",
+                        }
+                        or "tl.functions" in (r.__module__ or "")
                     )
                 ):
                     request_name = type(r).__name__
@@ -242,13 +256,19 @@ class APIRatelimiterMod(loader.Module):
 
         self._client._call = new_call
         self._client._old_call_rewritten = old_call
-        self._client._call._hikkari_overwritten = True
-        logger.debug("Successfully installed ratelimiter")
+        self._client._hikkari_api_protect = True
+        try:
+            self._client._call._hikkari_overwritten = True
+        except Exception:
+            pass
+        logger.info("API flood protection installed (active=%s)", self._protection_enabled())
 
     async def on_unload(self):
         if hasattr(self._client, "_old_call_rewritten"):
             self._client._call = self._client._old_call_rewritten
             delattr(self._client, "_old_call_rewritten")
+            with contextlib.suppress(Exception):
+                delattr(self._client, "_hikkari_api_protect")
             logger.debug("Successfully uninstalled ratelimiter")
 
     def _protection_enabled(self) -> bool:
@@ -283,6 +303,10 @@ class APIRatelimiterMod(loader.Module):
                 await utils.answer(message, self.strings["already_on"])
                 return
             self.set("disable_protection", False)
+            # Ensure wrapper is actually hooked
+            if not getattr(self._client, "_hikkari_api_protect", False):
+                with contextlib.suppress(Exception):
+                    await self._install_protection()
             await utils.answer(message, self.strings["on"])
             return
 
@@ -331,4 +355,7 @@ class APIRatelimiterMod(loader.Module):
             return
 
         self.set("disable_protection", not want_enable)
+        if want_enable and not getattr(self._client, "_hikkari_api_protect", False):
+            with contextlib.suppress(Exception):
+                await self._install_protection()
         await call.edit(self.strings["on" if want_enable else "off"])
