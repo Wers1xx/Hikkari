@@ -313,12 +313,13 @@ class HikkariFindMod(loader.Module):
         rows = [
             [
                 {
-                    "text": self.strings["install_btn"].format(name=e["name"][:18]),  # ⬇️ premium icon on button
+                    "text": self.strings["install_btn"].format(name=e["name"][:18]),
                     "callback": self._install,
                     "args": (
                         e.get("urls") or [e["url"]],
                         e["name"],
                     ),
+                    "emoji_id": 5406745015365943482,
                 }
             ]
             for e in matched[:8]
