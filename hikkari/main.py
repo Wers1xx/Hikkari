@@ -63,6 +63,13 @@ from hikkaritl.tl.functions.account import GetPasswordRequest
 from hikkaritl.tl.functions.auth import CheckPasswordRequest
 from hikkaritl.tl.functions.contacts import UnblockRequest
 
+
+# Premium button icons: KeyboardInlineButton (Heroku-compatible)
+try:
+    from .tl_button_patch import apply_keyboard_inline_button_patch
+    apply_keyboard_inline_button_patch()
+except Exception:
+    pass
 from . import database, session_repair, loader, utils, version
 from ._internal import print_banner, restart
 from .dispatcher import CommandDispatcher
