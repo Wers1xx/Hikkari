@@ -331,11 +331,16 @@ class APIRatelimiterMod(loader.Module):
             text=text,
             force_me=True,
             reply_markup=[
-                {"text": self.strings["btn_no"], "action": "close"},
+                {
+                    "text": self.strings["btn_no"],
+                    "action": "close",
+                    "emoji_id": 5210952531676504517,
+                },
                 {
                     "text": self.strings["btn_yes"],
                     "callback": self._finish,
                     "args": (want_enable,),
+                    "emoji_id": 5206607081334906820,
                 },
             ],
         )
