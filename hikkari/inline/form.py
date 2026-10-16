@@ -66,34 +66,22 @@ class Placeholder:
 class Form(InlineUnit):
 
     async def _answer_form_inline(self, inline_query, form: dict, *, text: str, parse_mode: str = "HTML"):
-        """Prefer Bot API answer when buttons use premium icon_custom_emoji_id."""
-        uid = form.get("uid")
-        buttons = form.get("buttons") or []
-        has_icon = False
-        try:
-            for row in self._normalize_markup(buttons):
-                for b in row:
-                    if isinstance(b, dict) and (
-                        b.get("emoji_id") or b.get("icon") or b.get("icon_custom_emoji_id")
-                    ):
-                        has_icon = True
-                        break
-                if has_icon:
-                    break
-        except Exception:
-            has_icon = False
+        """Answer form via Bot API (icon_custom_emoji_id) then MTProto fallback."""
+        uid = form.get("uid") or getattr(getattr(inline_query, "query", None), "query", None)
+        # Always register callbacks first
+        with contextlib.suppress(Exception):
+            self.generate_markup(uid)
 
-        if has_icon:
-            ok = await self.answer_inline_bot_api(
-                inline_query.query.query_id,
-                title="Hikkari",
-                message_text=text,
-                parse_mode=parse_mode,
-                markup_obj=uid,
-                cache_time=0,
-            )
-            if ok:
-                return True
+        ok = await self.answer_inline_bot_api(
+            inline_query.query.query_id,
+            title="Hikkari",
+            message_text=text,
+            parse_mode=parse_mode,
+            markup_obj=uid,
+            cache_time=0,
+        )
+        if ok:
+            return True
 
         await inline_query.answer(
             [
@@ -928,18 +916,8 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
                 case _:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.article(
-                                title="Hikkari",
-                                text=form_text,
-                                parse_mode="HTML",
-                                link_preview=False,
-                                buttons=self.generate_markup(inline_query.query),
-                                id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=0,
+                    await self._answer_form_inline(
+                        inline_query, form, text=form_text, parse_mode="HTML"
                     )
         except Exception as e:
             # Caption over limit → hard-clip and retry once
@@ -966,18 +944,8 @@ class Form(InlineUnit):
                             cache_time=0,
                         )
                     else:
-                        await inline_query.answer(
-                            [
-                                await inline_query.builder.article(
-                                    title="Hikkari",
-                                    text=form_text2,
-                                    parse_mode="HTML",
-                                    link_preview=False,
-                                    buttons=self.generate_markup(inline_query.query),
-                                    id=utils.rand(20),
-                                )
-                            ],
-                            cache_time=0,
+                        await self._answer_form_inline(
+                            inline_query, form, text=form_text2, parse_mode="HTML"
                         )
                     return
                 except Exception as e2:
