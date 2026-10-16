@@ -212,14 +212,15 @@ class TestMod(loader.Module):
                                     "text": name,
                                     "callback": self.logs,
                                     "args": (False, level),
+                                    "emoji_id": eid,
                                 }
-                                for name, level in [
-                                    ("🚫 Critical", 60),
-                                    ("🚫 Error", 40),
-                                    ("⚠️ Warning", 30),
-                                    ("ℹ️ Info", 20),
-                                    ("⚠️ Debug", 10),
-                                    ("🧑‍💻 All", 0),
+                                for name, level, eid in [
+                                    ("Critical", 60, 5240241223632954241),
+                                    ("Error", 40, 5240241223632954241),
+                                    ("Warning", 30, 5447644880824181073),
+                                    ("Info", 20, 5334544901428229844),
+                                    ("Debug", 10, 5447644880824181073),
+                                    ("All", 0, 5447410659077661506),
                                 ]
                             ],
                             2,
