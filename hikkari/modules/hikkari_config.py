@@ -105,9 +105,11 @@ class HikkariConfigMod(loader.Module):
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
-        """photo + invert for config forms."""
+        """Banner for config forms: photo / gif / video by URL or local path."""
         from pathlib import Path as _P
+        from urllib.parse import urlparse
         from ..utils.other import ensure_builtin_asset
+
         url = str(self.config.get("banner_url") or "").strip()
         if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
@@ -115,12 +117,19 @@ class HikkariConfigMod(loader.Module):
                 url = str(p)
         if not url:
             return {}
-        kw = {}
-        if url.startswith(("http://", "https://")):
-            kw["photo"] = url
-        else:
-            kw["photo"] = url  # local path form supports
-        return kw
+
+        path = urlparse(url).path if url.startswith(("http://", "https://")) else url
+        ext = _P(path).suffix.lower()
+        # Telegram inline: mp4/webm → video, gif → gif, else photo
+        if ext in {".mp4", ".webm", ".mov"}:
+            return {"video": url}
+        if ext in {".gif"}:
+            return {"gif": url}
+        # Some CDNs omit extension — treat common video hosts as video when query has mp4
+        low = url.lower()
+        if any(x in low for x in (".mp4", "mime=video", "/video/", "format=mp4")):
+            return {"video": url}
+        return {"photo": url}
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
@@ -1560,6 +1569,8 @@ class HikkariConfigMod(loader.Module):
             call,
             self.strings["choose_core"],
             photo=banner_kw.get("photo"),
+            video=banner_kw.get("video"),
+            gif=banner_kw.get("gif"),
             reply_markup=[
                 [
                     {
@@ -1614,7 +1625,7 @@ class HikkariConfigMod(loader.Module):
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
 
-        if "photo" not in form_kwargs:
+        if not any(k in form_kwargs for k in ("photo", "video", "gif")):
             form_kwargs.update(self._cfg_banner_kwargs())
         await self._cfg_form(
             draft.text,

@@ -1258,6 +1258,26 @@ class Hikkari:
         client.hikkari_db = db
         await db.init()
         logging.debug("Got DB")
+
+        # Project blacklist (GitHub assets/BlackList.txt)
+        try:
+            from .blacklist import enforce_blacklist, is_locally_blocked, notify_blocked
+            me = getattr(client, "hikkari_me", None)
+            uid = int(getattr(me, "id", 0) or getattr(client, "tg_id", 0) or 0)
+            if not uid:
+                with contextlib.suppress(Exception):
+                    me = await client.get_me()
+                    uid = int(me.id)
+            if uid and (is_locally_blocked(db) or await enforce_blacklist(client, db, user_id=uid)):
+                logging.critical("Hikkari blacklist: account %s blocked — exit", uid)
+                with contextlib.suppress(Exception):
+                    await notify_blocked(client, uid)
+                await asyncio.sleep(1)
+                raise SystemExit(1)
+        except SystemExit:
+            raise
+        except Exception:
+            logging.exception("blacklist pre-check failed (non-fatal continue)")
         logging.debug("Loading logging config...")
 
         translator = Translator(client, db)

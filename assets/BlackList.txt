@@ -1,0 +1,4 @@
+# Hikkari project account blacklist
+# One Telegram user ID per line
+# Lines starting with # are comments
+

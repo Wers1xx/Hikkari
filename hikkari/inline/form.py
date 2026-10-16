@@ -261,11 +261,17 @@ class Form(InlineUnit):
         except Exception:
             ext = None
 
-        if photo is not None and ext in {".gif", ".mp4"}:
-            gif = copy.copy(photo)
+        if photo is not None and ext in {".gif", ".mp4", ".webm", ".mov"}:
+            if ext in {".mp4", ".webm", ".mov"}:
+                video = copy.copy(photo)
+            else:
+                gif = copy.copy(photo)
             photo = None
 
-        if gif and (not isinstance(gif, str) or not utils.check_url(gif)):
+        if gif and (
+            not isinstance(gif, str)
+            or (not utils.check_url(gif) and not Path(gif).is_file())
+        ):
             logger.error(
                 "Invalid type for `gif`. Expected `str` with URL, got `%s`",
                 type(gif),
@@ -286,7 +292,10 @@ class Form(InlineUnit):
             )
             return False
 
-        if video and (not isinstance(video, str) or not utils.check_url(video)):
+        if video and (
+            not isinstance(video, str)
+            or (not utils.check_url(video) and not Path(video).is_file())
+        ):
             logger.error(
                 "Invalid type for `video`. Expected `str` with URL, got `%s`",
                 type(video),
