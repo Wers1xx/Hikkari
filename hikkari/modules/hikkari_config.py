@@ -356,8 +356,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ]
         ]
 
@@ -401,8 +400,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    },
+                        "style": "danger", "emoji_id": 5283176512747507510},
                 ]
             ],
         )
@@ -528,8 +526,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ],
         ]
 
@@ -584,8 +581,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    },
+                        "style": "danger", "emoji_id": 5283176512747507510},
                 ]
             ],
             inline_message_id=inline_message_id or call.inline_message_id,
@@ -676,8 +672,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    },
+                        "style": "danger", "emoji_id": 5283176512747507510},
                 ]
             ],
             inline_message_id=inline_message_id or call.inline_message_id,
@@ -748,8 +743,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ],
         ]
 
@@ -794,8 +788,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    },
+                        "style": "danger", "emoji_id": 5283176512747507510},
                 ]
             ],
         )
@@ -902,8 +895,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ],
         ]
 
@@ -976,8 +968,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ],
         ]
 
@@ -1218,8 +1209,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ],
         ]
         try:
@@ -1271,8 +1261,7 @@ class HikkariConfigMod(loader.Module):
         close_btn = {
             "text": self.strings["close_btn"],
             "action": "close",
-            "style": "danger",
-        }
+            "style": "danger", "emoji_id": 5283176512747507510}
 
         if category is not None:
             params = list(grouped.get(category, []))
@@ -1590,10 +1579,12 @@ class HikkariConfigMod(loader.Module):
                         "text": self.strings["builtin"],
                         "callback": self.inline__global_config,
                         "kwargs": {"obj_type": True},
+                        "emoji_id": 5321304062715517873,
                     },
                     {
                         "text": self.strings["external"],
                         "callback": self.inline__global_config,
+                        "emoji_id": 5319139188744936824,
                     },
                 ],
                 *(
@@ -1615,8 +1606,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    }
+                        "style": "danger", "emoji_id": 5283176512747507510}
                 ],
             ],
         )
@@ -1704,8 +1694,7 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger",
-                    },
+                        "style": "danger", "emoji_id": 5283176512747507510},
                 ]
             ],
         )
@@ -1767,8 +1756,7 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger",
-                },
+                    "style": "danger", "emoji_id": 5283176512747507510},
             ]
         ]
 
