@@ -265,6 +265,11 @@ class TelegramLogsHandler(logging.Handler):
         self.capacity = capacity
         self.lvl = logging.NOTSET
         self._send_lock = asyncio.Lock()
+        # Never spam log-chat with these noisy internal messages
+        self._tg_mute_substrings = (
+            "SQLite snapshot was not enqueued",
+            "snapshot was not enqueued",
+        )
 
     def install_tg_log(self, mod: Module):
         if getattr(self, "_task", False):
@@ -502,7 +507,23 @@ class TelegramLogsHandler(logging.Handler):
 
         record.hikkari_caller = caller
 
-        if record.levelno >= self.tg_level:
+        # Drop internal noise from Telegram log-chat (still stays in local buffer if needed)
+        try:
+            msg0 = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
+        except Exception:
+            msg0 = str(getattr(record, "msg", ""))
+        mute = getattr(self, "_tg_mute_substrings", ()) or ()
+        if any(s in msg0 for s in mute):
+            # keep in local buffer at DEBUG only; never enqueue to Telegram
+            if record.levelno >= logging.ERROR:
+                record.levelno = logging.DEBUG
+                record.levelname = "DEBUG"
+            # still store locally below, but skip tg_buff path
+            skip_tg = True
+        else:
+            skip_tg = False
+
+        if (not skip_tg) and record.levelno >= self.tg_level:
             if record.exc_info:
                 try:
                     if record.args:

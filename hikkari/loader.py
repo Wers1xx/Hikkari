@@ -910,8 +910,9 @@ class Modules:
 
                 logger.debug("Successfully loaded %s from filesystem", module_name)
                 if origin == "<file>":
-                    await asyncio.sleep(0)
-                    if len(loaded) % 5 == 0:
+                    if len(loaded) % 3 == 0:
+                        await asyncio.sleep(0)
+                    if len(loaded) % 15 == 0:
                         with contextlib.suppress(Exception):
                             _release_memory()
             except Exception as e:

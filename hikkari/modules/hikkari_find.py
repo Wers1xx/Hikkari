@@ -298,42 +298,72 @@ class HikkariFindMod(loader.Module):
             )
             return
 
-        body = "\n".join(
-            self.strings["item"].format(
-                name=utils.escape_html(e["name"]),
-                desc=utils.escape_html(e["desc"] or "—"),
-                url=utils.escape_html(e["url"]),
+        # Pagination: 1 module per page
+        self._find_cache = {
+            "q": q,
+            "items": matched[:30],
+        }
+        await self._render_find_page(status, page=0, edit=False)
+
+    async def _render_find_page(self, message_or_call, page: int = 0, edit: bool = True):
+        cache = getattr(self, "_find_cache", None) or {}
+        items = cache.get("items") or []
+        q = cache.get("q") or ""
+        if not items:
+            return
+        page = max(0, min(int(page), len(items) - 1))
+        e = items[page]
+        body = self.strings["item"].format(
+            name=utils.escape_html(e["name"]),
+            desc=utils.escape_html(e["desc"] or "—"),
+            url=utils.escape_html(e["url"]),
+        )
+        text = (
+            self.strings["header"].format(
+                n=len(items), q=utils.escape_html(q), body=body
             )
-            for e in matched[:12]
+            + f"\n\n📄 <b>{page + 1}/{len(items)}</b>"
         )
-        text = self.strings["header"].format(
-            n=len(matched), q=utils.escape_html(q), body=body
+        nav = []
+        if page > 0:
+            nav.append(
+                {
+                    "text": "⬅️",
+                    "callback": self._find_page,
+                    "args": (page - 1,),
+                }
+            )
+        nav.append(
+            {
+                "text": self.strings["install_btn"].format(name=e["name"][:18]),
+                "callback": self._install,
+                "args": (e.get("urls") or [e["url"]], e["name"]),
+                "emoji_id": 5406745015365943482,
+            }
+        )
+        if page < len(items) - 1:
+            nav.append(
+                {
+                    "text": "➡️",
+                    "callback": self._find_page,
+                    "args": (page + 1,),
+                }
+            )
+        rows = [nav, [{"text": self.strings["close_btn"], "action": "close"}]]
+        if edit and hasattr(message_or_call, "edit"):
+            try:
+                await message_or_call.edit(text, reply_markup=rows)
+                return
+            except Exception:
+                logger.debug("find page edit failed", exc_info=True)
+        await self.inline.form(
+            text, message=message_or_call, reply_markup=rows, silent=True
         )
 
-        rows = [
-            [
-                {
-                    "text": self.strings["install_btn"].format(name=e["name"][:18]),
-                    "callback": self._install,
-                    "args": (
-                        e.get("urls") or [e["url"]],
-                        e["name"],
-                    ),
-                    "emoji_id": 5406745015365943482,
-                }
-            ]
-            for e in matched[:8]
-        ]
-        rows.append(
-            [
-                {
-                    "text": self.strings["close_btn"],
-                    "action": "close",
-                }
-            ]
-        )
-
-        await self.inline.form(text, message=status, reply_markup=rows, silent=True)
+    async def _find_page(self, call: InlineCall, page: int):
+        with contextlib.suppress(Exception):
+            await call.answer()
+        await self._render_find_page(call, page=page, edit=True)
 
     async def _install(self, call: InlineCall, urls, name: str):
         """Reliable install: answer → resolve URL → timeout-bounded load."""
