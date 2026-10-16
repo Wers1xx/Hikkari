@@ -1,4 +1,3 @@
 # Hikkari project account blacklist
-# One Telegram user ID per line
-# Lines starting with # are comments
-
+8733187718
+6389119809
