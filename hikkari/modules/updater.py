@@ -326,59 +326,41 @@ class UpdaterMod(loader.Module):
         except Exception:
             return False
 
-    def _bot_api_update_markup(self):
-        """Inline keyboard for Bot API send_message (callback_data + optional premium icon)."""
-        defs = getattr(self, "_upd_btn_defs", None) or [
-            {
-                "text": self.strings.get("update", "Update"),
-                "data": "hikkari/update",
-                "style": "primary",
-                "emoji_id": 5258382512656253510,
-            },
-            {
-                "text": self.strings.get("ignore", "Ignore"),
-                "data": "hikkari/ignore_upd",
-                "style": "danger",
-                "emoji_id": 5255949705740843980,
-            },
-        ]
-        # Prefer shared converter if available
-        try:
-            kb = self.inline.buttons_to_bot_api_keyboard([defs])
-            if kb:
-                return {"inline_keyboard": kb}
-        except Exception:
-            pass
-        row = []
-        for b in defs:
-            item = {
-                "text": str(b.get("text") or "•"),
-                "callback_data": str(b.get("data") or "hikkari/update"),
-            }
-            if b.get("emoji_id"):
-                item["icon_custom_emoji_id"] = str(b["emoji_id"])
-            if b.get("style"):
-                item["style"] = b["style"]
-            row.append(item)
-        return {"inline_keyboard": [row]}
+    def _update_markup_rows(self):
+        """Hikkari dict buttons for TelethonBot.send_message → TL ReplyInlineMarkup."""
+        defs = getattr(self, "_upd_btn_defs", None)
+        if not defs:
+            defs = [
+                {
+                    "text": self.strings.get("update", "Update"),
+                    "data": "hikkari/update",
+                    "style": "primary",
+                    "emoji_id": 5258382512656253510,
+                },
+                {
+                    "text": self.strings.get("ignore", "Ignore"),
+                    "data": "hikkari/ignore_upd",
+                    "style": "danger",
+                    "emoji_id": 5255949705740843980,
+                },
+            ]
+        # one row: [Update] [Ignore]
+        return [list(defs)]
 
     async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
         """Send update notice via inline bot if available, else user client to Saved Messages."""
         disable_preview = kwargs.pop("disable_web_page_preview", True)
+        if callable(reply_markup):
+            reply_markup = reply_markup()
         if self._inline_bot_ok():
             try:
-                # Ensure Bot API shape
-                if callable(reply_markup):
-                    reply_markup = reply_markup()
-                if reply_markup is not None and not (
-                    isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup
-                ):
-                    try:
-                        kb = self.inline.buttons_to_bot_api_keyboard(reply_markup)
-                        if kb:
-                            reply_markup = {"inline_keyboard": kb}
-                    except Exception:
-                        reply_markup = self._bot_api_update_markup()
+                # TelethonBot expects list-of-rows of dicts / Button, NOT Bot API
+                # {"inline_keyboard": ...} — that was rendered as a broken empty button.
+                if reply_markup is None:
+                    reply_markup = self._update_markup_rows()
+                elif isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup:
+                    # unwrap accidental Bot API shape
+                    reply_markup = reply_markup.get("inline_keyboard") or self._update_markup_rows()
                 return await self.inline.bot.send_message(
                     self.tg_id,
                     text,
@@ -389,6 +371,7 @@ class UpdaterMod(loader.Module):
             except Exception:
                 logger.exception("inline bot notify failed, fallback to client")
         try:
+            # User-client fallback: no bot buttons
             return await self._client.send_message(
                 self.tg_id,
                 text,
@@ -1423,7 +1406,7 @@ class UpdaterMod(loader.Module):
                 "emoji_id": 5255949705740843980,
             },
         ]
-        self._markup = self._bot_api_update_markup
+        self._markup = self._update_markup_rows
 
         if self.get("selfupdatemsg") is not None:
             try:

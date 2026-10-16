@@ -102,6 +102,49 @@ class TelethonBot:
         ):
             return reply_markup
 
+        # Bot API shape from modules: {"inline_keyboard": [[{text, callback_data}, ...]]}
+        if isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup:
+            rows_api = reply_markup.get("inline_keyboard") or []
+            converted = []
+            for row in rows_api:
+                if not isinstance(row, (list, tuple)):
+                    continue
+                crow = []
+                for b in row:
+                    if not isinstance(b, dict):
+                        continue
+                    crow.append(
+                        {
+                            "text": b.get("text") or "·",
+                            "data": b.get("callback_data") or b.get("data"),
+                            "url": b.get("url"),
+                            "emoji_id": b.get("icon_custom_emoji_id") or b.get("emoji_id"),
+                            "style": b.get("style"),
+                            **(
+                                {"web_app": b["web_app"]}
+                                if "web_app" in b
+                                else {}
+                            ),
+                            **(
+                                {"copy": b["copy_text"]["text"]}
+                                if isinstance(b.get("copy_text"), dict)
+                                and b["copy_text"].get("text")
+                                else {}
+                            ),
+                        }
+                    )
+                # drop empty data+url buttons after strip
+                crow = [
+                    x
+                    for x in crow
+                    if x.get("url") or x.get("data") or x.get("web_app") or x.get("copy")
+                ]
+                if crow:
+                    converted.append(crow)
+            reply_markup = converted or None
+            if reply_markup is None:
+                return None
+
         # Already a list of Button / KeyboardButton objects (or nested rows)
         def _is_tl_button(obj) -> bool:
             if obj is None:
@@ -137,9 +180,13 @@ class TelethonBot:
                 except Exception:
                     icon = None
 
-            if "url" in btn:
+            if "url" in btn and btn["url"]:
                 return make_button(text=text, url=btn["url"], style=style, icon=icon)
-            if "data" in btn:
+            if "callback_data" in btn and btn["callback_data"] is not None:
+                return make_button(
+                    text=text, data=btn["callback_data"], style=style, icon=icon
+                )
+            if "data" in btn and btn["data"] is not None:
                 return make_button(text=text, data=btn["data"], style=style, icon=icon)
             if "_callback_data" in btn:
                 return make_button(
