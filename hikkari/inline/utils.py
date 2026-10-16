@@ -153,27 +153,12 @@ class Utils(InlineUnit):
             line = []
             for button in row:
                 try:
-                    # Buttons cannot render HTML — strip tags, keep unicode fallback
-                    raw_btn_text = str(button.get("text") or "•")
-                    try:
-                        from ..utils.emoji_prem import prem_btn_text
-                        safe_text = prem_btn_text(raw_btn_text)
-                    except Exception:
-                        safe_text = re.sub(
-                            r"<emoji\b[^>]*>(.*?)</emoji>|<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
-                            lambda m: m.group(1) or m.group(2) or "",
-                            raw_btn_text,
-                            flags=re.I | re.S,
-                        )
-                    # Keep unicode in text (fallback) + MTProto style.icon for clients that support it
-                    btn_kwargs = {"text": safe_text or "•"}
+                    # Heroku-compatible: plain text + optional style + icon (document_id)
+                    btn_kwargs = {"text": str(button.get("text") or "•")}
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
                     if emoji_id := self._get_button_emoji_id(button):
-                        try:
-                            btn_kwargs["icon"] = int(str(emoji_id).strip())
-                        except (TypeError, ValueError):
-                            pass
+                        btn_kwargs["icon"] = int(emoji_id)
 
                     match True:
                         case _ if "url" in button:
