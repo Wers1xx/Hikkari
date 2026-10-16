@@ -78,14 +78,6 @@ class UpdaterMod(loader.Module):
                 validator=loader.validators.Link(),
             ),
             loader.ConfigValue(
-                "beta_users",
-                [],
-                "Optional LOCAL extra beta IDs. Main list is on GitHub: "
-                "assets/beta_users.txt (raw.githubusercontent.com/Wers1xx/Hikkari/master/...). "
-                "Does NOT grant .branch beta. Access is ONLY via GitHub assets/beta_users.txt",
-                validator=loader.validators.Series(validator=loader.validators.Integer()),
-            ),
-            loader.ConfigValue(
                 "disable_notifications",
                 doc=lambda: self.strings["_cfg_doc_disable_notifications"],
                 validator=loader.validators.Boolean(),
@@ -1308,11 +1300,6 @@ class UpdaterMod(loader.Module):
     async def betalist(self, message: Message):
         """Show who can use the beta branch (from GitHub)"""
         ids = await self._fetch_github_beta_ids()
-        local = []
-        try:
-            local = [int(x) for x in (self.config.get("beta_users") or [])]
-        except Exception:
-            pass
         lines = [
             "<b>✨ Beta access</b>",
             "",
@@ -1321,11 +1308,6 @@ class UpdaterMod(loader.Module):
         for i in sorted(ids):
             mark = " (creator)" if i == self._BETA_CREATOR_ID else ""
             lines.append(f"• <code>{i}</code>{mark}")
-        if local:
-            lines.append("")
-            lines.append("<b>Local extra</b> (cfg Updater beta_users):")
-            for i in local:
-                lines.append(f"• <code>{i}</code>")
         lines.append("")
         lines.append(
             '<a href="https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt">'
@@ -1338,58 +1320,26 @@ class UpdaterMod(loader.Module):
         en_doc="<id|reply> — local beta grant (main list is on GitHub)",
     )
     async def betagrant(self, message: Message):
-        """Local-only beta grant. Prefer editing GitHub assets/beta_users.txt"""
-        args = utils.get_args_raw(message)
-        uid = None
-        if args and str(args).strip().isdigit():
-            uid = int(str(args).strip())
-        elif message.is_reply:
-            reply = await message.get_reply_message()
-            uid = reply.sender_id if reply else None
-        if not uid:
-            await utils.answer(
-                message,
-                "❌ Reply / ID\n\n"
-                "<b>Main list:</b> edit on GitHub\n"
-                "<code>assets/beta_users.txt</code>",
-            )
-            return
-        cur = list(self.config.get("beta_users") or [])
-        if uid not in [int(x) for x in cur]:
-            cur.append(int(uid))
-            self.config["beta_users"] = cur
+        """Beta list is GitHub-only — no local config."""
         await utils.answer(
             message,
-            f"✅ Local beta for <code>{uid}</code>\n"
-            f"Prefer adding ID to GitHub <code>assets/beta_users.txt</code> "
-            f"so all installs see it.",
+            "🚫 <b>Local beta_users config removed</b>\n\n"
+            "Edit on GitHub:\n"
+            "<code>assets/beta_users.txt</code>\n"
+            '<a href="https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt">'
+            "open file</a>",
         )
 
-    @loader.command(
-        ru_doc="<id|reply> — убрать локальный beta-доступ",
-        en_doc="<id|reply> — revoke local beta access",
-    )
+
     async def betarevoke(self, message: Message):
-        """Revoke local beta access (GitHub list unchanged)"""
-        args = utils.get_args_raw(message)
-        uid = None
-        if args and str(args).strip().isdigit():
-            uid = int(str(args).strip())
-        elif message.is_reply:
-            reply = await message.get_reply_message()
-            uid = reply.sender_id if reply else None
-        if not uid:
-            await utils.answer(message, "❌ Reply to user or pass numeric ID")
-            return
-        cur = [int(x) for x in (self.config.get("beta_users") or [])]
-        if uid in cur:
-            cur.remove(uid)
-            self.config["beta_users"] = cur
+        """Beta list is GitHub-only — no local config."""
         await utils.answer(
             message,
-            f"✅ Local beta revoked for <code>{uid}</code>\n"
-            f"GitHub list is separate — edit <code>assets/beta_users.txt</code> there.",
+            "🚫 <b>Local beta_users config removed</b>\n\n"
+            "Remove ID on GitHub:\n"
+            "<code>assets/beta_users.txt</code>",
         )
+
 
 
     async def source(self, message: Message):

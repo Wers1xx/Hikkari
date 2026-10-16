@@ -91,18 +91,6 @@ class HikkariConfigMod(loader.Module):
                 lambda: "Banner for config UI (http URL or empty for built-in)",
                 validator=loader.validators.String(),
             ),
-            loader.ConfigValue(
-                "media_quote",
-                True,
-                lambda: "Use quote/webpage media for config banner",
-                validator=loader.validators.Boolean(),
-            ),
-            loader.ConfigValue(
-                "invert_media",
-                True,
-                lambda: "Invert media (quote style) for config banner",
-                validator=loader.validators.Boolean(),
-            ),
         )
 
 
@@ -1567,12 +1555,11 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
+        banner_kw = self._cfg_banner_kwargs()
         await utils.answer(
             call,
             self.strings["choose_core"],
-            photo=str(_cfg_banner) if _cfg_banner and Path(_cfg_banner).is_file() else None,
+            photo=banner_kw.get("photo"),
             reply_markup=[
                 [
                     {
@@ -1627,10 +1614,8 @@ class HikkariConfigMod(loader.Module):
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
-            form_kwargs["photo"] = str(_cfg_banner)
+        if "photo" not in form_kwargs:
+            form_kwargs.update(self._cfg_banner_kwargs())
         await self._cfg_form(
             draft.text,
             message=message,

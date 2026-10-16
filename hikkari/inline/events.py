@@ -681,6 +681,13 @@ class Events(InlineUnit):
                         value[:50],
                         unit_id,
                     )
+                    # Clear PM-fallback pending so next chat message is NOT saved as config
+                    try:
+                        pend = getattr(self, "_pending_config_input", None)
+                        if isinstance(pend, dict) and user_id in pend:
+                            pend.pop(user_id, None)
+                    except Exception:
+                        pass
                     return await handler(call, value, *args, **kwargs)
                 except Exception:
                     logger.exception(
