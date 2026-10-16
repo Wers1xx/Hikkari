@@ -64,6 +64,53 @@ class Placeholder:
     """Placeholder"""
 
 class Form(InlineUnit):
+
+    async def _answer_form_inline(self, inline_query, form: dict, *, text: str, parse_mode: str = "HTML"):
+        """Prefer Bot API answer when buttons use premium icon_custom_emoji_id."""
+        uid = form.get("uid")
+        buttons = form.get("buttons") or []
+        has_icon = False
+        try:
+            for row in self._normalize_markup(buttons):
+                for b in row:
+                    if isinstance(b, dict) and (
+                        b.get("emoji_id") or b.get("icon") or b.get("icon_custom_emoji_id")
+                    ):
+                        has_icon = True
+                        break
+                if has_icon:
+                    break
+        except Exception:
+            has_icon = False
+
+        if has_icon:
+            ok = await self.answer_inline_bot_api(
+                inline_query.query.query_id,
+                title="Hikkari",
+                message_text=text,
+                parse_mode=parse_mode,
+                markup_obj=uid,
+                cache_time=0,
+            )
+            if ok:
+                return True
+
+        await inline_query.answer(
+            [
+                await inline_query.builder.article(
+                    title=form.get("title") or "Hikkari",
+                    description=form.get("description") or "",
+                    text=text,
+                    parse_mode=parse_mode,
+                    link_preview=False,
+                    buttons=self.generate_markup(uid),
+                    id=utils.rand(20),
+                )
+            ],
+            cache_time=0,
+        )
+        return True
+
     async def form(
         self: "InlineManager",
         text: str,
