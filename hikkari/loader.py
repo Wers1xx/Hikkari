@@ -864,6 +864,9 @@ class Modules:
         if not no_external:
             loaded += await self._register_modules(external_mods, "<file>")
 
+        with contextlib.suppress(Exception):
+            _release_memory()
+
         return loaded
 
     async def _register_modules(
@@ -906,6 +909,11 @@ class Modules:
                 loaded += [await self.register_module(spec, module_name, origin)]
 
                 logger.debug("Successfully loaded %s from filesystem", module_name)
+                if origin == "<file>":
+                    await asyncio.sleep(0)
+                    if len(loaded) % 5 == 0:
+                        with contextlib.suppress(Exception):
+                            _release_memory()
             except Exception as e:
                 logger.exception("Failed to load module %s due to %s:", mod, e)
                 try:

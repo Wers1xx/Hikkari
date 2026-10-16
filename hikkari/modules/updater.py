@@ -325,19 +325,6 @@ class UpdaterMod(loader.Module):
         except Exception:
             return ""
 
-    async def client_ready(self):
-        # Restore preferred branch (beta must survive restarts / container recreation)
-        with contextlib.suppress(Exception):
-            await self._ensure_preferred_branch()
-        # Immediate update check on start (don't wait for first poll interval)
-        async def _boot_check():
-            await asyncio.sleep(3)  # let inline bot / net settle
-            with contextlib.suppress(Exception):
-                self._fetch_branch()
-            with contextlib.suppress(Exception):
-                await self._poll_once()
-        asyncio.ensure_future(_boot_check())
-
 
     def _inline_bot_ok(self) -> bool:
         """True if inline bot client is ready (token valid + connected)."""
@@ -461,7 +448,7 @@ class UpdaterMod(loader.Module):
 
     @loader.callback_handler()
     async def update_call(self, call: InlineCall):
-        """Process update buttons clicks"""
+        """Process update buttons in bot PM: download → install → restart."""
         if NO_GIT:
             await call.answer("Git disabled via --no-git.", show_alert=True)
             return
@@ -470,49 +457,22 @@ class UpdaterMod(loader.Module):
 
         if call.data == "hikkari/ignore_upd":
             self.set("ignore_permanent", self.get_latest())
-            await self.inline.bot(call.answer(self.strings["latest_disabled"]))
+            with contextlib.suppress(Exception):
+                await call.answer(self.strings["latest_disabled"], show_alert=True)
             return
 
-        await self._delete_all_upd_messages()
-
-        # Status from OWNER account (userbot), NOT from inline bot
+        # Do NOT show restart first and do NOT delete the card before download
         with contextlib.suppress(Exception):
             await call.answer()
-        caption = self.strings["restarting_caption"].format(
-            utils.get_platform_emoji()
-            if getattr(self._client, "hikkari_me", None)
-            and self._client.hikkari_me.premium
-            else "Hikkari"
-        )
-        # Remove bot's update card — status will be owner's message
-        with contextlib.suppress(Exception):
-            await call.delete()
 
-        status_msg = None
-        # Prefer same dialog (chat with inline bot) as owner message
-        peer = None
-        with contextlib.suppress(Exception):
-            peer = getattr(self.inline, "bot_id", None)
-        if peer is None:
-            with contextlib.suppress(Exception):
-                uname = getattr(self.inline, "bot_username", None)
-                if uname:
-                    peer = uname if str(uname).startswith("@") else f"@{uname}"
-        if peer is None:
-            peer = self.tg_id  # fallback: Saved Messages
+        # Keep bot message id for status edits + post-restart success edit
+        mid = getattr(call, "message_id", None) or getattr(
+            getattr(call, "message", None), "message_id", None
+        ) or getattr(getattr(call, "message", None), "id", None)
+        if mid is not None:
+            self.set("selfupdatemsg", f"bot:{self.tg_id}:{int(mid)}")
 
-        with contextlib.suppress(Exception):
-            status_msg = await self._client.send_message(peer, caption)
-        if status_msg is not None:
-            self.set(
-                "selfupdatemsg",
-                f"{utils.get_chat_id(status_msg)}:{status_msg.id}",
-            )
-        else:
-            logger.warning("update_call: failed to send owner restart status")
-
-        # Restart as userbot; restart_common must not re-send status
-        await self.inline_update(status_msg or call)
+        await self.inline_update(call)
 
     def _recent_commits_changelog(self, limit: int = 15) -> str:
         """Build changelog text from recent git commits (latest updates/fixes)."""
@@ -1008,20 +968,59 @@ class UpdaterMod(loader.Module):
             "Use <code>.update</code> manually.",
         )
 
+    async def _edit_update_status(self, msg_obj, text: str):
+        """Edit progress on bot-PM card or owner message."""
+        if getattr(self, "inline", None):
+            with contextlib.suppress(Exception):
+                text = self.inline.sanitise_text(text)
+        # Prefer explicit bot:chat:mid ref
+        ref = self.get("selfupdatemsg")
+        if isinstance(ref, str) and ref.startswith("bot:"):
+            parts = ref.split(":")
+            if len(parts) == 3:
+                try:
+                    chat_id, message_id = int(parts[1]), int(parts[2])
+                    await self.inline.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        disable_web_page_preview=True,
+                    )
+                    return msg_obj
+                except Exception:
+                    logger.debug("bot status edit failed", exc_info=True)
+        mid = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
+        if mid is None:
+            m = getattr(msg_obj, "message", None)
+            mid = getattr(m, "message_id", None) or getattr(m, "id", None)
+        if mid is not None and getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+            try:
+                await self.inline.bot.edit_message_text(
+                    chat_id=self.tg_id,
+                    message_id=int(mid),
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+                return msg_obj
+            except Exception:
+                logger.debug("bot edit by mid failed", exc_info=True)
+        with contextlib.suppress(Exception):
+            return await utils.answer(msg_obj, text, skip_rich=True)
+        return msg_obj
+
     async def inline_update(
         self,
         msg_obj: InlineCall | Message,
         hard: bool = False,
     ):
-        # We don't really care about asyncio at this point, as we are shutting down
+        # Strict order: download → install requirements → restart (never restart first)
         if hard:
             os.system(f"cd {utils.get_base_dir()} && cd .. && git reset --hard HEAD")
 
         try:
-            with contextlib.suppress(Exception):
-                msg_obj = await utils.answer(
-                    msg_obj, self.strings["downloading"], skip_rich=True
-                )
+            msg_obj = await self._edit_update_status(
+                msg_obj, self.strings["downloading"]
+            )
 
             try:
                 req_update = await self.download_common()
@@ -1029,12 +1028,15 @@ class UpdaterMod(loader.Module):
                     raise RuntimeError("Hikkari update auto-rollback")
             except TimeoutError:
                 logger.exception("Timed out while fetching updates from git remote")
+                with contextlib.suppress(Exception):
+                    await self._edit_update_status(
+                        msg_obj, "❌ <b>Timeout while downloading update</b>"
+                    )
                 return
 
-            with contextlib.suppress(Exception):
-                msg_obj = await utils.answer(
-                    msg_obj, self.strings["installing"], skip_rich=True
-                )
+            msg_obj = await self._edit_update_status(
+                msg_obj, self.strings["installing"]
+            )
 
             if req_update:
                 self.req_common()
@@ -1460,6 +1462,19 @@ class UpdaterMod(loader.Module):
         else:
             with contextlib.suppress(Exception):
                 self._clear_pre_update()
+
+        # Preferred branch + immediate update notify in bot PM
+        with contextlib.suppress(Exception):
+            await self._ensure_preferred_branch()
+
+        async def _boot_check():
+            await asyncio.sleep(4)
+            with contextlib.suppress(Exception):
+                self._fetch_branch()
+            with contextlib.suppress(Exception):
+                await self._poll_once()
+
+        asyncio.ensure_future(_boot_check())
 
     async def _add_folder(self):
         folders = await self._client(GetDialogFiltersRequest())
