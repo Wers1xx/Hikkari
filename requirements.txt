@@ -1,4 +1,4 @@
-# hikkaritl installed separately in __main__.deps() from GitHub
+# hikkaritl>=1.1.6
 pyaes
 rsa
 aiofile==3.8.1
