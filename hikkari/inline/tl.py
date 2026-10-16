@@ -548,39 +548,93 @@ def make_button(
     web_app: str | dict | None = None,
     copy_text: str | None = None,
 ):
-    """Build button. icon if set must be int64 custom-emoji document_id."""
-    icon_i = None
+    """
+    Build MTProto inline button.
+
+    Premium emoji on buttons = KeyboardButtonStyle(icon=<document_id:int64>).
+    See https://core.telegram.org/constructor/keyboardButtonStyle
+    and keyboardButtonCallback style:flags.10?KeyboardButtonStyle
+    """
+    icon_i: int | None = None
     if icon is not None:
         try:
             icon_i = int(str(icon).strip())
+            if icon_i == 0:
+                icon_i = None
         except (TypeError, ValueError):
             icon_i = None
 
+    style_obj = None
+    st = (style or "").lower().strip() or None
+    if st is not None and st not in ("primary", "danger", "success"):
+        st = None
+    if st is not None or icon_i is not None:
+        # Official: icon can be used with or without bg_* colors
+        kw = {}
+        if st == "primary":
+            kw["bg_primary"] = True
+        elif st == "danger":
+            kw["bg_danger"] = True
+        elif st == "success":
+            kw["bg_success"] = True
+        if icon_i is not None:
+            kw["icon"] = icon_i
+        style_obj = types.KeyboardButtonStyle(**kw)
+
+    def _data_bytes(d) -> bytes:
+        if isinstance(d, (bytes, bytearray, memoryview)):
+            raw = bytes(d)
+        else:
+            raw = str(d).encode("utf-8")
+        return raw[:64]
+
+    # Prefer direct TL constructors so style.icon is never dropped
     if url is not None:
-        return Button.url(text, url, style=style, icon=icon_i)
+        try:
+            return types.KeyboardButtonUrl(text, url, style=style_obj)
+        except TypeError:
+            try:
+                return types.KeyboardButtonUrl(text, url)
+            except Exception:
+                return Button.url(text, url)
 
     if data is not None:
-        return Button.inline(text, data, style=style, icon=icon_i)
+        raw = _data_bytes(data)
+        try:
+            return types.KeyboardButtonCallback(text, raw, style=style_obj)
+        except TypeError:
+            return types.KeyboardButtonCallback(text, raw)
 
     if switch_inline_query_current_chat is not None:
-        return Button.switch_inline(
-            text, switch_inline_query_current_chat, same_peer=True, style=style, icon=icon_i
-        )
+        q = switch_inline_query_current_chat
+        try:
+            return types.KeyboardButtonSwitchInline(text, q, same_peer=True, style=style_obj)
+        except TypeError:
+            return types.KeyboardButtonSwitchInline(text, q, same_peer=True)
 
     if switch_inline_query is not None:
-        return Button.switch_inline(
-            text, switch_inline_query, same_peer=False, style=style, icon=icon_i
-        )
+        q = switch_inline_query
+        try:
+            return types.KeyboardButtonSwitchInline(text, q, same_peer=False, style=style_obj)
+        except TypeError:
+            return types.KeyboardButtonSwitchInline(text, q, same_peer=False)
 
     if web_app is not None:
         app_url = web_app if isinstance(web_app, str) else web_app["url"]
-        return Button.web_view(text, app_url)
+        try:
+            return types.KeyboardButtonWebView(text, app_url)
+        except Exception:
+            return Button.web_view(text, app_url)
 
     if copy_text is not None:
         try:
-            return Button.copy(text, copy_text)
+            return types.KeyboardButtonCopy(text, copy_text)
         except Exception:
-            return Button.inline(text, b"copy")
+            return types.KeyboardButtonCallback(text, b"copy")
 
-    return Button.inline(text, text, style=style, icon=icon_i)
+    raw = _data_bytes(text)
+    try:
+        return types.KeyboardButtonCallback(text, raw, style=style_obj)
+    except TypeError:
+        return types.KeyboardButtonCallback(text, raw)
 
