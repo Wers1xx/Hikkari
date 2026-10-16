@@ -981,10 +981,22 @@ class UpdaterMod(loader.Module):
                 ],
             )
             if not form_ok:
-                await self.inline_update(message)
+                tip = "\n\n<code>.update -f</code>"
+                body = (
+                    self.strings["update_confirm"].format(
+                        current, current[:8], upcoming, upcoming[:8]
+                    )
+                    if upcoming != current
+                    else self.strings["no_update"]
+                )
+                await utils.answer(message, body + tip)
         except Exception:
-            logger.exception("update form failed, force inline_update")
-            await self.inline_update(message)
+            logger.exception("update form failed")
+            with contextlib.suppress(Exception):
+                await utils.answer(
+                    message,
+                    "Update form failed. Use <code>.update -f</code>",
+                )
 
     @loader.command()
     async def autoupdate(self, message: Message):
