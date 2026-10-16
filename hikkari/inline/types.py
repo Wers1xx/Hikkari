@@ -271,6 +271,45 @@ class _CallbackMixin:
             sender_id=call.sender_id,
         )
 
+
+    @property
+    def client(self):
+        """Userbot Telethon client (for external modules)."""
+        im = getattr(self, "inline_manager", None)
+        if im is None:
+            return None
+        return (
+            getattr(im, "_client", None)
+            or getattr(im, "client", None)
+            or getattr(getattr(im, "bot", None), "_client", None)
+        )
+
+    @property
+    def conv(self):
+        """
+        Compatibility for Hikka/Heroku modules that use ``call.conv``.
+
+        Returns a Telethon Conversation with the user who pressed the button.
+        Typical usage::
+
+            async with call.conv as conv:
+                await conv.send_message("...")
+                r = await conv.get_response()
+        """
+        client = self.client
+        if client is None or not hasattr(client, "conversation"):
+            raise AttributeError(
+                "InlineCall.conv: userbot client is not available"
+            )
+        peer = (
+            getattr(self, "sender_id", None)
+            or getattr(getattr(self, "from_user", None), "id", None)
+            or getattr(self, "chat_id", None)
+        )
+        if peer is None:
+            raise AttributeError("InlineCall.conv: no peer for conversation")
+        return client.conversation(peer)
+
     async def answer(
         self,
         text: str | None = None,
