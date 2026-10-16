@@ -165,17 +165,31 @@ class Utils(InlineUnit):
                             raw_btn_text,
                             flags=re.I | re.S,
                         )
-                    btn_kwargs = {"text": safe_text or "•"}
+                    emoji_id = self._get_button_emoji_id(button)
+                    icon_i = None
+                    if emoji_id:
+                        try:
+                            icon_i = int(str(emoji_id).strip())
+                        except (TypeError, ValueError):
+                            icon_i = None
 
+                    # Official method: custom emoji is KeyboardButtonStyle.icon (document_id).
+                    # Keep plain label without unicode emoji when icon is set —
+                    # client renders the premium icon before the text.
+                    label = safe_text or "•"
+                    if icon_i is not None:
+                        label = re.sub(
+                            r"^[\s\W\d]*?(?:⬇️|⬇|🔻|✅|✔️|❌|⚠|⚠️|🚫|✨|🔄|ℹ️|ℹ|🛰|🛸|🌐|❓|📦|🔗)+\s*",
+                            "",
+                            label,
+                            count=1,
+                        ).strip() or label
+
+                    btn_kwargs = {"text": label}
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
-
-                    # Optional: only if module explicitly set emoji_id / icon (int64)
-                    if emoji_id := self._get_button_emoji_id(button):
-                        try:
-                            btn_kwargs["icon"] = int(str(emoji_id).strip())
-                        except (TypeError, ValueError):
-                            pass
+                    if icon_i is not None:
+                        btn_kwargs["icon"] = icon_i
 
                     match True:
                         case _ if "url" in button:
