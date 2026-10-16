@@ -971,6 +971,7 @@ class UpdaterMod(loader.Module):
                         "text": self.strings["btn_update"],
                         "callback": self.inline_update,
                         "style": "primary",
+                        "emoji_id": 5258382512656253510,
                     },
                     {
                         "text": self.strings["cancel"],
@@ -1401,11 +1402,13 @@ class UpdaterMod(loader.Module):
                     "text": self.strings["update"],
                     "data": "hikkari/update",
                     "style": "primary",
+                    "emoji_id": 5258382512656253510,
                 },
                 {
                     "text": self.strings["ignore"],
                     "data": "hikkari/ignore_upd",
                     "style": "danger",
+                    "emoji_id": 5255949705740843980,
                 },
             ]
         )
@@ -1827,9 +1830,10 @@ class UpdaterMod(loader.Module):
                         "callback": self.rollback_confirm,
                         "args": [target[0], target[1], target[2]],
                         "style": "success",
+                        "emoji_id": 5206607081334906820,
                     }
                 ],
-                [{"text": "❌", "action": "close", "style": "danger"}],
+                [{"text": "❌", "action": "close", "style": "danger", "emoji_id": 5210952531676504517}],
             ],
         )
 
