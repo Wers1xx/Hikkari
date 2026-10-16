@@ -1305,7 +1305,10 @@ class Hikkari:
         await modules.send_ready()
         # Let channel finish without holding the badge/start path longer than needed
         with contextlib.suppress(Exception):
-            await asyncio.wait_for(channel_task, timeout=45)
+            await asyncio.wait_for(
+            channel_task,
+            timeout=8 if os.environ.get("HIKKARI_FAST_START") else 20,
+        )
 
         if first:
             await self._badge(client)

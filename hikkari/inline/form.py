@@ -157,6 +157,7 @@ class Form(InlineUnit):
         location: str | None = None,
         audio: dict | str | None = None,
         silent: bool = False,
+        rich_message: typing.Any = None,
     ) -> InlineMessage | bool:
         """
         Send inline form to chat
@@ -416,6 +417,7 @@ class Form(InlineUnit):
             "on_unload": on_unload,
             "future": Event(),
             **({"photo": photo} if photo else {}),
+            **({"rich_message": rich_message} if rich_message is not None else {}),
             **({"video": video} if video else {}),
             **({"gif": gif} if gif else {}),
             **({"location": location} if location else {}),
@@ -858,6 +860,25 @@ class Form(InlineUnit):
 
         try:
             match True:
+                case _ if "rich_message" in form:
+                    rich_value = form["rich_message"]
+                    if not isinstance(rich_value, str):
+                        try:
+                            from .._internal import normalize_rich_html
+                            rich_value = normalize_rich_html(str(rich_value))
+                        except Exception:
+                            rich_value = str(rich_value)
+                    await inline_query.answer(
+                        [
+                            await inline_query.rich_article(
+                                title="Hikkari",
+                                html=rich_value if isinstance(rich_value, str) else str(rich_value),
+                                buttons=self.generate_markup(form["uid"]),
+                                id=utils.rand(20),
+                            )
+                        ],
+                        cache_time=0,
+                    )
                 case _ if "photo" in form:
                     await inline_query.answer(
                         [

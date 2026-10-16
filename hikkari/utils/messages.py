@@ -408,7 +408,25 @@ async def answer_rich(
         if not getattr(inline, "init_complete", False):
             with contextlib.suppress(Exception):
                 await inline.register_manager(ignore_token_checks=True)
+        # Heroku 2.2-style: native MTProto Rich when Premium + no need for inline unit
+        try:
+            me = getattr(client, "hikkari_me", None) or getattr(client, "heroku_me", None)
+            premium = bool(getattr(me, "premium", False))
+            if premium and not pages and hasattr(client, "send_rich_message"):
+                chat = utils.get_chat_id(message) if not getattr(message, "out", False) else message.peer_id
+                sent = await client.send_rich_message(
+                    chat,
+                    html,
+                    reply_to=getattr(message, "id", None) if not getattr(message, "out", False) else None,
+                    silent=silent,
+                )
+                if sent:
+                    return sent
+        except Exception:
+            pass  # fall through to via@ / Bot API rich
+
         m = await inline.rich(
+
             message,
             html,
             title=title[:64],
@@ -488,11 +506,16 @@ async def answer(
             reply_markup = message.client.loader.inline._normalize_markup(reply_markup)
             # Prefer silent form: avoid <emoji document_id=5283176512747507510>✨</emoji> "opening..." hang; delete cmd after click
             kwargs.setdefault("silent", True)
+            form_kw = dict(kwargs)
+            # Heroku 2.2: if response is Rich HTML, send as native rich form with buttons
+            if looks_like_rich_html(response) or form_kw.pop("rich", False):
+                form_kw["rich_message"] = response
+                form_kw.setdefault("silent", True)
             result = await message.client.loader.inline.form(
-                response,
+                response if not form_kw.get("rich_message") else "✨",
                 message=message if message.out else get_chat_id(message),
                 reply_markup=_sanitize_markup_emojis(reply_markup),
-                **kwargs,
+                **form_kw,
             )
             return result
 

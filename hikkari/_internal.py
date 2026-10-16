@@ -233,3 +233,18 @@ def restore_worktree(repo_path):
         return proc.returncode == 0
     except (subprocess.TimeoutExpired, Exception):
         return False
+
+
+import re as _re_rich
+
+_EMOJI_OPEN = _re_rich.compile(
+    r"<emoji\s+document_id\s*=\s*[\"']?(\d+)[\"']?\s*>", _re_rich.IGNORECASE
+)
+
+
+def normalize_rich_html(html_text):
+    """Map legacy <emoji document_id> to <tg-emoji emoji-id> for native Rich API."""
+    if not isinstance(html_text, str):
+        return html_text
+    html_text = _EMOJI_OPEN.sub(r'<tg-emoji emoji-id="\1">', html_text)
+    return _re_rich.sub(r"</emoji\s*>", "</tg-emoji>", html_text, flags=_re_rich.IGNORECASE)

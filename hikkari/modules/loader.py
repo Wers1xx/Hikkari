@@ -2604,49 +2604,34 @@ class LoaderMod(loader.Module):
             await utils.answer(message, self.strings["args"])
             return
 
-        await utils.answer(message, self.strings["ml_load_module"])
-
+        # Fast path: exact match without blocking "loading" status first
+        q = args.lower().strip()
         exact = True
-        if not (
-            class_name := next(
-                (
-                    module.strings("name")
-                    for module in self.allmodules.modules
-                    if args.lower()
-                    in {
-                        module.strings("name").lower(),
-                        module.__class__.__name__.lower(),
-                    }
-                ),
-                None,
-            )
-        ):
-            if not (
-                class_name := next(
-                    reversed(
-                        sorted(
-                            [
-                                module.strings["name"].lower()
-                                for module in self.allmodules.modules
-                            ]
-                            + [
-                                module.__class__.__name__.lower()
-                                for module in self.allmodules.modules
-                            ],
-                            key=lambda x: difflib.SequenceMatcher(
-                                None,
-                                args.lower(),
-                                x,
-                            ).ratio(),
-                        )
-                    ),
-                    None,
-                )
-            ):
+        class_name = None
+        best_ratio = 0.0
+        best_name = None
+        for module in self.allmodules.modules:
+            try:
+                sname = module.strings("name")
+            except Exception:
+                sname = module.__class__.__name__
+            names = {str(sname).lower(), module.__class__.__name__.lower()}
+            if q in names:
+                class_name = sname
+                break
+            for n in names:
+                r = difflib.SequenceMatcher(None, q, n).ratio()
+                if r > best_ratio:
+                    best_ratio = r
+                    best_name = sname
+        if class_name is None:
+            if best_ratio < 0.45 or not best_name:
                 await utils.answer(message, self.strings["404"])
                 return
-
+            class_name = best_name
             exact = False
+
+        await utils.answer(message, self.strings["ml_load_module"])
 
         try:
             module = self.lookup(class_name)

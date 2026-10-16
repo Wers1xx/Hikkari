@@ -512,6 +512,25 @@ class TelegramLogsHandler(logging.Handler):
             msg0 = record.getMessage() if hasattr(record, "getMessage") else str(record.msg)
         except Exception:
             msg0 = str(getattr(record, "msg", ""))
+        # Redact secrets from anything that might reach log-chat
+        try:
+            import re as _re_sec
+            msg0 = _re_sec.sub(
+                r"\b(\d{8,12}:[A-Za-z0-9_-]{30,})\b",
+                r"<bot_token>",
+                msg0,
+            )
+            msg0 = _re_sec.sub(
+                r"(api_hash[\"'=:\s]+)[A-Za-z0-9]{16,}",
+                r"\1<redacted>",
+                msg0,
+                flags=_re_sec.I,
+            )
+            # Reflect redaction into record message for TG path
+            record.msg = msg0
+            record.args = ()
+        except Exception:
+            pass
         mute = getattr(self, "_tg_mute_substrings", ()) or ()
         if any(s in msg0 for s in mute):
             # keep in local buffer at DEBUG only; never enqueue to Telegram

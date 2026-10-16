@@ -37,6 +37,9 @@ from hikkaritl.tl.functions.users import GetFullUserRequest
 from hikkaritl.tl.tlobject import TLRequest
 from hikkaritl.tl.types import (
     ChannelFull,
+    InputRichMessageHTML,
+    InputRichMessageMarkdown,
+    InputRichMessage,
     Message,
     Updates,
     UpdatesCombined,
@@ -44,6 +47,7 @@ from hikkaritl.tl.types import (
     User,
     UserFull,
 )
+from hikkaritl.tl import utils as tl_utils
 from hikkaritl.utils import is_list_like
 
 from .types import (
@@ -677,6 +681,97 @@ class CustomTelegramClient(TelegramClient):
             inspect.stack(),
             *args,
             **kwargs,
+        )
+
+
+    @staticmethod
+    def _rich_input(
+        html: str | None = None,
+        markdown: str | None = None,
+        rich_message=None,
+        *,
+        rtl: bool | None = None,
+        noautolink: bool | None = None,
+    ):
+        if rich_message is not None:
+            return rich_message
+        if html is not None:
+            from ._internal import normalize_rich_html
+            return InputRichMessageHTML(
+                html=normalize_rich_html(html), rtl=rtl, noautolink=noautolink
+            )
+        if markdown is not None:
+            return InputRichMessageMarkdown(
+                markdown=markdown, rtl=rtl, noautolink=noautolink
+            )
+        raise ValueError("One of html, markdown or rich_message is required")
+
+    @staticmethod
+    def _rich_fallback_text(html=None, markdown=None, rich_message=None):
+        from hikkaritl.extensions import html as html_parser
+        if html is not None:
+            text, _ = html_parser.parse(html)
+            return text
+        if markdown is not None:
+            return markdown
+        if rich_message is not None:
+            rich_html = getattr(rich_message, "html", None)
+            if rich_html:
+                text, _ = html_parser.parse(rich_html)
+                return text
+            return getattr(rich_message, "markdown", None) or ""
+        return ""
+
+    async def send_rich_message(
+        self,
+        entity,
+        html: str | None = None,
+        *,
+        markdown: str | None = None,
+        rich_message=None,
+        reply_to=None,
+        buttons=None,
+        silent: bool | None = None,
+        rtl: bool | None = None,
+        noautolink: bool | None = None,
+    ):
+        """Native Telegram Rich Message (Premium). Falls back raises on failure."""
+        rich_input = self._rich_input(
+            html, markdown, rich_message, rtl=rtl, noautolink=noautolink
+        )
+        return await self.send_message(
+            entity,
+            self._rich_fallback_text(html, markdown, rich_message),
+            reply_to=reply_to,
+            buttons=buttons,
+            silent=silent,
+            link_preview=False,
+            rich_message=rich_input,
+        )
+
+    async def edit_rich_message(
+        self,
+        entity,
+        message,
+        html: str | None = None,
+        *,
+        markdown: str | None = None,
+        rich_message=None,
+        buttons=None,
+        rtl: bool | None = None,
+        noautolink: bool | None = None,
+    ):
+        rich_input = self._rich_input(
+            html, markdown, rich_message, rtl=rtl, noautolink=noautolink
+        )
+        mid = message if isinstance(message, int) else getattr(message, "id", message)
+        return await self.edit_message(
+            entity,
+            mid,
+            self._rich_fallback_text(html, markdown, rich_message),
+            buttons=buttons,
+            link_preview=False,
+            rich_message=rich_input,
         )
 
     async def send_message(self, *args, **kwargs) -> Message:

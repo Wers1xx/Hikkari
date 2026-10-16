@@ -408,6 +408,55 @@ class InlineQuery:
     def __getattr__(self, item: str):
         return getattr(self.inline_query, item)
 
+
+    async def rich_article(
+        self,
+        title: str,
+        html: str | None = None,
+        *,
+        markdown: str | None = None,
+        rich_message=None,
+        description: str | None = None,
+        id: str | None = None,
+        buttons=None,
+    ):
+        """Build InputBotInlineResult with native Rich message (Heroku 2.2-compatible)."""
+        import secrets
+        from hikkaritl.tl import types
+        from .._internal import normalize_rich_html
+
+        if rich_message is None:
+            if html is not None:
+                rich_message = types.InputRichMessageHTML(
+                    html=normalize_rich_html(html)
+                )
+            elif markdown is not None:
+                rich_message = types.InputRichMessageMarkdown(markdown=markdown)
+            else:
+                raise ValueError("One of html, markdown or rich_message is required")
+
+        markup = None
+        if buttons is not None:
+            try:
+                client = getattr(self.inline_query, "client", None) or getattr(
+                    getattr(self.inline_query, "builder", None), "_client", None
+                )
+                if client is not None:
+                    markup = client.build_reply_markup(buttons)
+            except Exception:
+                markup = None
+
+        return types.InputBotInlineResult(
+            id=id or secrets.token_urlsafe(15),
+            type="article",
+            title=title,
+            description=description,
+            send_message=types.InputBotInlineMessageRichMessage(
+                rich_message=rich_message,
+                reply_markup=markup,
+            ),
+        )
+
     async def answer(self, results=None, cache_time: int = 0, **kwargs):
         return await self.inline_query.answer(
             results or [],
