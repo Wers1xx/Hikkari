@@ -165,31 +165,15 @@ class Utils(InlineUnit):
                             raw_btn_text,
                             flags=re.I | re.S,
                         )
-                    emoji_id = self._get_button_emoji_id(button)
-                    icon_i = None
-                    if emoji_id:
-                        try:
-                            icon_i = int(str(emoji_id).strip())
-                        except (TypeError, ValueError):
-                            icon_i = None
-
-                    # Official method: custom emoji is KeyboardButtonStyle.icon (document_id).
-                    # Keep plain label without unicode emoji when icon is set —
-                    # client renders the premium icon before the text.
-                    label = safe_text or "•"
-                    if icon_i is not None:
-                        label = re.sub(
-                            r"^[\s\W\d]*?(?:⬇️|⬇|🔻|✅|✔️|❌|⚠|⚠️|🚫|✨|🔄|ℹ️|ℹ|🛰|🛸|🌐|❓|📦|🔗)+\s*",
-                            "",
-                            label,
-                            count=1,
-                        ).strip() or label
-
-                    btn_kwargs = {"text": label}
+                    # Keep unicode in text (fallback) + MTProto style.icon for clients that support it
+                    btn_kwargs = {"text": safe_text or "•"}
                     if style := self._get_button_style(button):
                         btn_kwargs["style"] = style
-                    if icon_i is not None:
-                        btn_kwargs["icon"] = icon_i
+                    if emoji_id := self._get_button_emoji_id(button):
+                        try:
+                            btn_kwargs["icon"] = int(str(emoji_id).strip())
+                        except (TypeError, ValueError):
+                            pass
 
                     match True:
                         case _ if "url" in button:
@@ -279,6 +263,126 @@ class Utils(InlineUnit):
         return markup
 
     generate_markup = _generate_markup
+
+    def buttons_to_bot_api_keyboard(self, markup_obj) -> list[list[dict]] | None:
+        """
+        Convert unit/list markup to Bot API inline_keyboard with icon_custom_emoji_id.
+        Official Bot API field for premium emoji on buttons.
+        """
+        if not markup_obj:
+            return None
+        if isinstance(markup_obj, str):
+            unit = self._units.get(markup_obj) or {}
+            map_ = unit.get("buttons") or []
+        else:
+            map_ = markup_obj
+        map_ = self._normalize_markup(map_)
+        keyboard = []
+        for row in map_:
+            krow = []
+            for button in row:
+                if not isinstance(button, dict):
+                    continue
+                raw = str(button.get("text") or "•")
+                try:
+                    from .emoji_prem import prem_btn_text
+                    text = prem_btn_text(raw)
+                except Exception:
+                    text = re.sub(
+                        r"<[^>]+>",
+                        "",
+                        raw,
+                    )
+                item: dict = {"text": text or "•"}
+                eid = self._get_button_emoji_id(button)
+                if eid:
+                    item["icon_custom_emoji_id"] = str(eid).strip()
+                style = self._get_button_style(button)
+                if style:
+                    # Bot API 9.x button style (optional)
+                    item["style"] = style
+                if "url" in button:
+                    item["url"] = button["url"]
+                elif button.get("_callback_data"):
+                    item["callback_data"] = str(button["_callback_data"])
+                elif "data" in button:
+                    item["callback_data"] = str(button["data"])
+                elif "web_app" in button:
+                    app = button["web_app"]
+                    item["web_app"] = {"url": app if isinstance(app, str) else app.get("url")}
+                elif "switch_inline_query_current_chat" in button or "_switch_query" in button:
+                    q = button.get("switch_inline_query_current_chat") or (
+                        button.get("_switch_query", "") + " "
+                    )
+                    item["switch_inline_query_current_chat"] = q
+                elif "switch_inline_query" in button:
+                    item["switch_inline_query"] = button["switch_inline_query"]
+                elif "copy" in button:
+                    item["copy_text"] = {"text": button["copy"]}
+                else:
+                    # ensure callback setup ran
+                    if "callback" in button and "_callback_data" not in button:
+                        continue
+                    if button.get("_callback_data"):
+                        item["callback_data"] = str(button["_callback_data"])
+                    else:
+                        continue
+                krow.append(item)
+            if krow:
+                keyboard.append(krow)
+        return keyboard or None
+
+    async def answer_inline_bot_api(
+        self,
+        inline_query_id: str | int,
+        *,
+        title: str = "Hikkari",
+        message_text: str,
+        parse_mode: str = "HTML",
+        markup_obj=None,
+        cache_time: int = 0,
+        disable_web_page_preview: bool = True,
+    ) -> bool:
+        """answerInlineQuery via HTTP Bot API (supports icon_custom_emoji_id)."""
+        token = getattr(self, "_token", None) or getattr(self, "token", None)
+        if not token:
+            return False
+        # ensure callbacks assigned
+        if markup_obj is not None:
+            self.generate_markup(markup_obj)
+        keyboard = self.buttons_to_bot_api_keyboard(markup_obj) if markup_obj is not None else None
+        result = {
+            "type": "article",
+            "id": utils.rand(16),
+            "title": title[:64] or "Hikkari",
+            "input_message_content": {
+                "message_text": message_text[:4096],
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": disable_web_page_preview,
+            },
+        }
+        if keyboard:
+            result["reply_markup"] = {"inline_keyboard": keyboard}
+        payload = {
+            "inline_query_id": str(inline_query_id),
+            "results": [result],
+            "cache_time": int(cache_time),
+        }
+        import aiohttp
+        url = f"https://api.telegram.org/bot{token}/answerInlineQuery"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    data = await resp.json(content_type=None)
+                    if not data.get("ok"):
+                        logger.warning("answerInlineQuery BotAPI failed: %s", data)
+                        return False
+                    return True
+        except Exception:
+            logger.exception("answerInlineQuery BotAPI error")
+            return False
+
+
 
     async def _close_unit_handler(self: "InlineManager", call: InlineCall):
         """Close form/list: answer, strip buttons, delete message. Always visible feedback."""
