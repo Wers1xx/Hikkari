@@ -65,24 +65,62 @@ class Placeholder:
 
 class Form(InlineUnit):
 
+    def _inline_query_id(self, inline_query) -> str | int | None:
+        """Resolve query_id from Telethon/hikkaritl InlineQuery event variants."""
+        for attr in ("id", "query_id"):
+            v = getattr(inline_query, attr, None)
+            if v is not None and not callable(v) and not isinstance(v, (dict, list)):
+                return v
+        q = getattr(inline_query, "query", None)
+        if q is not None and not isinstance(q, str):
+            for attr in ("query_id", "id"):
+                v = getattr(q, attr, None)
+                if v is not None and not callable(v):
+                    return v
+        # some wrappers expose original update
+        for path in (
+            ("_event", "query", "query_id"),
+            ("original_update", "query_id"),
+            ("query", "query_id"),
+        ):
+            obj = inline_query
+            ok = True
+            for p in path:
+                obj = getattr(obj, p, None)
+                if obj is None:
+                    ok = False
+                    break
+            if ok and not isinstance(obj, str):
+                return obj
+        return None
+
     async def _answer_form_inline(self, inline_query, form: dict, *, text: str, parse_mode: str = "HTML"):
         """Answer form via Bot API (icon_custom_emoji_id) then MTProto fallback."""
-        uid = form.get("uid") or getattr(getattr(inline_query, "query", None), "query", None)
-        # Always register callbacks first
+        uid = form.get("uid")
+        if not uid:
+            q = getattr(inline_query, "query", None)
+            if isinstance(q, str):
+                uid = q
+            else:
+                uid = getattr(q, "query", None) or getattr(inline_query, "text", None)
+
         with contextlib.suppress(Exception):
             self.generate_markup(uid)
 
-        ok = await self.answer_inline_bot_api(
-            inline_query.query.query_id,
-            title="Hikkari",
-            message_text=text,
-            parse_mode=parse_mode,
-            markup_obj=uid,
-            cache_time=0,
-        )
-        if ok:
-            return True
+        qid = self._inline_query_id(inline_query)
+        if qid is not None:
+            ok = await self.answer_inline_bot_api(
+                qid,
+                title="Hikkari",
+                message_text=text,
+                parse_mode=parse_mode,
+                markup_obj=uid,
+                cache_time=0,
+            )
+            if ok:
+                return True
 
+        # MTProto fallback (always works for forms)
         await inline_query.answer(
             [
                 await inline_query.builder.article(
