@@ -108,6 +108,26 @@ class Help(loader.Module):
         match = re.search(r"# ?meta banner: ?(.+)", doc)
         return match.group(1).strip() if match else None
 
+
+    @staticmethod
+    def _linkify_dev(dev: str) -> str:
+        import html as html_mod
+        import re as _re
+        s = (dev or "").strip()
+        m = _re.fullmatch(r"@([A-Za-z0-9_]{4,})", s)
+        if m:
+            u = m.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        m = _re.fullmatch(r"(?:https?://)?t\.me/([A-Za-z0-9_]{4,})/?", s, flags=_re.I)
+        if m:
+            u = m.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        def repl(mm):
+            u = mm.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        linked = _re.sub(r"@([A-Za-z0-9_]{4,})", repl, s)
+        return linked if linked != s else html_mod.escape(s)
+
     def _get_module_developer(self, module) -> str | None:
         """Extract developer/author from module source meta comments."""
         source = getattr(module, "__source__", None) or ""

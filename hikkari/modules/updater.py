@@ -326,11 +326,59 @@ class UpdaterMod(loader.Module):
         except Exception:
             return False
 
+    def _bot_api_update_markup(self):
+        """Inline keyboard for Bot API send_message (callback_data + optional premium icon)."""
+        defs = getattr(self, "_upd_btn_defs", None) or [
+            {
+                "text": self.strings.get("update", "Update"),
+                "data": "hikkari/update",
+                "style": "primary",
+                "emoji_id": 5258382512656253510,
+            },
+            {
+                "text": self.strings.get("ignore", "Ignore"),
+                "data": "hikkari/ignore_upd",
+                "style": "danger",
+                "emoji_id": 5255949705740843980,
+            },
+        ]
+        # Prefer shared converter if available
+        try:
+            kb = self.inline.buttons_to_bot_api_keyboard([defs])
+            if kb:
+                return {"inline_keyboard": kb}
+        except Exception:
+            pass
+        row = []
+        for b in defs:
+            item = {
+                "text": str(b.get("text") or "•"),
+                "callback_data": str(b.get("data") or "hikkari/update"),
+            }
+            if b.get("emoji_id"):
+                item["icon_custom_emoji_id"] = str(b["emoji_id"])
+            if b.get("style"):
+                item["style"] = b["style"]
+            row.append(item)
+        return {"inline_keyboard": [row]}
+
     async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
         """Send update notice via inline bot if available, else user client to Saved Messages."""
         disable_preview = kwargs.pop("disable_web_page_preview", True)
         if self._inline_bot_ok():
             try:
+                # Ensure Bot API shape
+                if callable(reply_markup):
+                    reply_markup = reply_markup()
+                if reply_markup is not None and not (
+                    isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup
+                ):
+                    try:
+                        kb = self.inline.buttons_to_bot_api_keyboard(reply_markup)
+                        if kb:
+                            reply_markup = {"inline_keyboard": kb}
+                    except Exception:
+                        reply_markup = self._bot_api_update_markup()
                 return await self.inline.bot.send_message(
                     self.tg_id,
                     text,
@@ -1360,22 +1408,22 @@ class UpdaterMod(loader.Module):
         if not self.get("autoupdate_answered"):
             self.set("autoupdate_answered", self.get("autoupdate", False))
 
-        self._markup = lambda: self.inline.generate_markup(
-            [
-                {
-                    "text": self.strings["update"],
-                    "data": "hikkari/update",
-                    "style": "primary",
-                    "emoji_id": 5258382512656253510,
-                },
-                {
-                    "text": self.strings["ignore"],
-                    "data": "hikkari/ignore_upd",
-                    "style": "danger",
-                    "emoji_id": 5255949705740843980,
-                },
-            ]
-        )
+        # Bot API keyboard (send_message via inline bot). TL generate_markup is wrong here.
+        self._upd_btn_defs = [
+            {
+                "text": self.strings["update"],
+                "data": "hikkari/update",
+                "style": "primary",
+                "emoji_id": 5258382512656253510,
+            },
+            {
+                "text": self.strings["ignore"],
+                "data": "hikkari/ignore_upd",
+                "style": "danger",
+                "emoji_id": 5255949705740843980,
+            },
+        ]
+        self._markup = self._bot_api_update_markup
 
         if self.get("selfupdatemsg") is not None:
             try:

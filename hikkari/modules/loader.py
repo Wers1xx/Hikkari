@@ -268,6 +268,35 @@ class LoaderMod(loader.Module):
         return uniq
 
     @staticmethod
+
+    @staticmethod
+    def _linkify_developer(dev: str) -> str:
+        """Turn @user / t.me/user into HTML link; keep other text escaped."""
+        import html as html_mod
+        import re as _re
+        s = (dev or "").strip()
+        if not s:
+            return ""
+        # @username
+        m = _re.fullmatch(r"@([A-Za-z0-9_]{4,})", s)
+        if m:
+            u = m.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        # https://t.me/username or t.me/username
+        m = _re.fullmatch(r"(?:https?://)?t\.me/([A-Za-z0-9_]{4,})/?", s, flags=_re.I)
+        if m:
+            u = m.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        # mixed: keep @tokens as links
+        def repl(mm):
+            u = mm.group(1)
+            return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
+        linked = _re.sub(r"@([A-Za-z0-9_]{4,})", repl, s)
+        if linked != s:
+            # escape non-tag parts roughly: already only added tags
+            return linked
+        return html_mod.escape(s[:80])
+
     def _plain_cmd_doc(text, fallback="—"):
         import html as html_mod
         if not text:
@@ -427,7 +456,7 @@ class LoaderMod(loader.Module):
                 )
             if dev_plain:
                 parts.append(
-                    f"<p>Developer: <b>{html_mod.escape(dev_plain[:80])}</b></p>"
+                    f"<p>Developer: <b>{self._linkify_developer(dev_plain[:80])}</b></p>"
                 )
             if origin_url:
                 parts.append(
@@ -1470,6 +1499,9 @@ class LoaderMod(loader.Module):
         developer = re.search(r"# ?meta developer: ?(.+)", doc)
         developer = developer.group(1) if developer else False
         developer_raw = (str(developer).strip() if developer else "")
+        # Clickable @username in classic HTML loaded message
+        if developer_raw:
+            developer = self._linkify_developer(developer_raw)
 
         if not did_requires:
             requirements = []
