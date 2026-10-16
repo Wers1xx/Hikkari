@@ -455,7 +455,7 @@ class Help(loader.Module):
                 if dev_text:
                     # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>{self.strings.get('developer', '🧑‍💻 Developer: {}').format('<code>' + html_mod.escape(str(dev_text)) + '</code>')}</p>"
+                        f"<p>{self.strings.get('developer', '🧑‍💻 Developer: {}').format(self._linkify_dev(str(dev_text)))}</p>"
                     )
                 if getattr(module, "__origin__", "").startswith("<core"):
                     core_n = self._plain_doc(
@@ -505,7 +505,7 @@ class Help(loader.Module):
                 if placeholders
                 else ""
             )
-            + (f"\n\n{self.strings['developer']}".format(dev_text) if (dev_text and not getattr(module, "__origin__", "").startswith("<core")) else "")
+            + (f"\n\n{self.strings['developer']}".format(self._linkify_dev(str(dev_text))) if (dev_text and not getattr(module, "__origin__", "").startswith("<core")) else "")
             + (f"\n\n{self.strings['not_exact']}" if not exact else "")
             + (
                 f"\n{self.strings['core_notice']}"
