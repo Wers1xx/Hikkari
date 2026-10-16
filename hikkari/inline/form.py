@@ -954,8 +954,18 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
                 case _:
-                    await self._answer_form_inline(
-                        inline_query, form, text=form_text, parse_mode="HTML"
+                    await inline_query.answer(
+                        [
+                            await inline_query.builder.article(
+                                title="Hikkari",
+                                text=form_text,
+                                parse_mode="HTML",
+                                link_preview=False,
+                                buttons=self.generate_markup(form.get("uid") or inline_query.query),
+                                id=utils.rand(20),
+                            )
+                        ],
+                        cache_time=0,
                     )
         except Exception as e:
             # Caption over limit → hard-clip and retry once
@@ -982,8 +992,18 @@ class Form(InlineUnit):
                             cache_time=0,
                         )
                     else:
-                        await self._answer_form_inline(
-                            inline_query, form, text=form_text2, parse_mode="HTML"
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    text=form_text2,
+                                    parse_mode="HTML",
+                                    link_preview=False,
+                                    buttons=self.generate_markup(form.get("uid") or inline_query.query),
+                                    id=utils.rand(20),
+                                )
+                            ],
+                            cache_time=0,
                         )
                     return
                 except Exception as e2:
