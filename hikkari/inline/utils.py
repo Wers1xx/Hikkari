@@ -170,7 +170,6 @@ class Utils(InlineUnit):
                                 continue
                             btn_kwargs["url"] = button["url"]
 
-                        # input must win over callback (config value field)
                         case _ if "input" in button:
                             btn_kwargs["switch_inline_query_current_chat"] = (
                                 str(button.get("_switch_query") or utils.rand(10)) + " "
@@ -370,53 +369,47 @@ class Utils(InlineUnit):
 
 
 
-        async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Close form: answer + edit + delete. Works on phone/PC after unit lookup."""
+    async def _close_unit_handler(self: "InlineManager", call: InlineCall):
+        """Close form/list: answer, strip buttons, delete. Works across devices."""
         with contextlib.suppress(Exception):
             await call.answer()
 
         unit_id = getattr(call, "unit_id", None)
-        imid = getattr(call, "inline_message_id", None)
         if not unit_id and isinstance(getattr(self, "_units", None), dict):
+            # match by inline_message_id
+            imid = getattr(call, "inline_message_id", None)
             if imid:
-                for uid, unit in list(self._units.items()):
+                for uid, unit in self._units.items():
                     if unit.get("inline_message_id") == imid:
                         unit_id = uid
                         break
-            # callback data may embed unit
-            data = getattr(call, "data", None)
-            if not unit_id and data and isinstance(getattr(self, "_custom_map", None), dict):
-                # still try single unit
-                if len(self._units) == 1:
-                    unit_id = next(iter(self._units))
-            if not unit_id and self._units:
-                # last resort: most recent form unit
-                forms = [u for u, d in self._units.items() if d.get("type") == "form"]
-                if len(forms) == 1:
-                    unit_id = forms[0]
+            if not unit_id and len(self._units) == 1:
+                unit_id = next(iter(self._units))
 
-        unit = self._units.get(unit_id) if unit_id and self._units else None
-        chat = msg_id = None
+        unit = self._units.get(unit_id) if unit_id and getattr(self, "_units", None) else None
+        chat = None
+        msg_id = None
+        inline_msg_id = getattr(call, "inline_message_id", None)
         if isinstance(unit, dict):
             chat = unit.get("chat")
             msg_id = unit.get("message_id")
-            imid = imid or unit.get("inline_message_id")
+            inline_msg_id = inline_msg_id or unit.get("inline_message_id")
         if chat is None:
             chat = getattr(call, "chat_id", None)
         if msg_id is None:
             msg_id = getattr(call, "message_id", None)
 
-        # Edit empty
+        # A) Clear content / buttons
         with contextlib.suppress(Exception):
             if hasattr(call, "edit"):
-                await call.edit("✖️", reply_markup=[])
+                await call.edit("✖️", reply_markup=None)
         with contextlib.suppress(Exception):
-            if imid and getattr(self, "_bot_client", None):
+            if inline_msg_id and getattr(self, "_bot_client", None):
                 await self._bot_client.edit_message(
-                    imid, "✖️", buttons=None, link_preview=False
+                    inline_msg_id, "✖️", buttons=None, link_preview=False
                 )
 
-        # Delete — call / bot client / user client / HTTP Bot API
+        # B) Delete via every available path (phone + desktop)
         with contextlib.suppress(Exception):
             if hasattr(call, "delete"):
                 await call.delete()
@@ -436,7 +429,6 @@ class Utils(InlineUnit):
                         json={"chat_id": int(chat), "message_id": int(msg_id)},
                         timeout=aiohttp.ClientTimeout(total=10),
                     )
-        # drop unit
         with contextlib.suppress(Exception):
             if unit_id and unit_id in self._units:
                 on_unload = self._units[unit_id].get("on_unload")
