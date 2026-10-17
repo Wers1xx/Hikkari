@@ -243,7 +243,7 @@ class HikkariConfigMod(loader.Module):
                 message=message,
                 rich_message=rich,
                 reply_markup=markup,
-                silent=False,
+                silent=True,  # stay in same chat (Saved Messages / groups)
                 force_me=kwargs.get("force_me", True),
                 **banner,
             )
@@ -267,39 +267,40 @@ class HikkariConfigMod(loader.Module):
             text=text,
             message=message,
             reply_markup=markup,
-            silent=False,
+            silent=True,
+            force_me=True,
             **banner,
         )
 
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner for config forms: photo / gif / video by URL or local path."""
-        from pathlib import Path as _P
+        """Banner from URL only — no download, no RAM. TG fetches by link."""
         from urllib.parse import urlparse
-        from ..utils.other import ensure_builtin_asset
 
-        url = str(self.config.get("banner_url") or "").strip()
-        if not url:
-            p = ensure_builtin_asset("hikkari-config.jpg")
-            if p and _P(p).is_file():
-                url = str(p)
-        if not url:
+        raw = None
+        with contextlib.suppress(Exception):
+            raw = (self.config.get("banner_url") or self.config.get("banner") or "").strip()
+        if not raw:
+            with contextlib.suppress(Exception):
+                raw = (self.db.get("HikkariConfig", "banner_url", None) or "").strip()
+        if not raw or not str(raw).startswith("http"):
             return {}
 
-        path = urlparse(url).path if url.startswith(("http://", "https://")) else url
-        ext = _P(path).suffix.lower()
-        # Telegram inline: mp4/webm → video, gif → gif, else photo
-        if ext in {".mp4", ".webm", ".mov"}:
-            return {"video": url}
-        if ext in {".gif"}:
-            return {"gif": url}
-        # Some CDNs omit extension — treat common video hosts as video when query has mp4
+        url = str(raw).strip()
         low = url.lower()
-        if any(x in low for x in (".mp4", "mime=video", "/video/", "format=mp4")):
+        path = (urlparse(url).path or "").lower()
+
+        # Prefer explicit media keys so form/inline uses remote URL (no local file)
+        if any(x in low or path.endswith(x) for x in (".mp4", ".mov", ".webm", "mime=video")):
             return {"video": url}
+        if any(x in low or path.endswith(x) for x in (".gif", ".mp4.gif", "format=gif")):
+            return {"gif": url}
+        if any(x in low or path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            return {"photo": url}
+        # Unknown — try photo URL (preview); if TG rejects, form still shows text
         return {"photo": url}
 
-    @staticmethod
+
     def prep_value(value: typing.Any) -> typing.Any:
         if isinstance(value, str):
             return f"<b><code>{utils.escape_html(value.strip())}</code></b>"

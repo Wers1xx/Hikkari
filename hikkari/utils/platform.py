@@ -127,10 +127,10 @@ def get_platform_emoji() -> str:
     """
     # Fixed <emoji document_id=5283176512747507510>✨</emoji> set (replaces old 🪐 quartet)
     return (
-        "<tg-emoji emoji-id=5343785308817236494>✨</tg-emoji>"
-        "<tg-emoji emoji-id=5344055625468914277>✨</tg-emoji>"
-        "<tg-emoji emoji-id=5343547560902569132>✨</tg-emoji>"
-        "<tg-emoji emoji-id=5344023331609813322>✨</tg-emoji>"
+        "<tg-emoji emoji-id="5343785308817236494">✨</tg-emoji>"
+        "<tg-emoji emoji-id="5344055625468914277">✨</tg-emoji>"
+        "<tg-emoji emoji-id="5343547560902569132">✨</tg-emoji>"
+        "<tg-emoji emoji-id="5344023331609813322">✨</tg-emoji>"
     )
 
 

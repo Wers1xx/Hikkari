@@ -563,7 +563,7 @@ class InlineManager(
             nonlocal unit_id, q
             last_err = None
             # unit must be registered before first query
-            await asyncio.sleep(0.12)
+            await asyncio.sleep(0.04)
             for attempt in range(5):
                 try:
                     if unit_id not in self._units:
@@ -571,17 +571,17 @@ class InlineManager(
                     q = await self._client.inline_query(bot_un, unit_id)
                     if q:
                         return
-                    await asyncio.sleep(0.35 * (attempt + 1))
+                    await asyncio.sleep(0.15 * (attempt + 1))
                 except Exception as e:
                     last_err = e
                     logger.debug("inline_query attempt %s failed: %s", attempt, e)
-                    await asyncio.sleep(0.35 * (attempt + 1))
+                    await asyncio.sleep(0.15 * (attempt + 1))
             if last_err:
                 logger.warning("inline_query failed: %s", last_err)
 
         async def event_poller():
             nonlocal exception
-            await asyncio.wait_for(event.wait(), timeout=12)
+            await asyncio.wait_for(event.wait(), timeout=8)
             if self._error_events.get(unit_id):
                 exception = self._error_events[unit_id]
 

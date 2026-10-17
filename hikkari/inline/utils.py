@@ -170,6 +170,12 @@ class Utils(InlineUnit):
                                 continue
                             btn_kwargs["url"] = button["url"]
 
+                        # input must win over callback (config value field)
+                        case _ if "input" in button:
+                            btn_kwargs["switch_inline_query_current_chat"] = (
+                                str(button.get("_switch_query") or utils.rand(10)) + " "
+                            )
+
                         case _ if "callback" in button:
                             btn_kwargs["data"] = button["_callback_data"]
 
@@ -194,11 +200,6 @@ class Utils(InlineUnit):
                                         lambda: self._client.dispatcher.security._default,
                                     ),
                                 }
-
-                        case _ if "input" in button:
-                            btn_kwargs["switch_inline_query_current_chat"] = (
-                                button["_switch_query"] + " "
-                            )
 
                         case _ if "data" in button:
                             btn_kwargs["data"] = button["data"]
@@ -369,47 +370,53 @@ class Utils(InlineUnit):
 
 
 
-    async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Close form/list: answer, strip buttons, delete. Works across devices."""
+        async def _close_unit_handler(self: "InlineManager", call: InlineCall):
+        """Close form: answer + edit + delete. Works on phone/PC after unit lookup."""
         with contextlib.suppress(Exception):
             await call.answer()
 
         unit_id = getattr(call, "unit_id", None)
+        imid = getattr(call, "inline_message_id", None)
         if not unit_id and isinstance(getattr(self, "_units", None), dict):
-            # match by inline_message_id
-            imid = getattr(call, "inline_message_id", None)
             if imid:
-                for uid, unit in self._units.items():
+                for uid, unit in list(self._units.items()):
                     if unit.get("inline_message_id") == imid:
                         unit_id = uid
                         break
-            if not unit_id and len(self._units) == 1:
-                unit_id = next(iter(self._units))
+            # callback data may embed unit
+            data = getattr(call, "data", None)
+            if not unit_id and data and isinstance(getattr(self, "_custom_map", None), dict):
+                # still try single unit
+                if len(self._units) == 1:
+                    unit_id = next(iter(self._units))
+            if not unit_id and self._units:
+                # last resort: most recent form unit
+                forms = [u for u, d in self._units.items() if d.get("type") == "form"]
+                if len(forms) == 1:
+                    unit_id = forms[0]
 
-        unit = self._units.get(unit_id) if unit_id and getattr(self, "_units", None) else None
-        chat = None
-        msg_id = None
-        inline_msg_id = getattr(call, "inline_message_id", None)
+        unit = self._units.get(unit_id) if unit_id and self._units else None
+        chat = msg_id = None
         if isinstance(unit, dict):
             chat = unit.get("chat")
             msg_id = unit.get("message_id")
-            inline_msg_id = inline_msg_id or unit.get("inline_message_id")
+            imid = imid or unit.get("inline_message_id")
         if chat is None:
             chat = getattr(call, "chat_id", None)
         if msg_id is None:
             msg_id = getattr(call, "message_id", None)
 
-        # A) Clear content / buttons
+        # Edit empty
         with contextlib.suppress(Exception):
             if hasattr(call, "edit"):
-                await call.edit("✖️", reply_markup=None)
+                await call.edit("✖️", reply_markup=[])
         with contextlib.suppress(Exception):
-            if inline_msg_id and getattr(self, "_bot_client", None):
+            if imid and getattr(self, "_bot_client", None):
                 await self._bot_client.edit_message(
-                    inline_msg_id, "✖️", buttons=None, link_preview=False
+                    imid, "✖️", buttons=None, link_preview=False
                 )
 
-        # B) Delete via every available path
+        # Delete — call / bot client / user client / HTTP Bot API
         with contextlib.suppress(Exception):
             if hasattr(call, "delete"):
                 await call.delete()
@@ -417,11 +424,25 @@ class Utils(InlineUnit):
             if chat is not None and msg_id is not None and getattr(self, "bot", None):
                 await self.bot.delete_message(chat, msg_id)
         with contextlib.suppress(Exception):
-            if chat is not None and msg_id is not None:
+            if chat is not None and msg_id is not None and getattr(self, "_client", None):
                 await self._client.delete_messages(chat, [msg_id])
         with contextlib.suppress(Exception):
+            token = getattr(self, "_token", None)
+            if token and chat is not None and msg_id is not None:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    await session.post(
+                        f"https://api.telegram.org/bot{token}/deleteMessage",
+                        json={"chat_id": int(chat), "message_id": int(msg_id)},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    )
+        # drop unit
+        with contextlib.suppress(Exception):
             if unit_id and unit_id in self._units:
+                on_unload = self._units[unit_id].get("on_unload")
                 del self._units[unit_id]
+                if callable(on_unload):
+                    on_unload()
 
 
     async def _unload_unit_handler(self: "InlineManager", call: InlineCall):

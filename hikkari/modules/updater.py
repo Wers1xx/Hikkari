@@ -410,23 +410,32 @@ class UpdaterMod(loader.Module):
                 if token:
                     import aiohttp
                     bot_rows = self._update_markup_rows(for_bot_api=True)
-                    payload = {
-                        "chat_id": int(self.tg_id),
-                        "text": self._for_bot_api_html(text),
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": bool(disable_preview),
-                        "reply_markup": {"inline_keyboard": bot_rows},
-                    }
                     async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            f"https://api.telegram.org/bot{token}/sendMessage",
-                            json=payload,
-                            timeout=aiohttp.ClientTimeout(total=20),
-                        ) as resp:
-                            data = await resp.json()
-                            if data.get("ok"):
-                                return data.get("result")
-                            logger.warning("Bot API notify failed: %s", data)
+                        for payload in (
+                            {
+                                "chat_id": int(self.tg_id),
+                                "text": self._plain_status_text(text),
+                                "disable_web_page_preview": bool(disable_preview),
+                                "reply_markup": {"inline_keyboard": bot_rows},
+                            },
+                            {
+                                "chat_id": int(self.tg_id),
+                                "text": self._for_bot_api_html(text),
+                                "parse_mode": "HTML",
+                                "disable_web_page_preview": bool(disable_preview),
+                                "reply_markup": {"inline_keyboard": bot_rows},
+                            },
+                        ):
+                            async with session.post(
+                                f"https://api.telegram.org/bot{token}/sendMessage",
+                                json=payload,
+                                timeout=aiohttp.ClientTimeout(total=20),
+                            ) as resp:
+                                data = await resp.json()
+                                if data.get("ok"):
+                                    return data.get("result")
+                                logger.debug("Bot API notify try: %s", data)
+                        logger.warning("Bot API notify failed after plain+html")
             except Exception:
                 logger.debug("Bot API notify path failed", exc_info=True)
 
@@ -1257,23 +1266,24 @@ class UpdaterMod(loader.Module):
         if not token:
             logger.warning("no bot token for HTTP edit")
             return False
-        html = self._for_bot_api_html(text)
         plain = self._plain_status_text(text)
+        html = self._for_bot_api_html(text)
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
+                # Plain FIRST — never dies on <emoji> / bad HTML
                 for payload in (
                     {
                         "chat_id": int(chat_id),
                         "message_id": int(message_id),
-                        "text": html,
-                        "parse_mode": "HTML",
+                        "text": plain,
                         "disable_web_page_preview": True,
                     },
                     {
                         "chat_id": int(chat_id),
                         "message_id": int(message_id),
-                        "text": plain,
+                        "text": html,
+                        "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                     },
                 ):
@@ -1286,35 +1296,36 @@ class UpdaterMod(loader.Module):
                             data = await resp.json()
                             if data.get("ok"):
                                 return True
-                            desc = str(data.get("description", ""))
-                            if "not modified" in desc.lower():
+                            desc = str(data.get("description", "")).lower()
+                            if "not modified" in desc:
                                 return True
-                            logger.warning("HTTP editMessageText: %s", data)
+                            logger.debug("HTTP edit try failed: %s", data)
                     except Exception:
-                        logger.debug("HTTP edit try failed", exc_info=True)
+                        logger.debug("HTTP edit attempt error", exc_info=True)
         except Exception:
             logger.exception("HTTP editMessageText exception")
         return False
+
 
     async def _http_bot_send(self, chat_id: int, text: str) -> int | None:
         token = self._resolve_bot_token()
         if not token:
             return None
-        html = self._for_bot_api_html(text)
         plain = self._plain_status_text(text)
+        html = self._for_bot_api_html(text)
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 for payload in (
                     {
                         "chat_id": int(chat_id),
-                        "text": html,
-                        "parse_mode": "HTML",
+                        "text": plain,
                         "disable_web_page_preview": True,
                     },
                     {
                         "chat_id": int(chat_id),
-                        "text": plain,
+                        "text": html,
+                        "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                     },
                 ):
@@ -1327,12 +1338,13 @@ class UpdaterMod(loader.Module):
                             data = await resp.json()
                             if data.get("ok"):
                                 return int(data["result"]["message_id"])
-                            logger.warning("HTTP sendMessage: %s", data)
+                            logger.debug("HTTP send try failed: %s", data)
                     except Exception:
-                        logger.debug("HTTP send try failed", exc_info=True)
+                        logger.debug("HTTP send attempt error", exc_info=True)
         except Exception:
             logger.exception("HTTP sendMessage exception")
         return None
+
 
     async def _http_bot_delete(self, chat_id: int, message_id: int) -> bool:
         token = self._resolve_bot_token()
