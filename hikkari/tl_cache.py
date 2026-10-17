@@ -47,7 +47,7 @@ from hikkaritl.tl.types import (
     User,
     UserFull,
 )
-from hikkaritl.tl import utils as tl_utils
+from hikkaritl import utils as tl_utils
 from hikkaritl.utils import is_list_like
 
 from .types import (
