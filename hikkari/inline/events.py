@@ -454,8 +454,7 @@ class Events(InlineUnit):
                 if mod is None:
                     await call.answer("Config module not found", show_alert=True)
                     return
-                # Wrap as BotInlineCall-like for existing handlers
-                from .types import BotInlineCall, InlineCall
+                # Use module-level imports (local import would shadow InlineCall for whole fn)
                 icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
                     call, self, None
                 )
