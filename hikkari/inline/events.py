@@ -464,7 +464,14 @@ class Events(InlineUnit):
                     await mod.inline__global_config(icall, obj_type=False)
                 elif action == "close":
                     with contextlib.suppress(Exception):
+                        await call.answer()
+                    with contextlib.suppress(Exception):
+                        if hasattr(call, "edit"):
+                            await call.edit("✖️", reply_markup=None)
+                    with contextlib.suppress(Exception):
                         await call.delete()
+                    with contextlib.suppress(Exception):
+                        await self._close_unit_handler(call)
                 else:
                     await call.answer(action or "ok")
                 return

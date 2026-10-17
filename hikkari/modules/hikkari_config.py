@@ -235,26 +235,27 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg try_send_rich failed")
 
-        # 2) Inline form — SetInlineBotResults strips external media, so after
-        #    the message lands we immediately edit with full rich (with banner),
-        #    same code path as Back → choose_category.
+        # 2) Inline form in the SAME chat as the command (incl. Saved Messages)
+        banner = self._cfg_banner_kwargs()
         try:
             form_msg = await self.inline.form(
-                text="⚙️",
+                text=text or "⚙️",
                 message=message,
                 rich_message=rich,
                 reply_markup=markup,
-                silent=True,
+                silent=False,
                 force_me=kwargs.get("force_me", True),
+                **banner,
             )
             if form_msg:
-                # Re-apply banner ASAP (same path as Back). Fire without blocking return.
+                # Keep banner via URL on edit (no local download)
                 async def _banner_edit():
                     with contextlib.suppress(Exception):
                         await form_msg.edit(
                             text or "⚙️",
                             reply_markup=markup,
                             rich_message=rich,
+                            **banner,
                         )
                 import asyncio as _aio
                 _aio.ensure_future(_banner_edit())
@@ -266,7 +267,8 @@ class HikkariConfigMod(loader.Module):
             text=text,
             message=message,
             reply_markup=markup,
-            silent=True,
+            silent=False,
+            **banner,
         )
 
 

@@ -412,7 +412,7 @@ class UpdaterMod(loader.Module):
                     bot_rows = self._update_markup_rows(for_bot_api=True)
                     payload = {
                         "chat_id": int(self.tg_id),
-                        "text": text,
+                        "text": self._for_bot_api_html(text),
                         "parse_mode": "HTML",
                         "disable_web_page_preview": bool(disable_preview),
                         "reply_markup": {"inline_keyboard": bot_rows},
@@ -1211,33 +1211,87 @@ class UpdaterMod(loader.Module):
                         return raw.split()[0]
         return None
 
+
+    @staticmethod
+    def _for_bot_api_html(text: str) -> str:
+        """Bot API HTML only accepts <tg-emoji emoji-id="N"> not <emoji document_id>.
+
+        Also strips tags Bot API rejects so status edit never 400s.
+        """
+        if not isinstance(text, str):
+            return str(text)
+        try:
+            from ..utils.emoji_prem import emoji_for_bot_api
+            text = emoji_for_bot_api(text)
+        except Exception:
+            text = re.sub(
+                r'<emoji\s+document_id\s*=\s*["\']?(\d+)["\']?\s*>(.*?)</emoji>',
+                r'<tg-emoji emoji-id="\1">\2</tg-emoji>',
+                text,
+                flags=re.I | re.S,
+            )
+        # normalize tg-emoji without quotes
+        text = re.sub(
+            r'<tg-emoji\s+emoji-id\s*=\s*(\d+)\s*>',
+            r'<tg-emoji emoji-id="\1">',
+            text,
+            flags=re.I,
+        )
+        # drop any remaining <emoji ...>
+        text = re.sub(r"</?emoji\b[^>]*>", "", text, flags=re.I)
+        return text
+
+    @staticmethod
+    def _plain_status_text(text: str) -> str:
+        """Strip all HTML tags for parse_mode-free Bot API send/edit."""
+        if not isinstance(text, str):
+            return str(text)
+        text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+        text = re.sub(r"</p>\s*<p>", "\n", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", "", text)
+        import html as _html
+        return _html.unescape(text).strip()
+
     async def _http_bot_edit(self, chat_id: int, message_id: int, text: str) -> bool:
         token = self._resolve_bot_token()
         if not token:
             logger.warning("no bot token for HTTP edit")
             return False
+        html = self._for_bot_api_html(text)
+        plain = self._plain_status_text(text)
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://api.telegram.org/bot{token}/editMessageText",
-                    json={
+                for payload in (
+                    {
                         "chat_id": int(chat_id),
                         "message_id": int(message_id),
-                        "text": text,
+                        "text": html,
                         "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                     },
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("ok"):
-                        return True
-                    # message not modified = still ok for us
-                    desc = str(data.get("description", ""))
-                    if "not modified" in desc.lower():
-                        return True
-                    logger.warning("HTTP editMessageText failed: %s", data)
+                    {
+                        "chat_id": int(chat_id),
+                        "message_id": int(message_id),
+                        "text": plain,
+                        "disable_web_page_preview": True,
+                    },
+                ):
+                    try:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{token}/editMessageText",
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=20),
+                        ) as resp:
+                            data = await resp.json()
+                            if data.get("ok"):
+                                return True
+                            desc = str(data.get("description", ""))
+                            if "not modified" in desc.lower():
+                                return True
+                            logger.warning("HTTP editMessageText: %s", data)
+                    except Exception:
+                        logger.debug("HTTP edit try failed", exc_info=True)
         except Exception:
             logger.exception("HTTP editMessageText exception")
         return False
@@ -1246,23 +1300,36 @@ class UpdaterMod(loader.Module):
         token = self._resolve_bot_token()
         if not token:
             return None
+        html = self._for_bot_api_html(text)
+        plain = self._plain_status_text(text)
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={
+                for payload in (
+                    {
                         "chat_id": int(chat_id),
-                        "text": text,
+                        "text": html,
                         "parse_mode": "HTML",
                         "disable_web_page_preview": True,
                     },
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("ok"):
-                        return int(data["result"]["message_id"])
-                    logger.warning("HTTP sendMessage failed: %s", data)
+                    {
+                        "chat_id": int(chat_id),
+                        "text": plain,
+                        "disable_web_page_preview": True,
+                    },
+                ):
+                    try:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=20),
+                        ) as resp:
+                            data = await resp.json()
+                            if data.get("ok"):
+                                return int(data["result"]["message_id"])
+                            logger.warning("HTTP sendMessage: %s", data)
+                    except Exception:
+                        logger.debug("HTTP send try failed", exc_info=True)
         except Exception:
             logger.exception("HTTP sendMessage exception")
         return None

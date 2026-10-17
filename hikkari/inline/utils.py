@@ -370,21 +370,23 @@ class Utils(InlineUnit):
 
 
     async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Close form/list: answer, strip buttons, delete message. Always visible feedback."""
+        """Close form/list: answer, strip buttons, delete. Works across devices."""
         with contextlib.suppress(Exception):
             await call.answer()
 
         unit_id = getattr(call, "unit_id", None)
-        # Try resolve unit_id from custom map / units by matching callback
         if not unit_id and isinstance(getattr(self, "_units", None), dict):
-            # best-effort: single unit
-            if len(self._units) == 1:
+            # match by inline_message_id
+            imid = getattr(call, "inline_message_id", None)
+            if imid:
+                for uid, unit in self._units.items():
+                    if unit.get("inline_message_id") == imid:
+                        unit_id = uid
+                        break
+            if not unit_id and len(self._units) == 1:
                 unit_id = next(iter(self._units))
 
-        unit = None
-        if unit_id and isinstance(getattr(self, "_units", None), dict):
-            unit = self._units.get(unit_id)
-
+        unit = self._units.get(unit_id) if unit_id and getattr(self, "_units", None) else None
         chat = None
         msg_id = None
         inline_msg_id = getattr(call, "inline_message_id", None)
@@ -397,53 +399,30 @@ class Utils(InlineUnit):
         if msg_id is None:
             msg_id = getattr(call, "message_id", None)
 
-        # A) Strip buttons / show closed (works even when delete is forbidden)
-        cleared = False
-        if inline_msg_id:
-            with contextlib.suppress(Exception):
-                await self._bot_client.edit_message(
-                    inline_msg_id,
-                    "✖️",
-                    parse_mode="HTML",
-                    buttons=None,
-                    link_preview=False,
-                )
-                cleared = True
-        if not cleared:
-            with contextlib.suppress(Exception):
-                if hasattr(call, "edit"):
-                    await call.edit("✖️", reply_markup=None)
-                    cleared = True
-
-        # B) Delete message via bot
-        if chat is not None and msg_id is not None:
-            bot = getattr(self, "bot", None)
-            if bot is not None:
-                with contextlib.suppress(Exception):
-                    await bot.delete_message(int(chat), int(msg_id))
-            bot_client = getattr(self, "_bot_client", None)
-            if bot_client is not None:
-                with contextlib.suppress(Exception):
-                    await bot_client.delete_messages(int(chat), [int(msg_id)])
-            with contextlib.suppress(Exception):
-                await self._client.delete_messages(int(chat), [int(msg_id)])
-
+        # A) Clear content / buttons
         with contextlib.suppress(Exception):
-            await self._delete_unit_message(
-                call, unit_id=unit_id, chat_id=chat, message_id=msg_id
-            )
+            if hasattr(call, "edit"):
+                await call.edit("✖️", reply_markup=None)
+        with contextlib.suppress(Exception):
+            if inline_msg_id and getattr(self, "_bot_client", None):
+                await self._bot_client.edit_message(
+                    inline_msg_id, "✖️", buttons=None, link_preview=False
+                )
 
-        # C) unload
-        if isinstance(unit, dict):
-            on_unload = unit.get("on_unload")
-            if callable(on_unload):
-                with contextlib.suppress(Exception):
-                    r = on_unload()
-                    if hasattr(r, "__await__"):
-                        await r
-        if unit_id and isinstance(getattr(self, "_units", None), dict):
-            with contextlib.suppress(Exception):
-                self._units.pop(unit_id, None)
+        # B) Delete via every available path
+        with contextlib.suppress(Exception):
+            if hasattr(call, "delete"):
+                await call.delete()
+        with contextlib.suppress(Exception):
+            if chat is not None and msg_id is not None and getattr(self, "bot", None):
+                await self.bot.delete_message(chat, msg_id)
+        with contextlib.suppress(Exception):
+            if chat is not None and msg_id is not None:
+                await self._client.delete_messages(chat, [msg_id])
+        with contextlib.suppress(Exception):
+            if unit_id and unit_id in self._units:
+                del self._units[unit_id]
+
 
     async def _unload_unit_handler(self: "InlineManager", call: InlineCall):
         await call.unload()
