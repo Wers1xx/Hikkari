@@ -828,6 +828,14 @@ class UpdaterMod(loader.Module):
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
         self.set("restart_ts", time.time())
         with contextlib.suppress(Exception):
+            self._db.set("Updater", "restart_ts", time.time())
+        # Hard flush so post-boot edit has the ref
+        with contextlib.suppress(Exception):
+            self._db.save()
+        with contextlib.suppress(Exception):
+            # second flush after tiny yield
+            import time as _t
+            _t.sleep(0.05)
             self._db.save()
 
         handler = logging.getLogger().handlers[0]
@@ -1116,24 +1124,75 @@ class UpdaterMod(loader.Module):
             logger.debug("capture status target failed", exc_info=True)
         return target
 
+    def _restart_status_path(self) -> Path:
+        try:
+            base = Path(utils.get_base_dir())
+        except Exception:
+            base = Path.cwd()
+        return base / ".hikkari_restart_status.json"
+
     def _persist_status_target(self, target: dict) -> None:
+        """Save restart message ref to DB + sidecar file (survives kill before db flush)."""
+        ref = None
         try:
             if target.get("inline_message_id"):
-                self.set("selfupdatemsg", f"imid:{target['inline_message_id']}")
+                ref = f"imid:{target['inline_message_id']}"
             elif target.get("chat_id") and target.get("message_id"):
                 if target.get("via_bot"):
-                    self.set(
-                        "selfupdatemsg",
-                        f"bot:{int(target['chat_id'])}:{int(target['message_id'])}",
-                    )
+                    ref = f"bot:{int(target['chat_id'])}:{int(target['message_id'])}"
                 else:
-                    # 2-part chat:mid — works with _parse_legacy + client.edit_message
-                    self.set(
-                        "selfupdatemsg",
-                        f"{int(target['chat_id'])}:{int(target['message_id'])}",
-                    )
+                    ref = f"{int(target['chat_id'])}:{int(target['message_id'])}"
+            if not ref:
+                return
+            self.set("selfupdatemsg", ref)
+            # also under fixed key (class rename safe)
+            with contextlib.suppress(Exception):
+                self._db.set("Updater", "selfupdatemsg", ref)
+            with contextlib.suppress(Exception):
+                import json as _json
+                payload = {
+                    "ref": ref,
+                    "ts": time.time(),
+                    "via_bot": bool(target.get("via_bot")),
+                    "chat_id": target.get("chat_id"),
+                    "message_id": target.get("message_id"),
+                    "inline_message_id": target.get("inline_message_id"),
+                }
+                p = self._restart_status_path()
+                p.write_text(_json.dumps(payload), encoding="utf-8")
         except Exception:
-            pass
+            logger.debug("persist status target failed", exc_info=True)
+
+    def _load_status_ref(self) -> str | None:
+        """Load status message ref: module db → Updater db → sidecar file."""
+        for getter in (
+            lambda: self.get("selfupdatemsg"),
+            lambda: self._db.get("Updater", "selfupdatemsg", None),
+        ):
+            with contextlib.suppress(Exception):
+                v = getter()
+                if v:
+                    return v
+        with contextlib.suppress(Exception):
+            import json as _json
+            p = self._restart_status_path()
+            if p.is_file():
+                data = _json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("ref"):
+                    return str(data["ref"])
+                if isinstance(data, dict) and data.get("chat_id") and data.get("message_id"):
+                    if data.get("via_bot"):
+                        return f"bot:{int(data['chat_id'])}:{int(data['message_id'])}"
+                    return f"{int(data['chat_id'])}:{int(data['message_id'])}"
+        return None
+
+    def _clear_status_ref(self) -> None:
+        with contextlib.suppress(Exception):
+            self.set("selfupdatemsg", None)
+        with contextlib.suppress(Exception):
+            self._db.set("Updater", "selfupdatemsg", None)
+        with contextlib.suppress(Exception):
+            self._restart_status_path().unlink(missing_ok=True)
 
     async def _edit_update_status(self, msg_obj, text: str, target: dict | None = None):
         """Always try: call.edit → bot API → client edit. Never silent-fail the UI."""
@@ -1234,9 +1293,8 @@ class UpdaterMod(loader.Module):
             except Exception:
                 logger.debug("ref fallback edit failed", exc_info=True)
 
-        # 6) Last resort — answer in place
-        with contextlib.suppress(Exception):
-            return await utils.answer(msg_obj, text, skip_rich=True)
+        # 6) NEVER send a new message for status — only edit (avoids stuck duplicates)
+        logger.warning("status edit failed for all methods; text=%s", text[:80])
         return msg_obj
 
 
@@ -1592,18 +1650,17 @@ class UpdaterMod(loader.Module):
         ]
         self._markup = self._update_markup_rows
 
-        # Always complete restart UI after boot (same message → success, then full_success)
-        if self.get("selfupdatemsg") is not None:
+        # Always complete restart UI after boot (DB or sidecar file)
+        if self._load_status_ref() is not None:
             try:
                 await self.update_complete()
             except Exception:
                 logger.exception("Failed to complete update!")
 
             async def _full_later():
-                # Wait until modules settle, then show full_success and auto-delete
-                await asyncio.sleep(8)
+                await asyncio.sleep(6)
                 try:
-                    if self.get("selfupdatemsg") is not None:
+                    if self._load_status_ref() is not None:
                         await self.full_restart_complete()
                 except Exception:
                     logger.exception("full_restart_complete failed")
@@ -1840,18 +1897,37 @@ class UpdaterMod(loader.Module):
                     ok = True
                 except Exception as e:
                     logger.warning("bot PM status edit failed (%s)", e)
-                    with contextlib.suppress(Exception):
-                        sent = await bot.send_message(chat_id, text)
-                        if delete_after and sent is not None:
-                            mid = getattr(sent, "id", None) or getattr(sent, "message_id", None)
-                            if mid is not None:
-                                await self._schedule_delete_status(
-                                    chat_id=chat_id,
-                                    message_id=int(mid),
-                                    delay=delete_after,
-                                    via_bot=True,
-                                )
-                            return True
+            if not ok:
+                # HTTP Bot API fallback
+                try:
+                    token = getattr(self.inline, "token", None) or getattr(
+                        self.inline, "_token", None
+                    )
+                    if not token:
+                        token = self._db.get("hikka.inline", "bot_token") or self._db.get(
+                            "hikkari.inline", "bot_token"
+                        )
+                    if token:
+                        import aiohttp
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post(
+                                f"https://api.telegram.org/bot{token}/editMessageText",
+                                json={
+                                    "chat_id": int(chat_id),
+                                    "message_id": int(message_id),
+                                    "text": text,
+                                    "parse_mode": "HTML",
+                                    "disable_web_page_preview": True,
+                                },
+                                timeout=aiohttp.ClientTimeout(total=15),
+                            ) as resp:
+                                data = await resp.json()
+                                if data.get("ok"):
+                                    ok = True
+                                else:
+                                    logger.warning("HTTP editMessageText: %s", data)
+                except Exception:
+                    logger.debug("HTTP bot edit failed", exc_info=True)
             if ok and delete_after:
                 await self._schedule_delete_status(
                     chat_id=chat_id,
@@ -1908,17 +1984,29 @@ class UpdaterMod(loader.Module):
         return False
 
     async def update_complete(self):
-        logger.debug("Self update successful! Edit message")
-        start = self.get("restart_ts")
+        logger.info("Self update successful — editing restart status")
+        start = self.get("restart_ts") or self._db.get("Updater", "restart_ts", None)
         try:
-            took = round(time.time() - start)
+            took = round(time.time() - float(start))
         except Exception:
             took = "n/a"
 
         msg = self.strings["success"].format(utils.ascii_face(), took)
-        ms = self.get("selfupdatemsg")
-        # Do NOT clear here — full_restart_complete still needs the same ref
-        await self._edit_restart_status(ms, msg)
+        ms = self._load_status_ref()
+        if not ms:
+            logger.warning("update_complete: no selfupdatemsg ref found")
+            return
+        # Keep ref for full_restart_complete
+        ok = await self._edit_restart_status(ms, msg)
+        if not ok:
+            # retry a few times (bot/client may not be fully up)
+            for delay in (2, 4, 6):
+                await asyncio.sleep(delay)
+                ok = await self._edit_restart_status(ms, msg)
+                if ok:
+                    break
+            if not ok:
+                logger.warning("update_complete: failed to edit status after retries (%s)", ms)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -1929,7 +2017,9 @@ class UpdaterMod(loader.Module):
             took = "n/a"
 
         self.set("restart_ts", None)
-        ms = self.get("selfupdatemsg")
+        with contextlib.suppress(Exception):
+            self._db.set("Updater", "restart_ts", None)
+        ms = self._load_status_ref()
 
         # Only REAL register_all failures. modules_count delta is a false
         # positive (update, soft client_ready, etc.) and must not show as error.
@@ -1953,17 +2043,23 @@ class UpdaterMod(loader.Module):
                 "secure_boot_complete" if secure_boot else "full_success"
             ].format(utils.ascii_face(), took)
 
-        if ms is None:
+        if not ms:
+            logger.warning("full_restart_complete: no status ref")
             return
 
-        self.set("selfupdatemsg", None)
         # Keep modules_count in sync so next restart does not false-fail
         with contextlib.suppress(Exception):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
-        # ONLY edit the original restart message (bot PM or user .restart msg).
-        # Never spam Saved Messages. Auto-delete after 60s (as before).
-        await self._edit_restart_status(ms, msg, delete_after=60)
+        # Edit success then auto-delete; clear ref only after successful edit attempt
+        ok = await self._edit_restart_status(ms, msg, delete_after=60)
+        if not ok:
+            for delay in (2, 4):
+                await asyncio.sleep(delay)
+                ok = await self._edit_restart_status(ms, msg, delete_after=60)
+                if ok:
+                    break
+        self._clear_status_ref()
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
