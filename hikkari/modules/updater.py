@@ -668,17 +668,21 @@ class UpdaterMod(loader.Module):
     def _parse_legacy_update_message_ref(
         message_ref: typing.Any,
     ) -> tuple[int, int] | None:
+        """Parse chat:mid | msg:chat:mid | bot:chat:mid → (chat_id, message_id)."""
         if not isinstance(message_ref, str):
             return None
-
-        parts = message_ref.split(":")
-        if len(parts) != 2:
+        s = message_ref.strip()
+        if s.startswith("imid:"):
             return None
-
+        parts = s.split(":")
         try:
-            return int(parts[0]), int(parts[1])
+            if len(parts) == 2:
+                return int(parts[0]), int(parts[1])
+            if len(parts) == 3 and parts[0] in {"msg", "bot"}:
+                return int(parts[1]), int(parts[2])
         except ValueError:
             return None
+        return None
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
         # Prefer already stored bot: ref from update_call
@@ -1042,11 +1046,17 @@ class UpdaterMod(loader.Module):
             if target.get("inline_message_id"):
                 self.set("selfupdatemsg", f"imid:{target['inline_message_id']}")
             elif target.get("chat_id") and target.get("message_id"):
-                prefix = "bot" if target.get("via_bot") else "msg"
-                self.set(
-                    "selfupdatemsg",
-                    f"{prefix}:{int(target['chat_id'])}:{int(target['message_id'])}",
-                )
+                if target.get("via_bot"):
+                    self.set(
+                        "selfupdatemsg",
+                        f"bot:{int(target['chat_id'])}:{int(target['message_id'])}",
+                    )
+                else:
+                    # 2-part chat:mid — works with _parse_legacy + client.edit_message
+                    self.set(
+                        "selfupdatemsg",
+                        f"{int(target['chat_id'])}:{int(target['message_id'])}",
+                    )
         except Exception:
             pass
 
@@ -1480,8 +1490,7 @@ class UpdaterMod(loader.Module):
         )
 
     async def client_ready(self):
-        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
-            return
+        # Do NOT return early if inline bot is not ready — must finish restart status edit
         try:
             with git.Repo():
                 pass
@@ -1508,11 +1517,23 @@ class UpdaterMod(loader.Module):
         ]
         self._markup = self._update_markup_rows
 
+        # Always complete restart UI after boot (same message → success, then full_success)
         if self.get("selfupdatemsg") is not None:
             try:
                 await self.update_complete()
             except Exception:
                 logger.exception("Failed to complete update!")
+
+            async def _full_later():
+                # Wait until modules settle, then show full_success and auto-delete
+                await asyncio.sleep(8)
+                try:
+                    if self.get("selfupdatemsg") is not None:
+                        await self.full_restart_complete()
+                except Exception:
+                    logger.exception("full_restart_complete failed")
+
+            asyncio.ensure_future(_full_later())
 
         if self.get("do_not_create", False):
             pass
@@ -1689,43 +1710,73 @@ class UpdaterMod(loader.Module):
         *,
         delete_after: int | None = None,
     ) -> bool:
-        """Edit restart status message. bot:chat:id → bot API only (no Saved Messages).
-
-        If delete_after is set (seconds), schedule deletion of that status message.
-        """
+        """Edit restart status after boot. Supports bot:/msg:/imid:/chat:mid."""
         if not ms:
             return False
         text = self.inline.sanitise_text(msg) if getattr(self, "inline", None) else msg
-        # bot PM message owned by inline bot
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+        ok = False
+        chat_id = message_id = None
+        via_bot = False
+
+        # imid:...
+        if isinstance(ms, str) and ms.startswith("imid:"):
+            imid = ms[5:]
+            if bot:
+                try:
+                    await bot.edit_message_text(
+                        text,
+                        inline_message_id=self._deserialize_inline_message_id(imid),
+                        disable_web_page_preview=True,
+                    )
+                    ok = True
+                except TypeError:
+                    try:
+                        await bot.edit_message_text(
+                            inline_message_id=self._deserialize_inline_message_id(imid),
+                            text=text,
+                            disable_web_page_preview=True,
+                        )
+                        ok = True
+                    except Exception as e:
+                        logger.warning("imid status edit failed (%s)", e)
+                except Exception as e:
+                    logger.warning("imid status edit failed (%s)", e)
+            if ok and delete_after:
+                await self._schedule_delete_status(ms=ms, delay=delete_after)
+            return ok
+
+        # bot:chat:mid — message in bot PM
         if isinstance(ms, str) and ms.startswith("bot:"):
+            via_bot = True
             try:
                 _, chat_s, msg_s = ms.split(":", 2)
                 chat_id, message_id = int(chat_s), int(msg_s)
             except Exception:
                 return False
-            ok = False
-            try:
-                await self.inline.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=text,
-                )
-                ok = True
-            except Exception as e:
-                logger.warning("bot PM status edit failed (%s)", e)
-                with contextlib.suppress(Exception):
-                    sent = await self.inline.bot.send_message(chat_id, text)
-                    # if we had to send new, delete that one later
-                    if delete_after and sent is not None:
-                        mid = getattr(sent, "id", None) or getattr(sent, "message_id", None)
-                        if mid is not None:
-                            await self._schedule_delete_status(
-                                chat_id=chat_id,
-                                message_id=int(mid),
-                                delay=delete_after,
-                                via_bot=True,
-                            )
-                    return True
+            if bot:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        disable_web_page_preview=True,
+                    )
+                    ok = True
+                except Exception as e:
+                    logger.warning("bot PM status edit failed (%s)", e)
+                    with contextlib.suppress(Exception):
+                        sent = await bot.send_message(chat_id, text)
+                        if delete_after and sent is not None:
+                            mid = getattr(sent, "id", None) or getattr(sent, "message_id", None)
+                            if mid is not None:
+                                await self._schedule_delete_status(
+                                    chat_id=chat_id,
+                                    message_id=int(mid),
+                                    delay=delete_after,
+                                    via_bot=True,
+                                )
+                            return True
             if ok and delete_after:
                 await self._schedule_delete_status(
                     chat_id=chat_id,
@@ -1734,34 +1785,52 @@ class UpdaterMod(loader.Module):
                     via_bot=True,
                 )
             return ok
-        # legacy chat:message from userbot-owned message (e.g. .restart command)
-        if legacy := self._parse_legacy_update_message_ref(ms):
+
+        # msg:chat:mid or chat:mid — user-visible message (via@ form or .restart)
+        legacy = self._parse_legacy_update_message_ref(ms)
+        if legacy:
             chat_id, message_id = legacy
+            # Prefer user client (via@ forms live as user messages)
             try:
-                await self._client.edit_message(chat_id, message_id, msg)
-                if delete_after:
-                    await self._schedule_delete_status(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        delay=delete_after,
-                        via_bot=False,
-                    )
-                return True
+                await self._client.edit_message(chat_id, message_id, text)
+                ok = True
             except Exception as e:
-                logger.warning("legacy status edit failed (%s)", e)
-                return False
-        # inline_message_id JSON / raw
-        try:
-            await self.inline.bot.edit_message_text(
-                inline_message_id=self._deserialize_inline_message_id(str(ms)),
-                text=text,
-            )
-            if delete_after:
-                await self._schedule_delete_status(ms=str(ms), delay=delete_after)
-            return True
-        except Exception:
-            logger.debug("inline_message_id status edit failed", exc_info=True)
-            return False
+                logger.debug("client status edit failed (%s)", e)
+                if bot:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=text,
+                            disable_web_page_preview=True,
+                        )
+                        ok = True
+                        via_bot = True
+                    except Exception as e2:
+                        logger.warning("status edit failed client+bot (%s / %s)", e, e2)
+            if ok and delete_after:
+                await self._schedule_delete_status(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    delay=delete_after,
+                    via_bot=via_bot,
+                )
+            return ok
+
+        # raw inline_message_id JSON / string
+        if bot:
+            try:
+                await bot.edit_message_text(
+                    inline_message_id=self._deserialize_inline_message_id(str(ms)),
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+                if delete_after:
+                    await self._schedule_delete_status(ms=str(ms), delay=delete_after)
+                return True
+            except Exception:
+                logger.debug("inline_message_id status edit failed", exc_info=True)
+        return False
 
     async def update_complete(self):
         logger.debug("Self update successful! Edit message")
