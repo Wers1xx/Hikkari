@@ -354,27 +354,46 @@ class TestMod(loader.Module):
     @loader.command()
     async def ping(self, message: Message):
         """- Find out your userbot ping (Heroku-style Rich when enabled)"""
+        import contextlib
+        from .. import version as _ver
+
         start = time.perf_counter_ns()
-        message = await utils.answer(message, self.config.get("ping_emoji") or "🪐")
+        message = await utils.answer(message, self.config.get("ping_emoji") or "✨")
 
         ping_ms = round((time.perf_counter_ns() - start) / 10**6, 3)
         uptime = utils.formatted_uptime()
         hint = ""
-        try:
+        with contextlib.suppress(Exception):
             if self.config.get("hint") and random.choice([0, 0, 1]) == 1:
                 hint = str(self.config["hint"])
-        except Exception:
-            pass
 
-        # Template from config or default
-        template = self.config.get("custom_message") or (
-            "<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> <b>Ping:</b> "
-            f"<code>{{ping}}</code> <b>ms</b>\n"
-            "<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji> <b>Uptime:</b> "
-            f"<code>{{uptime}}</code>"
+        build = ""
+        with contextlib.suppress(Exception):
+            build = str(utils.get_commit_url())
+        ver = ".".join(map(str, getattr(_ver, "__version__", (0, 0, 0))))
+
+        class _Safe(dict):
+            def __missing__(self, key):
+                return "{" + key + "}"
+
+        placeholders = _Safe(
+            ping=ping_ms,
+            uptime=uptime,
+            ping_hint=hint,
+            version=ver,
+            build=build,
+            branch=getattr(_ver, "branch", "master"),
         )
-        if isinstance(template, str) and "{ping}" in template:
-            text = template.format(ping=ping_ms, uptime=uptime, ping_hint=hint)
+
+        template = self.config.get("custom_message")
+        if isinstance(template, str) and template.strip():
+            try:
+                text = template.format_map(placeholders)
+            except Exception:
+                text = (
+                    f"<b>Ping:</b> <code>{ping_ms}</code> ms\n"
+                    f"<b>Uptime:</b> <code>{uptime}</code>"
+                )
         else:
             text = (
                 f"<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> "
@@ -385,15 +404,31 @@ class TestMod(loader.Module):
 
         if self.config.get("rich_mode", True):
             from .._internal import normalize_rich_html
+
             rich = text.replace("\r\n", "<br>").replace("\n", "<br>")
-            # ensure paragraphs for plain lines
             if "<p>" not in rich and "<details>" not in rich:
-                rich = "".join(f"<p>{ln}</p>" for ln in rich.split("<br>") if ln.strip())
+                rich = "".join(
+                    f"<p>{ln}</p>" for ln in rich.split("<br>") if ln.strip()
+                )
             banner = str(self.config.get("banner_url") or "").strip()
+            # RandomLink may be a list
+            if isinstance(self.config.get("banner_url"), list):
+                try:
+                    import random as _r
+
+                    banner = str(_r.choice(self.config["banner_url"]) or "")
+                except Exception:
+                    banner = ""
+            if banner.startswith("local:"):
+                name = banner[6:].lstrip("/")
+                banner = (
+                    f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
+                )
             if banner.startswith(("http://", "https://")) and not banner.lower().endswith(
                 (".mp4", ".webm", ".gif", ".mov")
             ):
-                rich = f'<figure><img src="{banner}"/></figure>' + rich
+                if "<figure" not in rich.lower():
+                    rich = f'<figure><img src="{banner}"/></figure>' + rich
             rich = normalize_rich_html(rich)
             await utils.answer_with_media_fallback(message, rich_message=rich)
             return
@@ -401,14 +436,13 @@ class TestMod(loader.Module):
         banner = self.config.get("banner_url")
         media = None
         if banner:
-            try:
+            with contextlib.suppress(Exception):
                 from hikkaritl.types import InputMediaWebPage
+
                 if self.config.get("quote_media"):
                     media = InputMediaWebPage(str(banner), optional=True)
                 else:
                     media = banner
-            except Exception:
-                media = banner
         await utils.answer_with_media_fallback(message, text, file=media)
 
 

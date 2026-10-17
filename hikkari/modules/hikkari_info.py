@@ -368,10 +368,22 @@ class HikkariInfoMod(loader.Module):
                     html = html.format_map(_Safe(**{k: str(v) for k, v in data.items()}))
                 except Exception:
                     pass
-                banner = str(self.config.get("banner_url") or "").strip()
-                if banner.startswith(("http://", "https://")) and "<figure" not in html.lower():
-                    if not banner.lower().endswith((".mp4", ".webm", ".gif", ".mov")):
-                        html = f'<figure><img src="{banner}"/></figure>' + html
+                banner = self.config.get("banner_url")
+                if isinstance(banner, list) and banner:
+                    import random as _r
+                    banner = _r.choice(banner)
+                banner = str(banner or "").strip()
+                if banner.startswith("local:"):
+                    banner = (
+                        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
+                        + banner[6:].lstrip("/")
+                    )
+                if not banner.startswith(("http://", "https://")):
+                    banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg"
+                if "<figure" not in html.lower() and not banner.lower().endswith(
+                    (".mp4", ".webm", ".gif", ".mov")
+                ):
+                    html = f'<figure><img src="{banner}"/></figure>' + html
                 html = normalize_rich_html(html)
                 await utils.answer_with_media_fallback(message, rich_message=html)
                 return

@@ -95,25 +95,43 @@ class HikkariConfigMod(loader.Module):
 
 
     def _cfg_rich_html(self, body: str, *, title: str = "Hikkari Config") -> str:
-        """Wrap config body as Rich HTML (Heroku 2.2 style)."""
+        """Wrap config body as Rich HTML (Heroku 2.2 style) + banner figure."""
         import html as html_mod
         from .._internal import normalize_rich_html
 
+        def _resolve_banner(url: str) -> str | None:
+            url = (url or "").strip()
+            if not url:
+                return None
+            if url.startswith("local:"):
+                name = url[6:].lstrip("/")
+                return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
+            if url.startswith(("http://", "https://")):
+                if url.lower().endswith((".mp4", ".webm", ".mov", ".gif")):
+                    return None  # video/gif not as <img> in rich
+                return url
+            # bare filename
+            if "/" not in url and "." in url:
+                return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{url}"
+            return None
+
         banner = ""
         try:
-            url = str(self.config.get("banner_url") or "").strip()
-            if url.startswith(("http://", "https://")) and not url.lower().endswith(
-                (".mp4", ".webm", ".mov", ".gif")
-            ):
-                banner = f'<figure><img src="{html_mod.escape(url)}"/></figure>'
+            raw = self.config.get("banner_url")
+            if isinstance(raw, list) and raw:
+                import random as _r
+                raw = _r.choice(raw)
+            url = _resolve_banner(str(raw or ""))
+            if not url:
+                url = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
+            banner = f'<figure><img src="{html_mod.escape(url)}"/></figure>'
         except Exception:
             pass
+
         body = body or ""
-        # Already rich-ish
         if "<details" in body or "<h2" in body or "<p>" in body:
             html = banner + body
         else:
-            # Convert classic HTML/br text into paragraphs
             lines = [
                 ln.strip()
                 for ln in body.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").split("\n")
@@ -122,6 +140,7 @@ class HikkariConfigMod(loader.Module):
             paras = "".join(f"<p>{ln}</p>" for ln in lines) or f"<p>{body}</p>"
             html = f"{banner}<h2>{html_mod.escape(title)}</h2>{paras}"
         return normalize_rich_html(html)
+
 
     def _cfg_use_rich(self) -> bool:
         # Always try Rich path (Heroku 2.2). Non-premium falls back via form/answer.
@@ -1704,9 +1723,10 @@ class HikkariConfigMod(loader.Module):
 
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
-
-        if not any(k in form_kwargs for k in ("photo", "video", "gif")):
-            form_kwargs.update(self._cfg_banner_kwargs())
+        # Do NOT inject photo/gif/video — that forces classic Inline Mode.
+        # Banner goes into Rich HTML as <figure> inside _cfg_rich_html / _cfg_form.
+        for _k in ("photo", "video", "gif", "file", "audio"):
+            form_kwargs.pop(_k, None)
         await self._cfg_form(
             draft.text,
             message=message,
