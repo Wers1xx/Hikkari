@@ -868,17 +868,35 @@ class Form(InlineUnit):
                             rich_value = normalize_rich_html(str(rich_value))
                         except Exception:
                             rich_value = str(rich_value)
-                    await inline_query.answer(
-                        [
-                            await inline_query.rich_article(
-                                title="Hikkari",
-                                html=rich_value if isinstance(rich_value, str) else str(rich_value),
-                                buttons=self.generate_markup(form["uid"]),
-                                id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=0,
-                    )
+                    btns = self.generate_markup(form["uid"])
+                    try:
+                        await inline_query.answer(
+                            [
+                                await inline_query.rich_article(
+                                    title="Hikkari",
+                                    html=rich_value if isinstance(rich_value, str) else str(rich_value),
+                                    buttons=btns,
+                                    id=utils.rand(20),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    except Exception:
+                        logger.exception("rich_article failed, classic article fallback")
+                        # Still show HTML + working buttons (inline mode)
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari Config",
+                                    description="Rich form",
+                                    text=form.get("text") or "⚙️",
+                                    parse_mode="HTML",
+                                    buttons=btns,
+                                    id=utils.rand(20),
+                                )
+                            ],
+                            cache_time=0,
+                        )
                 case _ if "photo" in form:
                     await inline_query.answer(
                         [

@@ -46,6 +46,13 @@ class HikkariInfoMod(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
+                "rich_mode",
+                True,
+                lambda: "Show .info as Rich message (Premium)",
+                validator=loader.validators.Boolean(),
+            ),
+
+            loader.ConfigValue(
                 "custom_message",
                 doc=lambda: self.strings["_cfg_cst_msg"]
                 + "\nPlaceholders: {ping}, {uptime}, {version}, {build}, {owner}, …",
@@ -315,14 +322,64 @@ class HikkariInfoMod(loader.Module):
             return False
 
     async def infocmd(self, message: Message):
-        """Show userbot info (Heroku-compatible quote_media)"""
+        """Show userbot info — Heroku 2.2 Rich when rich_mode is on"""
         start = time.perf_counter_ns()
         from .. import main as _main
+        from .._internal import normalize_rich_html
+
+        # --- Heroku-style native Rich info ---
+        if self.config.get("rich_mode", True):
+            try:
+                data = await self._info_placeholders(start)
+                # Prefer langpack-style template if present in strings
+                tmpl = None
+                with contextlib.suppress(Exception):
+                    tmpl = self.strings.get("rich_info_message")
+                custom = self.config.get("custom_message")
+                if custom and str(custom).strip() and ("<details" in str(custom) or "<table" in str(custom) or "<figure" in str(custom)):
+                    html = str(custom)
+                elif tmpl:
+                    html = str(tmpl)
+                else:
+                    html = (
+                        "<details><summary>Overview</summary>"
+                        "<p><b>Owner</b>: {me}</p>"
+                        "<p><b>Version</b>: {version}</p>"
+                        "<p><b>Prefix</b>: {prefix}</p>"
+                        "<p><b>Uptime</b>: {uptime}</p>"
+                        "<p><b>Branch</b>: {branch}</p>"
+                        "</details>"
+                        "<details><summary>Status</summary>"
+                        "<p><b>Updates</b>: {upd}</p>"
+                        "<p><b>CPU</b>: {cpu_usage}</p>"
+                        "<p><b>RAM</b>: {ram_usage}</p>"
+                        "<p><b>Ping</b>: {ping}</p>"
+                        "</details>"
+                        "<details><summary>Environment</summary>"
+                        "<p><b>Host</b>: {platform}</p>"
+                        "<p><b>OS</b>: {os}</p>"
+                        "<p><b>Python</b>: {python_ver}</p>"
+                        "</details>"
+                    )
+                class _Safe(dict):
+                    def __missing__(self, k):
+                        return "{" + k + "}"
+                try:
+                    html = html.format_map(_Safe(**{k: str(v) for k, v in data.items()}))
+                except Exception:
+                    pass
+                banner = str(self.config.get("banner_url") or "").strip()
+                if banner.startswith(("http://", "https://")) and "<figure" not in html.lower():
+                    if not banner.lower().endswith((".mp4", ".webm", ".gif", ".mov")):
+                        html = f'<figure><img src="{banner}"/></figure>' + html
+                html = normalize_rich_html(html)
+                await utils.answer_with_media_fallback(message, rich_message=html)
+                return
+            except Exception:
+                logger.exception("Heroku-style rich info failed, fallback")
 
         banner = self.config["banner_url"]
         media = utils.resolve_banner_media(banner)
-        # Rich mode → prefer quote/invert like Heroku info card
-
 
         # Rich via @bot (Premium + rich_mode) — custom_message keeps full Rich HTML
         try:

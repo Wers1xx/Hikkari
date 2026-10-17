@@ -127,6 +127,12 @@ class TestMod(loader.Module):
                 validator=loader.validators.String(),
             ),
             loader.ConfigValue(
+                "rich_mode",
+                True,
+                lambda: "Show .ping as Rich message (Premium)",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
                 "banner_url",
                 [
                     "local:hikkari-started.jpg",
@@ -347,200 +353,65 @@ class TestMod(loader.Module):
 
     @loader.command()
     async def ping(self, message: Message):
-        """- Find out your userbot ping"""
+        """- Find out your userbot ping (Heroku-style Rich when enabled)"""
         start = time.perf_counter_ns()
-        from ..utils.rich import can_use_rich
-        from ..utils.other import is_audio_banner
-        _audio_banner = is_audio_banner(self.config.get("banner_url"))
-        _rich = (
-            not _audio_banner
-            and can_use_rich(self._client, self._db)
-            and getattr(self.inline, "init_complete", False)
-        )
-        # Rich mode: no intermediate emoji (via @bot)
-        # Audio banner: no intermediate emoji either (instant send with caption)
-        # Classic image: timing emoji then edit
-        if not _rich and not _audio_banner:
-            message = await utils.answer(
-                message, self.config["ping_emoji"], skip_rich=True
-            )
-        banner = utils.resolve_banner_media(self.config["banner_url"])
-        # Local large video path must stay as path (send_file), not WebPage
-        try:
-            from pathlib import Path as _P
-            if isinstance(banner, str) and _P(banner).is_file():
-                pass  # path OK for send_file
-            elif banner and self.config.get("quote_media") is True and isinstance(banner, str) and banner.startswith(("http://", "https://")):
-                banner = InputMediaWebPage(banner, optional=True)
-        except Exception:
-            if banner and self.config.get("quote_media") is True and isinstance(banner, str) and banner.startswith(("http://", "https://")):
-                banner = InputMediaWebPage(banner, optional=True)
+        message = await utils.answer(message, self.config.get("ping_emoji") or "🪐")
 
-        from .. import version as ver_mod
-        import hikkaritl
-        import psutil
-
-        me = (
-            f'<a href="tg://user?id={self._client.hikkari_me.id}">'
-            f"{utils.escape_html(self._client.hikkari_me.first_name)}</a>"
-        )
-        build = utils.get_commit_url()
-        _version = ".".join(map(str, list(ver_mod.__version__)))
-        data = {
-            "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
-            "uptime": utils.formatted_uptime(),
-            "ping_hint": (
-                (self.config["hint"]) if random.choice([0, 0, 1]) == 1 else ""
-            ),
-            "hostname": lib_platform.node(),
-            "user": getpass.getuser(),
-            "platform": utils.get_platform_name(),
-            "version": _version,
-            "build": build,
-            "owner": me,
-            "me": me,
-            "prefix": utils.escape_html(self.get_prefix()),
-            "branch": getattr(ver_mod, "branch", "master"),
-            "python_ver": lib_platform.python_version(),
-            "cpu_usage": utils.get_cpu_usage(),
-            "ram_usage": f"{utils.get_ram_usage()} MB",
-            "os": lib_platform.system(),
-            "kernel": lib_platform.release(),
-            "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) cores",
-            "htl_ver": getattr(hikkaritl, "__version__", "?"),
-            "git_status": utils.get_git_status() if hasattr(utils, "get_git_status") else "",
-            "me_plain": utils.escape_html(getattr(self._client.hikkari_me, "first_name", "") or ""),
-            "build_plain": re.sub(r"<[^>]+>", "", str(build))[:48] if build else "—",
-            "time": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
-            "date": __import__("datetime").datetime.now().strftime("%d.%m.%Y"),
-            "fortune": "",
-            "upd": "",
-        }
-        data = await utils.get_placeholders(data, self.config["custom_message"])
+        ping_ms = round((time.perf_counter_ns() - start) / 10**6, 3)
+        uptime = utils.formatted_uptime()
+        hint = ""
         try:
-            custom = str(self.config.get("custom_message") or "")
-            for tok in re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", custom):
-                data.setdefault(tok, "")
+            if self.config.get("hint") and random.choice([0, 0, 1]) == 1:
+                hint = str(self.config["hint"])
         except Exception:
             pass
-        try:
-            placeholders_msg = apply_placeholders(self.config["custom_message"], data)
-        except KeyError:
-            logger.exception("Missing placeholder in custom_message")
-            placeholders_msg = "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
-        # Rich mode: official table + <tg-button-row> + via/@bot or sendRichMessage
-        try:
-            from ..utils.rich import can_use_rich
-            from ..utils.rich_api import (
-                pick_banner_url,
-                inject_banner_html,
-                build_info_html,
-                to_rich_compatible,
-                parse_rich_url_buttons,
-                try_send_rich,
-            )
-            if (
-                not _audio_banner
-                and can_use_rich(self._client, self._db)
-                and getattr(self.inline, "init_complete", False)
-            ):
-                burl = pick_banner_url(self.config.get("banner_url"))
-                custom = self.config.get("custom_message")
-                # Keep full Rich HTML if user provided it; otherwise official table
-                use_raw = bool(
-                    custom
-                    and str(custom).strip()
-                    and (
-                        "<table" in str(custom).lower()
-                        or "<h2" in str(custom).lower()
-                        or "<details" in str(custom).lower()
-                        or "<tg-button" in str(custom).lower()
-                        or "<figure" in str(custom).lower()
-                        or "<audio" in str(custom).lower()
-                        or "<video" in str(custom).lower()
-                        or "<tg-slideshow" in str(custom).lower()
-                        or "<slideshow" in str(custom).lower()
-                    )
-                )
-                if use_raw:
-                    html = to_rich_compatible(placeholders_msg)
-                    html = inject_banner_html(html, burl, force=True)
-                else:
-                    rows = [
-                        ("Ping", f"{data['ping']} ms"),
-                        ("Uptime", str(data["uptime"])),
-                        ("Version", str(data["version"])),
-                        (
-                            "Build",
-                            re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
-                        ),
-                        ("Host", str(data.get("hostname") or "—")),
-                        ("Python", str(data.get("python_ver", ""))),
-                    ]
-                    html = build_info_html(
-                        title="Hikkari Ping",
-                        rows=rows,
-                        footer=str(data.get("ping_hint") or ""),
-                        banner_url=burl,
-                    )
-                html = to_rich_compatible(html)
-                html = inject_banner_html(html, burl, force=True)
-                btn_html = parse_rich_url_buttons(
-                    str(self.config.get("rich_buttons") or "")
-                )
-                if btn_html:
-                    html = html + "\n" + btn_html
-                m = await self.inline.rich(
-                    message,
-                    html,
-                    title="Hikkari Ping",
-                    description=f"{data['ping']} ms",
-                    thumbnail_url=burl,
-                    silent=True,
-                )
-                if m:
-                    return
-                # Fallback: Bot API sendRichMessage (still real Rich)
-                chat = utils.get_chat_id(message)
-                if await try_send_rich(self._client, chat, html):
-                    with contextlib.suppress(Exception):
-                        if getattr(message, "out", False):
-                            await message.delete()
-                    return
-            elif can_use_rich(self._client, self._db):
-                logger.info("ping rich: inline bot not ready (.yesbot / .ch_bot_token)")
-        except Exception:
-            logger.warning("ping rich failed", exc_info=True)
 
-        # Audio track banner → instant send via document ref (no re-upload)
-        if _audio_banner:
-            from ..utils.other import audio_banner_send_kwargs
-            akw = audio_banner_send_kwargs(self.config.get("banner_url"))
-            if akw:
-                await utils.answer(
-                    message,
-                    placeholders_msg,
-                    skip_rich=True,
-                    **akw,
-                )
-                # belt: delete command if answer left it
-                with contextlib.suppress(Exception):
-                    if getattr(message, "out", False):
-                        await message.delete()
-                return
-            # fallback: local audio: path from resolve
-            if isinstance(banner, str) and banner.startswith("audio_ref:"):
-                banner = None
-        await utils.answer(
-            message,
-            placeholders_msg,
-            file=banner,
-            invert_media=self.config["invert_media"],
-            skip_rich=True,
+        # Template from config or default
+        template = self.config.get("custom_message") or (
+            "<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> <b>Ping:</b> "
+            f"<code>{{ping}}</code> <b>ms</b>\n"
+            "<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji> <b>Uptime:</b> "
+            f"<code>{{uptime}}</code>"
         )
+        if isinstance(template, str) and "{ping}" in template:
+            text = template.format(ping=ping_ms, uptime=uptime, ping_hint=hint)
+        else:
+            text = (
+                f"<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> "
+                f"<b>Ping:</b> <code>{ping_ms}</code> <b>ms</b>\n"
+                f"<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji> "
+                f"<b>Uptime:</b> <code>{uptime}</code>"
+            )
+
+        if self.config.get("rich_mode", True):
+            from .._internal import normalize_rich_html
+            rich = text.replace("\r\n", "<br>").replace("\n", "<br>")
+            # ensure paragraphs for plain lines
+            if "<p>" not in rich and "<details>" not in rich:
+                rich = "".join(f"<p>{ln}</p>" for ln in rich.split("<br>") if ln.strip())
+            banner = str(self.config.get("banner_url") or "").strip()
+            if banner.startswith(("http://", "https://")) and not banner.lower().endswith(
+                (".mp4", ".webm", ".gif", ".mov")
+            ):
+                rich = f'<figure><img src="{banner}"/></figure>' + rich
+            rich = normalize_rich_html(rich)
+            await utils.answer_with_media_fallback(message, rich_message=rich)
+            return
+
+        banner = self.config.get("banner_url")
+        media = None
+        if banner:
+            try:
+                from hikkaritl.types import InputMediaWebPage
+                if self.config.get("quote_media"):
+                    media = InputMediaWebPage(str(banner), optional=True)
+                else:
+                    media = banner
+            except Exception:
+                media = banner
+        await utils.answer_with_media_fallback(message, text, file=media)
 
 
-    @loader.command()
     async def usinfo(self, message: Message):
         """Detailed host / process resource usage"""
         import os
