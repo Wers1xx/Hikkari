@@ -488,12 +488,22 @@ class UpdaterMod(loader.Module):
         with contextlib.suppress(Exception):
             await call.answer()
 
-        # Keep bot message id for status edits + post-restart success edit
+        # Pin bot-PM notification message for status chain
         mid = getattr(call, "message_id", None) or getattr(
             getattr(call, "message", None), "message_id", None
         ) or getattr(getattr(call, "message", None), "id", None)
         if mid is not None:
-            self.set("selfupdatemsg", f"bot:{self.tg_id}:{int(mid)}")
+            self.set("selfupdatemsg", f"bot:{int(self.tg_id)}:{int(mid)}")
+        # Pre-seed capture so installing/restart edits hit this card
+        try:
+            self._status_seed = {
+                "chat_id": int(self.tg_id),
+                "message_id": int(mid) if mid is not None else None,
+                "inline_message_id": getattr(call, "inline_message_id", None),
+                "via_bot": True,
+            }
+        except Exception:
+            self._status_seed = None
 
         await self.inline_update(call)
 
@@ -703,7 +713,9 @@ class UpdaterMod(loader.Module):
         self,
         msg_obj: InlineCall | Message,
         secure_boot: bool = False,
+        _status_target: dict | None = None,
     ):
+
         if (
             hasattr(msg_obj, "form")
             and isinstance(msg_obj.form, dict)
@@ -718,57 +730,26 @@ class UpdaterMod(loader.Module):
         if secure_boot:
             self._db.set(loader.__name__, "secure_boot", True)
 
-        # Never use Rich for restart status (must be editable by user/bot cleanly)
+        # Always show restart caption on the SAME status message (chat form or bot PM)
         caption = self.strings["restarting_caption"].format(
             utils.get_platform_emoji()
             if getattr(self._client, "hikkari_me", None)
-            and self._client.hikkari_me.premium
+            and getattr(self._client.hikkari_me, "premium", False)
             else "Hikkari"
         )
-        existing = self.get("selfupdatemsg")
-        is_call = type(msg_obj).__name__ in (
-            "InlineCall",
-            "BotInlineCall",
-            "ChosenInlineCall",
-            "BotInlineMessage",
-        )
-        if isinstance(existing, str) and existing.startswith("bot:"):
-            # Legacy bot-ref — convert path no longer used for new updates
-            pass
-        elif isinstance(existing, str) and ":" in existing and not existing.startswith("{"):
-            # Owner status message already posted (update button) — keep it
-            pass
-        elif is_call:
-            # Edit the form message in the SAME chat — never spawn bot-PM status
-            with contextlib.suppress(Exception):
-                await msg_obj.edit(caption)
-            # Remember chat:mid if unit has message
-            try:
-                form = getattr(msg_obj, "form", None) or {}
-                unit = self.inline._units.get(form.get("uid")) if form.get("uid") else None
-                m = (unit or {}).get("message")
-                if m is not None:
-                    self.set(
-                        "selfupdatemsg",
-                        f"{utils.get_chat_id(m)}:{getattr(m, 'id', getattr(m, 'message_id', 0))}",
-                    )
-            except Exception:
-                pass
-        else:
-            # User invoked .restart / .update from a chat — edit THAT message only
-            new_msg = None
-            try:
-                new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
-            except Exception as e:
-                logger.warning("restart caption edit failed (%s)", e)
-            if new_msg is not None:
-                msg_obj = new_msg
-            with contextlib.suppress(Exception):
-                await self.process_restart_message(msg_obj)
+        target = _status_target or self._capture_status_target(msg_obj)
+        self._persist_status_target(target)
+        try:
+            await self._edit_update_status(msg_obj, caption, target=target)
+        except Exception:
+            logger.exception("restart caption edit failed")
+        # Ensure Telegram delivers the edit before we kill the process
+        await asyncio.sleep(0.5)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
-
         self.set("restart_ts", time.time())
+        with contextlib.suppress(Exception):
+            self._db.save()
 
         handler = logging.getLogger().handlers[0]
         handler.setLevel(logging.CRITICAL)
@@ -996,87 +977,200 @@ class UpdaterMod(loader.Module):
             "Use <code>.update</code> manually.",
         )
 
-    async def _edit_update_status(self, msg_obj, text: str):
-        """Edit progress in the SAME chat where update was started (never jump to bot PM)."""
+    def _capture_status_target(self, msg_obj) -> dict:
+        """Resolve chat/message/inline ids for reliable status edits."""
+        seed = getattr(self, "_status_seed", None)
+        if isinstance(seed, dict) and (seed.get("message_id") or seed.get("inline_message_id")):
+            self._status_seed = None
+            return dict(seed)
+        target = {"chat_id": None, "message_id": None, "inline_message_id": None, "via_bot": False}
+        try:
+            # Bot API callback (notification in bot PM / inline)
+            imid = getattr(msg_obj, "inline_message_id", None)
+            if imid:
+                target["inline_message_id"] = str(imid)
+                target["via_bot"] = True
+            # form unit message
+            form = getattr(msg_obj, "form", None)
+            if isinstance(form, dict) and form.get("uid") and getattr(self, "inline", None):
+                unit = self.inline._units.get(form["uid"]) or {}
+                m = unit.get("message")
+                if m is not None:
+                    target["chat_id"] = utils.get_chat_id(m)
+                    target["message_id"] = getattr(m, "id", None) or getattr(m, "message_id", None)
+                if unit.get("inline_message_id"):
+                    target["inline_message_id"] = str(unit["inline_message_id"])
+                    target["via_bot"] = True
+            # plain Message
+            from hikkaritl.tl.types import Message as _Msg
+            if isinstance(msg_obj, _Msg):
+                target["chat_id"] = utils.get_chat_id(msg_obj)
+                target["message_id"] = msg_obj.id
+            # BotInlineCall / call.message
+            call_msg = getattr(msg_obj, "message", None)
+            if call_msg is not None and target["message_id"] is None:
+                mid = getattr(call_msg, "id", None) or getattr(call_msg, "message_id", None)
+                if mid is not None:
+                    target["message_id"] = mid
+                cid = getattr(call_msg, "chat", None)
+                if cid is not None and hasattr(cid, "id"):
+                    target["chat_id"] = cid.id
+                elif getattr(msg_obj, "chat_id", None):
+                    target["chat_id"] = int(msg_obj.chat_id)
+            # sender for bot-PM callbacks
+            if target["chat_id"] is None:
+                for attr in ("chat_id", "from_user", "sender_id"):
+                    v = getattr(msg_obj, attr, None)
+                    if v is None:
+                        continue
+                    if attr == "from_user" and hasattr(v, "id"):
+                        target["chat_id"] = v.id
+                        target["via_bot"] = True
+                        break
+                    if attr in ("chat_id", "sender_id") and v:
+                        target["chat_id"] = int(getattr(v, "id", v))
+                        break
+            # Prefer explicit user id for bot edits in PM
+            if target["via_bot"] and target["chat_id"] is None:
+                target["chat_id"] = int(self.tg_id)
+        except Exception:
+            logger.debug("capture status target failed", exc_info=True)
+        return target
+
+    def _persist_status_target(self, target: dict) -> None:
+        try:
+            if target.get("inline_message_id"):
+                self.set("selfupdatemsg", f"imid:{target['inline_message_id']}")
+            elif target.get("chat_id") and target.get("message_id"):
+                prefix = "bot" if target.get("via_bot") else "msg"
+                self.set(
+                    "selfupdatemsg",
+                    f"{prefix}:{int(target['chat_id'])}:{int(target['message_id'])}",
+                )
+        except Exception:
+            pass
+
+    async def _edit_update_status(self, msg_obj, text: str, target: dict | None = None):
+        """Always try: call.edit → bot API → client edit. Never silent-fail the UI."""
         if getattr(self, "inline", None):
             with contextlib.suppress(Exception):
                 text = self.inline.sanitise_text(text)
 
-        # 1) InlineCall / form unit — edit in place
-        if hasattr(msg_obj, "edit") and callable(getattr(msg_obj, "edit", None)):
+        if target is None:
+            target = self._capture_status_target(msg_obj)
+            self._persist_status_target(target)
+
+        # 1) InlineCall.edit (works for form in any chat)
+        if hasattr(msg_obj, "edit") and callable(msg_obj.edit):
             try:
                 await msg_obj.edit(text)
                 return msg_obj
             except Exception:
-                logger.debug("status call.edit failed", exc_info=True)
+                logger.debug("call.edit failed", exc_info=True)
 
-        # 2) Explicit chat:mid ref saved at start of update
-        ref = self.get("selfupdatemsg")
-        if isinstance(ref, str) and ":" in ref and not ref.startswith("{"):
-            parts = ref.split(":")
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+
+        # 2) Bot API by inline_message_id
+        if bot and target.get("inline_message_id"):
             try:
-                if parts[0] == "bot" and len(parts) == 3:
-                    chat_id, message_id = int(parts[1]), int(parts[2])
-                elif len(parts) == 2:
-                    chat_id, message_id = int(parts[0]), int(parts[1])
-                else:
-                    chat_id = message_id = None
-                if chat_id is not None and message_id is not None:
-                    # Prefer user client edit in that chat
-                    try:
-                        await self._client.edit_message(chat_id, message_id, text)
+                await bot.edit_message_text(
+                    text,
+                    inline_message_id=str(target["inline_message_id"]),
+                    disable_web_page_preview=True,
+                )
+                return msg_obj
+            except TypeError:
+                try:
+                    await bot.edit_message_text(
+                        inline_message_id=str(target["inline_message_id"]),
+                        text=text,
+                        disable_web_page_preview=True,
+                    )
+                    return msg_obj
+                except Exception:
+                    logger.debug("bot edit imid failed", exc_info=True)
+            except Exception:
+                logger.debug("bot edit imid failed", exc_info=True)
+
+        # 3) Bot API chat+mid (bot PM notification card)
+        if bot and target.get("chat_id") and target.get("message_id"):
+            try:
+                await bot.edit_message_text(
+                    chat_id=int(target["chat_id"]),
+                    message_id=int(target["message_id"]),
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+                return msg_obj
+            except Exception:
+                logger.debug("bot edit chat/mid failed", exc_info=True)
+
+        # 4) User client edit
+        if target.get("chat_id") and target.get("message_id"):
+            try:
+                await self._client.edit_message(
+                    int(target["chat_id"]), int(target["message_id"]), text
+                )
+                return msg_obj
+            except Exception:
+                logger.debug("client edit failed", exc_info=True)
+
+        # 5) Parse selfupdatemsg fallback
+        ref = self.get("selfupdatemsg")
+        if isinstance(ref, str):
+            try:
+                if ref.startswith("imid:"):
+                    if bot:
+                        await bot.edit_message_text(
+                            text,
+                            inline_message_id=ref[5:],
+                            disable_web_page_preview=True,
+                        )
                         return msg_obj
-                    except Exception:
-                        pass
-                    if getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+                parts = ref.split(":")
+                if len(parts) == 3:
+                    _, cid, mid = parts
+                    cid, mid = int(cid), int(mid)
+                    if bot:
                         with contextlib.suppress(Exception):
-                            await self.inline.bot.edit_message_text(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                text=text,
+                            await bot.edit_message_text(
+                                chat_id=cid, message_id=mid, text=text,
                                 disable_web_page_preview=True,
                             )
                             return msg_obj
+                    with contextlib.suppress(Exception):
+                        await self._client.edit_message(cid, mid, text)
+                        return msg_obj
+                elif len(parts) == 2:
+                    cid, mid = int(parts[0]), int(parts[1])
+                    with contextlib.suppress(Exception):
+                        await self._client.edit_message(cid, mid, text)
+                        return msg_obj
             except Exception:
-                logger.debug("status ref edit failed", exc_info=True)
+                logger.debug("ref fallback edit failed", exc_info=True)
 
-        # 3) Plain Message in the original chat
+        # 6) Last resort — answer in place
         with contextlib.suppress(Exception):
             return await utils.answer(msg_obj, text, skip_rich=True)
         return msg_obj
+
 
     async def inline_update(
         self,
         msg_obj: InlineCall | Message,
         hard: bool = False,
     ):
-        # Pin status target to THIS chat (form/message), never bot PM by default
-        try:
-            from hikkaritl.tl.types import Message as _Msg
-            if isinstance(msg_obj, _Msg):
-                self.set(
-                    "selfupdatemsg",
-                    f"{utils.get_chat_id(msg_obj)}:{msg_obj.id}",
-                )
-            elif hasattr(msg_obj, "form"):
-                form = getattr(msg_obj, "form", None) or {}
-                unit = self.inline._units.get(form.get("uid")) if getattr(self, "inline", None) else None
-                m = (unit or {}).get("message")
-                if m is not None:
-                    self.set(
-                        "selfupdatemsg",
-                        f"{utils.get_chat_id(m)}:{getattr(m, 'id', 0)}",
-                    )
-        except Exception:
-            logger.debug("pin selfupdatemsg failed", exc_info=True)
+        # Capture once and reuse — status stays on the SAME message
+        target = self._capture_status_target(msg_obj)
+        self._persist_status_target(target)
 
-        # Strict order: download → install requirements → restart (never restart first)
+        # Strict order: download → install → show restart → restart()
         if hard:
             os.system(f"cd {utils.get_base_dir()} && cd .. && git reset --hard HEAD")
 
         try:
-            msg_obj = await self._edit_update_status(
-                msg_obj, self.strings["downloading"]
+            await self._edit_update_status(
+                msg_obj, self.strings["downloading"], target=target
             )
 
             try:
@@ -1087,18 +1181,39 @@ class UpdaterMod(loader.Module):
                 logger.exception("Timed out while fetching updates from git remote")
                 with contextlib.suppress(Exception):
                     await self._edit_update_status(
-                        msg_obj, "❌ <b>Timeout while downloading update</b>"
+                        msg_obj,
+                        "❌ <b>Timeout while downloading update</b>",
+                        target=target,
                     )
                 return
 
-            msg_obj = await self._edit_update_status(
-                msg_obj, self.strings["installing"]
+            await self._edit_update_status(
+                msg_obj, self.strings["installing"], target=target
             )
 
             if req_update:
-                self.req_common()
+                try:
+                    self.req_common()
+                except Exception:
+                    logger.exception("req_common failed")
 
-            await self.restart_common(msg_obj)
+            # Force restart caption BEFORE process dies (was missing → hang on installing)
+            caption = self.strings["restarting_caption"].format(
+                utils.get_platform_emoji()
+                if getattr(self._client, "hikkari_me", None)
+                and getattr(self._client.hikkari_me, "premium", False)
+                else "Hikkari"
+            )
+            await self._edit_update_status(msg_obj, caption, target=target)
+            # Give Telegram time to deliver the edit
+            await asyncio.sleep(0.6)
+            # Persist for post-restart success message
+            self.set("restart_ts", time.time())
+            self._persist_status_target(target)
+            with contextlib.suppress(Exception):
+                self._db.save()
+
+            await self.restart_common(msg_obj, _status_target=target)
         except GitCommandError:
             if not hard:
                 await self.inline_update(msg_obj, True)
