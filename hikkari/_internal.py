@@ -248,3 +248,39 @@ def normalize_rich_html(html_text):
         return html_text
     html_text = _EMOJI_OPEN.sub(r'<tg-emoji emoji-id="\1">', html_text)
     return _re_rich.sub(r"</emoji\s*>", "</tg-emoji>", html_text, flags=_re_rich.IGNORECASE)
+
+
+# --- Heroku 2.2: token / secret redaction ---
+import re as _re
+
+_secrets: set[str] = set()
+
+
+def register_secret(value: str | None) -> None:
+    if value and isinstance(value, str) and len(value) >= 8:
+        _secrets.add(value)
+
+
+def redact(text) -> str:
+    """Hide tokens, keys, passwords in logs and error text."""
+    text = str(text)
+    for secret in sorted(_secrets.copy(), key=len, reverse=True):
+        text = text.replace(secret, "[REDACTED]")
+    text = _re.sub(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        "[REDACTED PRIVATE KEY]",
+        text,
+        flags=_re.S,
+    )
+    text = _re.sub(r"\b\d{5,16}:[A-Za-z0-9_-]{30,}\b", "[REDACTED]", text)
+    text = _re.sub(r"\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{16,}\b", "[REDACTED]", text)
+    text = _re.sub(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9+/_.=-]+", r"\1 [REDACTED]", text)
+    text = _re.sub(r"(\w+://)[^\s/@]+:[^\s/@]+@", r"\1[REDACTED]@", text)
+    text = _re.sub(
+        r"(?i)([\"']?(?:[\w.-]*(?:token|password|passwd|secret|api_key|api_hash|"
+        r"auth_key|session_string|basic_auth))[\"']?\s*[:=]\s*)"
+        r"(?:\"[^\"]*\"|'[^']*'|[^\s&,;<>]+)",
+        r"\1[REDACTED]",
+        text,
+    )
+    return text

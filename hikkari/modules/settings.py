@@ -529,92 +529,116 @@ class CoreMod(loader.Module):
 
     @loader.command()
     async def setprefix(self, message: Message):
-        if not (args := utils.get_args(message)):
+        """<prefix...> [@owner|id] or --user <id> <prefix...> — multiple prefixes (Heroku 2.2)."""
+        from hikkaritl.tl.types import User
+        from .. import main as _main
+
+        args = utils.get_args(message)
+        if not args:
             await utils.answer(message, self.strings["what_prefix"])
             return
 
-        if len(args[0]) != 1 and self.config.get("allow_nonstandart_prefixes") is False:
+        target = self.tg_id
+        if "--user" in args:
+            index = args.index("--user")
+            if index + 1 >= len(args):
+                await utils.answer(message, self.strings["what_prefix"])
+                return
+            target = args[index + 1]
+            del args[index : index + 2]
+        elif len(args) > 1 and (
+            (str(args[-1]).startswith("@") and len(str(args[-1])) > 1)
+            or (str(args[-1]).isdigit() and len(str(args[-1])) >= 5)
+        ):
+            target = args.pop()
+
+        if not args:
+            await utils.answer(message, self.strings["what_prefix"])
+            return
+
+        allow_long = bool(self.config.get("allow_nonstandart_prefixes"))
+        if any(
+            (not p)
+            or p == "s"
+            or any(c.isspace() for c in p)
+            or (len(p) != 1 and not allow_long)
+            for p in args
+        ):
             await utils.answer(message, self.strings["prefix_incorrect"])
             return
 
-        if args[0] == "s":
-            await utils.answer(message, self.strings["prefix_incorrect"])
+        prefixes = list(dict.fromkeys(args))
+        try:
+            entity = await self.client.get_entity(
+                int(target) if str(target).isdigit() else target
+            )
+        except Exception:
+            await utils.answer(message, "❌ Invalid user id / username")
+            return
+        if not isinstance(entity, User):
+            await utils.answer(message, "❌ Not a user")
             return
 
-        if len(args) == 2:
-            if args[1].isdigit():
-                args[1] = int(args[1])
+        if entity.id == self.tg_id:
+            old = self.get_prefix()
+            self._db.set(_main.__name__, "command_prefix", prefixes[0])
+            self._db.set(
+                _main.__name__,
+                "extra_prefixes",
+                prefixes[1:] if len(prefixes) > 1 else [],
+            )
             try:
-                entity = await self.client.get_entity(args[1])
+                text = self.strings["prefix_set"].format(
+                    "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji>",
+                    utils.escape_html(" ".join(prefixes)),
+                    utils.escape_html(str(old)),
+                )
             except Exception:
-                return await utils.answer(
-                    message, self.strings["invalid_id_or_username"]
+                text = (
+                    f"✅ Prefix: <code>{utils.escape_html(' '.join(prefixes))}</code>"
                 )
+            await utils.answer(message, text)
+            return
 
-            if not isinstance(entity, User):
-                return await utils.answer(
-                    message, self.strings["not_a_user"].format(args[1])
-                )
+        security = self._client.dispatcher.security
+        allowed = set(security.owner or [])
+        try:
+            for g in getattr(security, "_sgroups", {}).values():
+                allowed.update(getattr(g, "users", []) or [])
+        except Exception:
+            pass
+        if entity.id not in allowed:
+            await utils.answer(
+                message,
+                self.strings.get(
+                    "id_not_found_scgroup", "❌ User not in security groups"
+                ),
+            )
+            return
 
-            if entity.id != self.tg_id:
-                sgroup_users = []
-                for g in self._client.dispatcher.security._sgroups.values():
-                    for u in g.users:
-                        sgroup_users.append(u)
-
-                tsec_users = [
-                    rule["target"]
-                    for rule in self._client.dispatcher.security._tsec_user
-                ]
-                ub_owners = self._client.dispatcher.security.owner.copy()
-
-                all_users = sgroup_users + tsec_users + ub_owners
-
-                if entity.id not in all_users:
-                    return await utils.answer(
-                        message, self.strings["id_not_found_scgroup"]
-                    )
-
-                oldprefix = utils.escape_html(self.get_prefix(entity.id))
-                all_prefixes = self._db.get(
-                    main.__name__,
-                    "command_prefixes",
-                    {},
-                )
-
-                all_prefixes[str(entity.id)] = args[0]
-
-                self._db.set(
-                    main.__name__,
-                    "command_prefixes",
-                    all_prefixes,
-                )
-                return await utils.answer(
-                    message,
-                    self.strings["entity_prefix_set"].format(
-                        "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji>",
-                        entity_name=utils.escape_html(entity.first_name),
-                        newprefix=utils.escape_html(args[0]),
-                        oldprefix=utils.escape_html(oldprefix),
-                        entity_id=args[1],
-                    ),
-                )
-
-        oldprefix = utils.escape_html(self.get_prefix())
-
-        self._db.set(
-            main.__name__,
-            "command_prefix",
-            args[0],
+        oldprefix = utils.escape_html(str(self.get_prefix(entity.id)))
+        all_prefixes = dict(self._db.get(_main.__name__, "command_prefixes", {}) or {})
+        all_prefixes[str(entity.id)] = (
+            prefixes[0] if len(prefixes) == 1 else list(prefixes)
         )
-        await utils.answer(
-            message,
-            self.strings["prefix_set"].format(
+        self._db.set(_main.__name__, "command_prefixes", all_prefixes)
+        try:
+            text = self.strings["entity_prefix_set"].format(
                 "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji>",
-                newprefix=utils.escape_html(args[0]),
-                oldprefix=utils.escape_html(oldprefix),
-            ),
-        )
+                entity_name=utils.escape_html(
+                    getattr(entity, "first_name", "") or str(entity.id)
+                ),
+                newprefix=utils.escape_html(" ".join(prefixes)),
+                oldprefix=oldprefix,
+                entity_id=entity.id,
+            )
+        except Exception:
+            text = (
+                f"✅ Prefix for <code>{entity.id}</code>: "
+                f"<code>{utils.escape_html(' '.join(prefixes))}</code>"
+            )
+        await utils.answer(message, text)
+
 
     @loader.command()
     async def aliases(self, message: Message):
@@ -633,66 +657,94 @@ class CoreMod(loader.Module):
 
     @loader.command()
     async def addalias(self, message: Message):
+        """Supports: addalias a cmd; a, b && cmd args; multiline body (Heroku 2.2)."""
+        import keyword
 
         args_raw = utils.get_args_raw(message)
         if not args_raw:
             await utils.answer(message, self.strings["alias_args"])
             return
 
-        alias_lines = []
-        for line in args_raw.splitlines():
+        def parse_alias_line(line: str):
             line = line.strip()
             if not line:
-                continue
-
+                return None
+            if "&&" in line:
+                left, right = line.split("&&", 1)
+                aliases = [a.strip().lower() for a in left.split(",") if a.strip()]
+                return aliases, right.strip()
             if "," in line:
-                parts = [part.strip() for part in line.split(",")]
-                last = parts[-1].split(maxsplit=1)
-                if len(last) < 2:
+                parts = [p.strip() for p in line.split(",")]
+                if parts:
+                    last = parts[-1].split(maxsplit=1)
+                    if len(last) >= 2:
+                        aliases = [p.lower() for p in parts[:-1] if p]
+                        aliases.append(last[0].lower())
+                        return aliases, last[1]
+            args = line.split(maxsplit=1)
+            if len(args) >= 2:
+                return [args[0].lower()], args[1].strip()
+            return None
+
+        alias_lines = []
+        lines = args_raw.splitlines()
+        for line_idx, line in enumerate(lines):
+            is_new_alias = False
+            parsed_aliases = parsed_cmd = parsed_rest = None
+            stripped = line.strip()
+            if stripped:
+                parsed = parse_alias_line(line)
+                if parsed:
+                    aliases, command = parsed
+                    command_parts = command.split(maxsplit=1)
+                    cmd = command_parts[0].lstrip(".")
+                    rest = command_parts[1] if len(command_parts) > 1 else None
+                    first_word = stripped.split()[0] if stripped else ""
+                    is_valid = (
+                        not line.startswith(" ")
+                        and not line.startswith("\t")
+                        and not keyword.iskeyword(first_word)
+                        and all(c.isalnum() or c in "_-" for c in first_word)
+                    )
+                    if is_valid and cmd in self.allmodules.commands:
+                        is_new_alias = True
+                        parsed_aliases, parsed_cmd, parsed_rest = aliases, cmd, rest
+
+            if line_idx == 0:
+                parsed = parse_alias_line(line)
+                if not parsed:
                     await utils.answer(message, self.strings["alias_args"])
                     return
-
-                aliases = [part.lower() for part in parts[:-1] if part]
-                aliases.append(last[0].lower())
-                command = last[1]
+                aliases, command = parsed
+                command_parts = command.split(maxsplit=1)
+                cmd = command_parts[0].lstrip(".")
+                rest = command_parts[1] if len(command_parts) > 1 else None
+                if cmd not in self.allmodules.commands:
+                    await utils.answer(
+                        message,
+                        self.strings["no_command"].format(utils.escape_html(cmd)),
+                    )
+                    return
+                alias_lines.append((aliases, cmd, rest))
             else:
-                # .addalias <alias> <command> [args...]
-                # e.g. addalias рест restart -f
-                #      addalias фк fcfg tester banner_url
-                args = line.split(maxsplit=1)
-                if len(args) < 2:
-                    await utils.answer(message, self.strings["alias_args"])
-                    return
-
-                aliases = [args[0].lower()]
-                command = args[1].strip()
-
-            command_parts = command.split(maxsplit=1)
-            cmd = command_parts[0].lstrip(".")  # allow ".restart -f"
-            rest = command_parts[1] if len(command_parts) > 1 else None
-
-            if cmd not in self.allmodules.commands:
-                await utils.answer(
-                    message,
-                    self.strings["no_command"].format(utils.escape_html(cmd)),
-                )
-                return
-
-            alias_lines.append((aliases, cmd, rest))
+                if is_new_alias:
+                    alias_lines.append((parsed_aliases, parsed_cmd, parsed_rest))
+                elif alias_lines:
+                    aliases, cmd, rest = alias_lines[-1]
+                    new_rest = line if rest is None else rest + "\n" + line
+                    alias_lines[-1] = (aliases, cmd, new_rest)
 
         if not alias_lines:
             await utils.answer(message, self.strings["alias_args"])
             return
 
-        added_lines = []
-        skipped_lines = []
+        added_lines, skipped_lines = [], []
         planned_aliases = {}
         stored_aliases = {**self.get("aliases", {})}
 
         for aliases, cmd, rest in alias_lines:
             target = f"{cmd} {rest}" if rest else cmd
             added_aliases = []
-
             for alias in aliases:
                 if alias in self.allmodules.aliases:
                     skipped_lines.append(
@@ -702,7 +754,6 @@ class CoreMod(loader.Module):
                         )
                     )
                     continue
-
                 if alias in planned_aliases:
                     skipped_lines.append(
                         self.strings["alias_exists"].format(
@@ -711,53 +762,48 @@ class CoreMod(loader.Module):
                         )
                     )
                     continue
-
                 if not self.allmodules.add_alias(alias, cmd, rest):
                     await utils.answer(
                         message,
                         self.strings["no_command"].format(utils.escape_html(cmd)),
                     )
                     return
-
                 stored_aliases[alias] = target
                 planned_aliases[alias] = target
                 added_aliases.append(alias)
-
             if added_aliases:
                 added_lines.append((added_aliases, target))
 
         if added_lines:
             self.set("aliases", stored_aliases)
 
-        if len(added_lines) == 1 and len(added_lines[0][0]) == 1 and not skipped_lines:
+        if not added_lines:
             await utils.answer(
                 message,
-                self.strings["alias_created"].format(
-                    utils.escape_html(added_lines[0][0][0])
-                ),
+                "\n".join(skipped_lines) if skipped_lines else self.strings["alias_args"],
             )
             return
 
-        added_count = sum(len(aliases) for aliases, _ in added_lines)
-        response = []
-
-        if added_lines:
-            response.append(
-                self.strings["aliases_created"].format(
-                    count=added_count,
-                    aliases="\n".join(
-                        self.strings["aliases_created_line"].format(
-                            aliases=utils.escape_html(", ".join(aliases)),
-                            command=utils.escape_html(target),
-                        )
-                        for aliases, target in added_lines
-                    ),
-                )
+        try:
+            body = self.strings["aliases_created"].format(
+                count=sum(len(a) for a, _ in added_lines),
+                aliases="\n".join(
+                    self.strings["aliases_created_line"].format(
+                        aliases=utils.escape_html(", ".join(a)),
+                        command=utils.escape_html(t),
+                    )
+                    for a, t in added_lines
+                ),
             )
+        except Exception:
+            body = "✅ Aliases:\n" + "\n".join(
+                f"<code>{utils.escape_html(', '.join(a))}</code> → <code>{utils.escape_html(t)}</code>"
+                for a, t in added_lines
+            )
+        if skipped_lines:
+            body += "\n\n" + "\n".join(skipped_lines)
+        await utils.answer(message, body)
 
-        response.extend(skipped_lines)
-
-        await utils.answer(message, "\n\n".join(response))
 
     @loader.command()
     async def delalias(self, message: Message):

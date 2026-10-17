@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -319,7 +320,25 @@ class Database(dict):
             return True
 
         try:
-            self._db_file.write_text(self._fast_dumps(self))
+            # Heroku 2.2-style atomic write + private mode
+            import os as _os
+            import tempfile as _tmp
+            data = self._fast_dumps(self)
+            path = self._db_file
+            parent = path.parent if hasattr(path, "parent") else Path(path).parent
+            fd, tmp_name = _tmp.mkstemp(prefix=".db_", suffix=".tmp", dir=str(parent))
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(data)
+                    f.flush()
+                    _os.fsync(f.fileno())
+                _os.replace(tmp_name, str(path))
+                with contextlib.suppress(Exception):
+                    _os.chmod(str(path), 0o600)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    _os.unlink(tmp_name)
+                raise
         except Exception:
             logger.exception("Database save failed!")
             return False

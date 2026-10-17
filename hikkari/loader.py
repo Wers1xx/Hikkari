@@ -1274,17 +1274,32 @@ class Modules:
         return result
 
     def get_prefixes(self) -> set[str]:
-        """Get all command prefixes"""
+        """Get all command prefixes (main + extra + per-user)."""
         from . import main
 
         key = main.__name__
         default = "."
+        out: set[str] = set()
 
-        prefixes = ()
-        prefixes += tuple(self._db.get(key, "command_prefixes", {}).values())
-        prefixes += tuple(self._db.get(key, "command_prefix", default))
+        main_p = self._db.get(key, "command_prefix", default)
+        if isinstance(main_p, (list, tuple)):
+            out.update(str(x) for x in main_p if x)
+        elif main_p:
+            out.add(str(main_p))
 
-        return set(prefixes)
+        for extra in self._db.get(key, "extra_prefixes", []) or []:
+            if extra:
+                out.add(str(extra))
+
+        for value in (self._db.get(key, "command_prefixes", {}) or {}).values():
+            if isinstance(value, (list, tuple)):
+                out.update(str(x) for x in value if x)
+            elif value:
+                out.add(str(value))
+
+        if not out:
+            out.add(default)
+        return out
 
     async def complete_registration(self, instance: Module):
         """Complete registration of instance"""

@@ -610,7 +610,7 @@ class CommandDispatcher:
                     " failed!</b>"
                 )
             else:
-                exc = "\n".join(traceback.format_exc().splitlines()[1:])
+                exc = "\n".join((__import__('hikkari._internal', fromlist=['redact']).redact(traceback.format_exc())).splitlines()[1:])
                 txt = (
                     "<tg-emoji emoji-id=5877477244938489129>🚫</tg-emoji><b> Call</b>"
                     f" <code>{utils.escape_html(message.message)}</code><b>"
