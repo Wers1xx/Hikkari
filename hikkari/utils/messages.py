@@ -338,36 +338,106 @@ def looks_like_rich_html(text: str) -> bool:
 
 
 
+
+async def _send_rich_message(
+    message: Message,
+    html,
+    *,
+    reply_to: int | None = None,
+    reply_markup=None,
+    silent: bool | None = None,
+):
+    return await message.client.send_rich_message(
+        message.peer_id,
+        html,
+        reply_to=reply_to,
+        buttons=reply_markup,
+        silent=silent,
+    )
+
+
+async def _edit_rich_message(
+    message: Message,
+    html,
+    *,
+    reply_markup=None,
+):
+    return await message.client.edit_rich_message(
+        message.peer_id,
+        message,
+        html,
+        buttons=reply_markup,
+    )
+
+
+async def _edit_inline_rich_message(message, rich_message: str, reply_markup=None):
+    unit = getattr(message, "form", None) or {}
+    caller = unit.get("caller") or unit.get("chat") or getattr(message, "chat_id", None)
+    if caller is not None and hasattr(message, "inline_manager"):
+        with contextlib.suppress(Exception):
+            await message.delete()
+        return await message.inline_manager.form(
+            "",
+            caller,
+            reply_markup=reply_markup or [],
+            rich_message=rich_message,
+            reply_to=unit.get("top_msg_id"),
+            silent=True,
+            ttl=600,
+        )
+    rich_markup = (
+        message.inline_manager.generate_markup(reply_markup)
+        if reply_markup is not None
+        else None
+    )
+    if isinstance(message, (InlineMessage, InlineCall)):
+        await message.inline_manager.bot.edit_rich_message(
+            html=rich_message if isinstance(rich_message, str) else None,
+            rich_message=None if isinstance(rich_message, str) else rich_message,
+            inline_message_id=message.inline_message_id,
+            reply_markup=rich_markup,
+        )
+    else:
+        await message.inline_manager.bot.edit_rich_message(
+            html=rich_message if isinstance(rich_message, str) else None,
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            reply_markup=rich_markup,
+        )
+    return message
+
+
 async def answer_with_media_fallback(message, *args, **kwargs):
-    """Heroku-compatible: send rich_message or classic answer, strip imgs on media errors."""
-    rich_message = kwargs.pop("rich_message", None)
+    """Heroku-compatible: try answer (incl. rich_message), strip images on media errors."""
     try:
-        if rich_message is not None:
-            # Prefer native / via@ rich
-            ok = await answer_rich(
-                message,
-                rich_message if isinstance(rich_message, str) else str(rich_message),
-                title=kwargs.pop("title", "Hikkari"),
-                description=kwargs.pop("description", "Rich"),
-                reply_markup=kwargs.pop("reply_markup", None),
-                silent=kwargs.pop("silent", True),
-            )
-            if ok:
-                return ok
-            return await answer(message, rich_message if isinstance(rich_message, str) else str(args[0] if args else ""), **kwargs)
         return await answer(message, *args, **kwargs)
-    except Exception as e:
-        name = type(e).__name__
-        if name in {"WebpageMediaEmptyError", "RPCError"} or "RICH_MESSAGE" in str(e):
-            import re as _re
-            body = rich_message if isinstance(rich_message, str) else (args[0] if args else "")
-            body = _re.sub(r"<figure>.*?</figure>", "", str(body), flags=_re.S | _re.I)
-            body = _re.sub(r"<img\b[^>]*>", "", body, flags=_re.I)
-            try:
-                return await answer_rich(message, body, silent=True)
-            except Exception:
-                return await answer(message, body)
-        raise
+    except Exception as error:
+        name = type(error).__name__
+        msg = getattr(error, "message", None) or str(error)
+        if name not in {"WebpageMediaEmptyError", "RPCError"} and "RICH_MESSAGE" not in str(msg):
+            # also catch generic if message mentions external media
+            if "EXTERNAL_MEDIA" not in str(msg) and "PHOTO_NO_MEDIA" not in str(msg):
+                raise
+        rich_message = kwargs.get("rich_message")
+        if rich_message and isinstance(rich_message, str):
+            without = re.sub(
+                r"<img\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>",
+                "",
+                rich_message,
+                flags=re.IGNORECASE,
+            )
+            without = re.sub(r"<figure>.*?</figure>", "", without, flags=re.I | re.S)
+            if without == rich_message:
+                raise
+            kwargs["rich_message"] = without
+        elif not kwargs.get("file"):
+            raise
+        kwargs.pop("file", None)
+        kwargs.pop("invert_media", None)
+        kwargs["link_preview"] = False
+        return await answer(message, *args, **kwargs)
+
+
 
 async def answer_rich(
     message,
@@ -492,9 +562,11 @@ async def answer_rich(
 
 async def answer(
     message: Message | InlineCall | InlineMessage,
-    response: str,
+    response: str = "",
     *,
     reply_markup: HikkariReplyMarkup | None = None,
+    rich_message: str | None = None,
+    rich: bool = False,
     **kwargs,
 ) -> InlineCall | InlineMessage | Message:
     """
@@ -524,6 +596,76 @@ async def answer(
 
     if isinstance(message, list) and message:
         message = message[0]
+
+    if rich and rich_message is None:
+        if not isinstance(response, str):
+            raise TypeError("response must be a string when rich=True")
+        rich_message = response
+
+    # --- Heroku 2.2 native Rich path ---
+    if rich_message is not None:
+        if isinstance(
+            message,
+            (InlineMessage, InlineCall, BotInlineCall),
+        ):
+            return await _edit_inline_rich_message(
+                message,
+                rich_message,
+                reply_markup=reply_markup,
+            )
+
+        # Buttons / non-premium → via@ form with rich_message (working callbacks)
+        me = getattr(getattr(message, "client", None), "hikkari_me", None)
+        premium = bool(getattr(me, "premium", False))
+        if reply_markup or not premium:
+            inline = message.client.loader.inline
+            form_kwargs = {
+                key: kwargs[key]
+                for key in (
+                    "force_me",
+                    "always_allow",
+                    "manual_security",
+                    "disable_security",
+                    "on_unload",
+                )
+                if key in kwargs
+            }
+            return await inline.form(
+                text=response or "✨",
+                message=message if getattr(message, "out", False) else get_chat_id(message),
+                rich_message=rich_message,
+                reply_markup=inline._normalize_markup(reply_markup)
+                if reply_markup
+                else [],
+                reply_to=kwargs.get("reply_to")
+                or getattr(message, "reply_to_msg_id", None)
+                or get_topic(message),
+                silent=kwargs.get("silent", True),
+                ttl=kwargs.get("ttl", 600),
+                **form_kwargs,
+            )
+
+        edit = (
+            getattr(message, "out", False)
+            and not getattr(message, "via_bot_id", None)
+            and not getattr(message, "fwd_from", None)
+        )
+        if edit:
+            try:
+                return await _edit_rich_message(
+                    message, rich_message, reply_markup=reply_markup
+                )
+            except Exception:
+                pass
+        return await _send_rich_message(
+            message,
+            rich_message,
+            reply_to=kwargs.pop("reply_to", None)
+            or getattr(message, "reply_to_msg_id", None)
+            or get_topic(message),
+            reply_markup=reply_markup,
+            silent=kwargs.pop("silent", None),
+        )
 
     if reply_markup is not None:
         if not isinstance(reply_markup, (list, dict)):

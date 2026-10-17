@@ -93,6 +93,12 @@ class Help(loader.Module):
                 lambda: self.strings["show_preview_in_help"],
                 validator=loader.validators.Boolean(),
             ),
+            loader.ConfigValue(
+                "rich_mode",
+                True,
+                lambda: "Use Telegram Rich messages for .help (Premium)",
+                validator=loader.validators.Boolean(),
+            ),
         )
 
     async def client_ready(self):
@@ -720,6 +726,51 @@ class Help(loader.Module):
             1 for m in mods_iter if m.__class__.__name__ in hidden
         )
         reply = self.strings["all_header"].format(shown_count, hidden_count)
+
+        # === Heroku 2.2 native Rich help (details sections) ===
+        if self.config.get("rich_mode", True):
+            try:
+                from .. import utils as _u
+                from .._internal import normalize_rich_html
+
+                banner_html = ""
+                bu = banner_url_str if "banner_url_str" in dir() else None
+                try:
+                    bu = str(self.config.get("banner_url") or "").strip() or None
+                except Exception:
+                    bu = None
+                if bu and str(bu).startswith(("http://", "https://")):
+                    if not str(bu).lower().endswith((".mp4", ".webm", ".mov", ".gif")):
+                        banner_html = f'<figure><img src="{bu}"/></figure>'
+
+                icon = self.config.get("desc_icon") or ""
+                rich_message = banner_html + f"<p>{icon} {reply}</p>"
+                rich_core = "".join(f"<p>{item.strip()}</p>" for item in core_)
+                rich_modules = "".join(
+                    f"<p>{item.strip()}</p>"
+                    for item in plain_ + (no_commands_ if force else [])
+                )
+                if only_core:
+                    sections = [("🛡 Core", rich_core)]
+                elif only_loaded:
+                    sections = [("📦 Modules", rich_modules)]
+                else:
+                    sections = [("🛡 Core", rich_core), ("📦 Modules", rich_modules)]
+                rich_message += "".join(
+                    f"<details><summary>{title}</summary>{content}</details>"
+                    for title, content in sections
+                    if content
+                )
+                loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                if loader_mod and not getattr(loader_mod, "fully_loaded", True):
+                    rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
+                rich_message = normalize_rich_html(rich_message)
+                await _u.answer_with_media_fallback(
+                    message, rich_message=rich_message
+                )
+                return
+            except Exception:
+                logger.exception("Heroku-style rich help failed, fallback")
 
         async def _send_help_rich(text_header: str, sections: list[tuple[str, str]]) -> bool:
             """

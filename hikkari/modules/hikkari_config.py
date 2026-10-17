@@ -124,34 +124,39 @@ class HikkariConfigMod(loader.Module):
         return normalize_rich_html(html)
 
     def _cfg_use_rich(self) -> bool:
-        try:
-            me = getattr(self._client, "hikkari_me", None)
-            if me is not None and getattr(me, "premium", False):
-                return True
-        except Exception:
-            pass
-        return False
+        # Always try Rich path (Heroku 2.2). Non-premium falls back via form/answer.
+        return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner / Rich when available."""
+        """form() as Rich + buttons (Heroku 2.2). Fallback to photo banner form."""
         kw = dict(kwargs)
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
         kw.setdefault("silent", True)
 
-        # Prefer native Rich form with working callback buttons (Heroku 2.2 path)
-        if self._cfg_use_rich() and not any(
-            k in kw for k in ("photo", "video", "gif", "file", "audio")
-        ):
-            rich = kw.pop("rich_message", None) or self._cfg_rich_html(
-                text, title="⚙️ Hikkari Config"
-            )
-            kw["rich_message"] = rich
-            # placeholder caption for non-rich clients
-            return await self.inline.form("⚙️", message=message, **kw)
+        # Do not mix photo/video with rich_message
+        media_keys = ("photo", "video", "gif", "file", "audio")
+        if any(k in kw for k in media_keys):
+            return await self.inline.form(text, message=message, **kw)
 
-        kw.update(self._cfg_banner_kwargs())
-        return await self.inline.form(text, message=message, **kw)
+        rich = kw.pop("rich_message", None) or self._cfg_rich_html(
+            text, title="⚙️ Hikkari Config"
+        )
+        try:
+            return await self.inline.form(
+                "⚙️",
+                message=message,
+                rich_message=rich,
+                **kw,
+            )
+        except Exception:
+            logger.exception("cfg rich form failed, classic banner form")
+            kw2 = dict(kwargs)
+            if reply_markup is not None:
+                kw2["reply_markup"] = reply_markup
+            kw2.setdefault("silent", True)
+            kw2.update(self._cfg_banner_kwargs())
+            return await self.inline.form(text, message=message, **kw2)
 
     def _cfg_banner_kwargs(self) -> dict:
         """Banner for config forms: photo / gif / video by URL or local path."""
