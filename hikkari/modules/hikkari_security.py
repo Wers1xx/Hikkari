@@ -679,25 +679,77 @@ class HikkariSecurityMod(loader.Module):
 
     @loader.command()
     async def owneradd(self, message: Message):
+        """Add owner. Flags: -f force, -n nonick, -p/--prefix <prefix> (Heroku 2.2)."""
         args = utils.get_args(message)
-        force = any(arg in {"-f", "--force"} for arg in args)
-        # nonick is optional; confirm only grants owner, then offer nonick button
-        enable_nonick = "-n" in args or "--nonick" in args
-        user_args = " ".join(
-            arg for arg in args if arg not in {"-f", "--force", "-n", "--nonick"}
-        )
+        force = False
+        enable_nonick = False
+        prefix = None
+        targets = []
+        options = {"-f", "--force", "-n", "--nonick", "-p", "--prefix"}
+        tokens = iter(args)
+        for arg in tokens:
+            if arg in {"-f", "--force"}:
+                force = True
+            elif arg in {"-n", "--nonick"}:
+                enable_nonick = True
+            elif arg in {"-p", "--prefix"}:
+                value = next(tokens, None)
+                if not value or value in options:
+                    return await utils.answer(
+                        message,
+                        self.strings.get(
+                            "owneradd_usage",
+                            "Usage: <code>.owneradd [-f] [-n] [-p prefix] &lt;user&gt;</code>",
+                        ),
+                    )
+                prefix = value
+            else:
+                targets.append(arg)
+        if len(targets) > 1:
+            return await utils.answer(
+                message,
+                self.strings.get(
+                    "owneradd_usage",
+                    "Usage: <code>.owneradd [-f] [-n] [-p prefix] &lt;user&gt;</code>",
+                ),
+            )
+        if prefix is not None:
+            settings = (
+                self.lookup("settings")
+                or self.lookup("Settings")
+                or self.lookup("CoreMod")
+            )
+            allow_long = False
+            try:
+                if settings and getattr(settings, "config", None):
+                    allow_long = bool(settings.config.get("allow_nonstandart_prefixes"))
+            except Exception:
+                pass
+            if (
+                prefix == "s"
+                or any(c.isspace() for c in prefix)
+                or (len(prefix) != 1 and not allow_long)
+            ):
+                return await utils.answer(
+                    message,
+                    self.strings.get("owner_prefix_invalid", "❌ Invalid owner prefix"),
+                )
+        user_args = " ".join(targets)
         user = await self._resolve_user(message, user_args)
-
         if not user:
             return
-
-        await self._add_to_group(
-            message,
-            "owner",
-            user=user.id,
-            enable_nonick=enable_nonick,
-            force=force,
-        )
+        call_kwargs = {
+            "user": user.id,
+            "enable_nonick": enable_nonick,
+            "force": force,
+        }
+        try:
+            import inspect
+            if "prefix" in inspect.signature(self._add_to_group).parameters:
+                call_kwargs["prefix"] = prefix
+        except Exception:
+            pass
+        await self._add_to_group(message, "owner", **call_kwargs)
 
     @loader.command()
     async def ownerrm(self, message: Message):

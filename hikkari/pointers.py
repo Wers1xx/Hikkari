@@ -22,6 +22,155 @@ if typing.TYPE_CHECKING:
     from .database import Database
 
 
+
+def _wrap_nested(value, save):
+    """Wrap nested dict/list so mutations persist (Heroku 2.2)."""
+    if isinstance(value, (NestedPointerDict, NestedPointerList)):
+        return value
+    if isinstance(value, dict):
+        return NestedPointerDict(value, save)
+    if isinstance(value, list):
+        return NestedPointerList(value, save)
+    return value
+
+
+class NestedPointerDict(dict):
+    def __init__(self, data: dict, save):
+        self._data = data
+        self._save = save
+
+    def __getitem__(self, key):
+        return _wrap_nested(self._data[key], self._save)
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+        self._save()
+
+    def __delitem__(self, key):
+        del self._data[key]
+        self._save()
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def __repr__(self):
+        return repr(self._data)
+
+    def __eq__(self, other):
+        return self._data == (
+            other._data if isinstance(other, NestedPointerDict) else other
+        )
+
+    def get(self, key, default=None):
+        return _wrap_nested(self._data[key], self._save) if key in self._data else default
+
+    def setdefault(self, key, default=None):
+        existed = key in self._data
+        value = self._data.setdefault(key, default)
+        if not existed:
+            self._save()
+        return _wrap_nested(value, self._save)
+
+    def pop(self, key, *args):
+        value = self._data.pop(key, *args)
+        self._save()
+        return value
+
+    def popitem(self):
+        value = self._data.popitem()
+        self._save()
+        return value
+
+    def update(self, *args, **kwargs):
+        self._data.update(*args, **kwargs)
+        self._save()
+
+    def clear(self):
+        self._data.clear()
+        self._save()
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return self._data.values()
+
+    def items(self):
+        return self._data.items()
+
+    def copy(self):
+        return dict(self._data)
+
+
+class NestedPointerList(list):
+    def __init__(self, data: list, save):
+        self._data = data
+        self._save = save
+
+    def __getitem__(self, index):
+        value = self._data[index]
+        if isinstance(index, slice):
+            return NestedPointerList(value, self._save)
+        return _wrap_nested(value, self._save)
+
+    def __setitem__(self, index, value):
+        self._data[index] = value
+        self._save()
+
+    def __delitem__(self, index):
+        del self._data[index]
+        self._save()
+
+    def __len__(self):
+        return len(self._data)
+
+    def __iter__(self):
+        for item in self._data:
+            yield _wrap_nested(item, self._save)
+
+    def __repr__(self):
+        return repr(self._data)
+
+    def __eq__(self, other):
+        return self._data == (
+            other._data if isinstance(other, NestedPointerList) else other
+        )
+
+    def append(self, value):
+        self._data.append(value)
+        self._save()
+
+    def extend(self, value):
+        self._data.extend(value)
+        self._save()
+
+    def insert(self, index, value):
+        self._data.insert(index, value)
+        self._save()
+
+    def remove(self, value):
+        self._data.remove(value)
+        self._save()
+
+    def pop(self, index=-1):
+        value = self._data.pop(index)
+        self._save()
+        return value
+
+    def clear(self):
+        self._data.clear()
+        self._save()
+
+    def copy(self):
+        return list(self._data)
+
+
 class PointerList(list):
     """Pointer to list saved in database"""
 
@@ -103,6 +252,12 @@ class PointerList(list):
         super().clear()
         self._save()
 
+    def __getitem__(self, index):
+        value = super().__getitem__(index)
+        if isinstance(index, slice):
+            return value
+        return _wrap_nested(value, self._save)
+
     def _save(self):
         self._db.set(self._module, self._key, list(self))
 
@@ -176,6 +331,9 @@ class PointerDict(dict):
         super().clear()
         self._save()
 
+    def __getitem__(self, key):
+        return _wrap_nested(dict.__getitem__(self, key), self._save)
+
     def _save(self):
         self._db.set(self._module, self._key, dict(self))
 
@@ -193,8 +351,8 @@ class BaseSerializingMiddlewareDict:
     def deserialize(self, item: "JSONSerializable") -> typing.Any:  # type: ignore  # noqa: F821
         raise NotImplementedError
 
-    def __getitem__(self, key: typing.Any) -> typing.Any:
-        return self.deserialize(self._pointer[key])
+    def __getitem__(self, key):
+        return _wrap_nested(self.deserialize(self._pointer[key]), self._pointer._save)
 
     def __setitem__(self, key: typing.Any, value: typing.Any) -> None:
         self._pointer[key] = self.serialize(value)

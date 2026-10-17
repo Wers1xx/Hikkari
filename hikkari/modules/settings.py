@@ -331,6 +331,12 @@ class CoreMod(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
+                "keep_message_state",
+                True,
+                lambda: "Distinguish reaction updates from real message edits (Heroku 2.2)",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
                 "alias_emoji",
                 "<tg-emoji emoji-id=4974259868996207180>▪️</tg-emoji>",
                 "just emoji in .aliases",

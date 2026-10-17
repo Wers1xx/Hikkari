@@ -20,6 +20,7 @@
 
 import asyncio
 import collections
+from collections import OrderedDict
 import contextlib
 import copy
 import inspect
@@ -118,6 +119,9 @@ class CommandDispatcher:
         self._ratelimit_max_user = db.get(__name__, "ratelimit_max_user", 30)
         self._ratelimit_max_chat = db.get(__name__, "ratelimit_max_chat", 100)
 
+        
+        self._message_states = OrderedDict()
+        self._MESSAGE_STATES_LIMIT = 512
         self.security = security.SecurityManager(client, db)
 
         self.check_security = self.security.check
@@ -267,6 +271,43 @@ class CommandDispatcher:
 
         return message
 
+    
+    def _keep_message_state(self) -> bool:
+        try:
+            settings = self._modules.lookup("settings") or self._modules.lookup("Settings")
+            if settings and getattr(settings, "config", None):
+                return bool(settings.config.get("keep_message_state", True))
+        except Exception:
+            pass
+        return True
+
+    def _remember_state(self, message: Message) -> None:
+        if not self._keep_message_state():
+            self._message_states.clear()
+            return
+        key = (utils.get_chat_id(message), message.id)
+        try:
+            self._message_states[key] = hash(getattr(message, "message", None) or "")
+            self._message_states.move_to_end(key)
+            while len(self._message_states) > self._MESSAGE_STATES_LIMIT:
+                self._message_states.popitem(last=False)
+        except Exception:
+            pass
+
+    def _is_reaction_update(self, event) -> bool:
+        if not getattr(event, "reactions", False):
+            return False
+        if not self._keep_message_state():
+            return True
+        message = event.message
+        try:
+            state = self._message_states.get((utils.get_chat_id(message), message.id))
+        except Exception:
+            return True
+        if state is None:
+            return True
+        return state == hash(getattr(message, "message", None) or "")
+
     async def _handle_command(
         self,
         event: events.NewMessage | events.MessageDeleted,
@@ -345,6 +386,7 @@ class CommandDispatcher:
             or event.audio
             or event.via_bot_id
             or (getattr(event, "reactions", False) and getattr(event, "edit_hide", False))
+            or (getattr(event, "reactions", False) and self._is_reaction_update(event))
         ):
             return False
 
