@@ -37,6 +37,7 @@ from hikkaritl.tl.functions.users import GetFullUserRequest
 from hikkaritl.tl.tlobject import TLRequest
 from hikkaritl.tl.types import (
     ChannelFull,
+    InputReplyToMessage,
     InputRichMessageHTML,
     InputRichMessageMarkdown,
     InputRichMessage,
@@ -724,34 +725,48 @@ class CustomTelegramClient(TelegramClient):
 
     async def send_rich_message(
         self,
-        entity,
+        entity: EntityLike,
         html: str | None = None,
         *,
         markdown: str | None = None,
         rich_message=None,
-        reply_to=None,
+        reply_to: int | None = None,
+        top_msg_id: int | None = None,
         buttons=None,
         silent: bool | None = None,
         rtl: bool | None = None,
         noautolink: bool | None = None,
     ):
-        """Native Telegram Rich Message (Premium). Falls back raises on failure."""
+        """Native Telegram Rich Message via SendMessageRequest (Heroku 2.2)."""
+        input_entity = await self.get_input_entity(entity)
         rich_input = self._rich_input(
-            html, markdown, rich_message, rtl=rtl, noautolink=noautolink
+            html,
+            markdown,
+            rich_message,
+            rtl=rtl,
+            noautolink=noautolink,
         )
-        return await self.send_message(
-            entity,
-            self._rich_fallback_text(html, markdown, rich_message),
-            reply_to=reply_to,
-            buttons=buttons,
+        request = functions.messages.SendMessageRequest(
+            peer=input_entity,
+            message=self._rich_fallback_text(html, markdown, rich_message),
+            no_webpage=True,
             silent=silent,
-            link_preview=False,
+            reply_to=(
+                InputReplyToMessage(
+                    reply_to_msg_id=reply_to,
+                    top_msg_id=top_msg_id,
+                )
+                if reply_to is not None
+                else None
+            ),
+            reply_markup=self.build_reply_markup(buttons) if buttons is not None else None,
             rich_message=rich_input,
         )
+        return self._get_response_message(request, await self(request), input_entity)
 
     async def edit_rich_message(
         self,
-        entity,
+        entity: EntityLike,
         message,
         html: str | None = None,
         *,
@@ -761,18 +776,24 @@ class CustomTelegramClient(TelegramClient):
         rtl: bool | None = None,
         noautolink: bool | None = None,
     ):
+        """Native edit Rich Message via EditMessageRequest (Heroku 2.2)."""
+        input_entity = await self.get_input_entity(entity)
         rich_input = self._rich_input(
-            html, markdown, rich_message, rtl=rtl, noautolink=noautolink
+            html,
+            markdown,
+            rich_message,
+            rtl=rtl,
+            noautolink=noautolink,
         )
-        mid = message if isinstance(message, int) else getattr(message, "id", message)
-        return await self.edit_message(
-            entity,
-            mid,
-            self._rich_fallback_text(html, markdown, rich_message),
-            buttons=buttons,
-            link_preview=False,
+        request = functions.messages.EditMessageRequest(
+            peer=input_entity,
+            id=tl_utils.get_message_id(message),
+            message=self._rich_fallback_text(html, markdown, rich_message),
+            no_webpage=True,
+            reply_markup=self.build_reply_markup(buttons) if buttons is not None else None,
             rich_message=rich_input,
         )
+        return self._get_response_message(request, await self(request), input_entity)
 
     async def send_message(self, *args, **kwargs) -> Message:
         return await self._topic_guesser(
