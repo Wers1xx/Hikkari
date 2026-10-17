@@ -765,29 +765,7 @@ class Help(loader.Module):
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 rich_message = normalize_rich_html(rich_message)
-                # Heroku-compatible: Rich + action buttons (edit/close via form)
-                try:
-                    await _u.answer(
-                        message,
-                        "✨",
-                        rich_message=rich_message,
-                        reply_markup=[
-                            [
-                                {
-                                    "text": "🔄 Обновить",
-                                    "callback": self.inline__help_refresh,
-                                },
-                                {
-                                    "text": "🔻 Закрыть",
-                                    "action": "close",
-                                },
-                            ]
-                        ],
-                        silent=True,
-                    )
-                    return
-                except Exception:
-                    logger.exception("help rich+buttons form failed")
+                # Native Rich (Heroku) — details sections, no broken callbacks
                 await _u.answer_with_media_fallback(
                     message, rich_message=rich_message
                 )
