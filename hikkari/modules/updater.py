@@ -536,7 +536,792 @@ class UpdaterMod(loader.Module):
 
         return "\n\n".join(entries)
 
+    @loader.command()
+    async def changelog(self, message: Message):
+        """Shows what changed in recent updates and fixes"""
+        changelog = self._recent_commits_changelog(15)
 
+        if not changelog:
+            try:
+                with open("CHANGELOG.md", encoding="utf-8") as f:
+                    parts = f.read().split("##")
+                if len(parts) > 1:
+                    changelog = parts[1].strip()
+            except Exception:
+                changelog = ""
+
+        if not changelog:
+            await utils.answer(
+                message,
+                self.strings.get(
+                    "changelog_empty",
+                    "✨ <b>Changelog is empty</b>",
+                ),
+            )
+            return
+
+        try:
+            ver = ".".join(map(str, version.__version__))
+        except Exception:
+            ver = "?"
+        try:
+            build = utils.get_commit_url()
+        except Exception:
+            build = ""
+
+        body = self.strings["changelog"].format(changelog)
+        if build or ver:
+            prefix = f"✨ <b>Hikkari</b> <code>v{ver}</code>"
+            if build:
+                prefix += f" · {build}"
+            body = prefix + "\n" + body
+
+        await utils.answer(message, body)
+
+    @loader.command()
+    async def restart(self, message: Message):
+        args = utils.get_args_raw(message)
+        secure_boot = any(trigger in args for trigger in {"--secure-boot", "-sb"})
+        try:
+            if (
+                "-f" in args
+                or not self.inline.init_complete
+                or not await self.inline.form(
+                    message=message,
+                    text=self.strings[
+                        "secure_boot_confirm" if secure_boot else "restart_confirm"
+                    ],
+                    reply_markup=[
+                        {
+                            "text": self.strings["btn_restart"],
+                            "callback": self.inline_restart,
+                            "args": (secure_boot,),
+                            "style": "primary",
+                        },
+                        {
+                            "text": self.strings["cancel"],
+                            "action": "close",
+                            "style": "danger",
+                        },
+                    ],
+                )
+            ):
+                raise
+        except Exception:
+            await self.restart_common(message, secure_boot)
+
+    async def inline_restart(self, call: InlineCall, secure_boot: bool = False):
+        await self.restart_common(call, secure_boot=secure_boot)
+
+    @staticmethod
+    def _serialize_inline_message_id(
+        inline_message_id: str | InputBotInlineMessageID | InputBotInlineMessageID64,
+    ) -> str:
+        if isinstance(
+            inline_message_id,
+            (InputBotInlineMessageID, InputBotInlineMessageID64),
+        ):
+            return typing.cast(str, inline_message_id.to_json())
+
+        return inline_message_id
+
+    @staticmethod
+    def _deserialize_inline_message_id(
+        inline_message_id: str,
+    ) -> str | InputBotInlineMessageID | InputBotInlineMessageID64:
+        try:
+            data = json.loads(inline_message_id)
+        except (TypeError, ValueError):
+            return inline_message_id
+
+        if not isinstance(data, dict):
+            return inline_message_id
+
+        if data.get("_") == "InputBotInlineMessageID":
+            return InputBotInlineMessageID(
+                dc_id=data["dc_id"],
+                id=data["id"],
+                access_hash=data["access_hash"],
+            )
+
+        if data.get("_") == "InputBotInlineMessageID64":
+            return InputBotInlineMessageID64(
+                dc_id=data["dc_id"],
+                owner_id=data["owner_id"],
+                id=data["id"],
+                access_hash=data["access_hash"],
+            )
+
+        return inline_message_id
+
+    @staticmethod
+    def _parse_legacy_update_message_ref(
+        message_ref: typing.Any,
+    ) -> tuple[int, int] | None:
+        if not isinstance(message_ref, str):
+            return None
+
+        parts = message_ref.split(":")
+        if len(parts) != 2:
+            return None
+
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+
+    async def process_restart_message(self, msg_obj: InlineCall | Message):
+        # Prefer already stored bot: ref from update_call
+        existing = self.get("selfupdatemsg")
+        if isinstance(existing, str) and existing.startswith("bot:"):
+            return
+        inline_message_id = getattr(msg_obj, "inline_message_id", None)
+        if inline_message_id is not None:
+            self.set(
+                "selfupdatemsg",
+                self._serialize_inline_message_id(inline_message_id),
+            )
+            return
+        chat_id = getattr(msg_obj, "chat_id", None)
+        if chat_id is None:
+            with contextlib.suppress(Exception):
+                chat_id = utils.get_chat_id(msg_obj)
+        msg_id = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
+        is_bot_call = type(msg_obj).__name__ in (
+            "BotInlineCall",
+            "InlineCall",
+            "BotInlineMessage",
+            "ChosenInlineCall",
+        )
+        if is_bot_call and chat_id is not None and msg_id is not None:
+            self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
+            return
+        if chat_id is not None and msg_id is not None:
+            self.set("selfupdatemsg", f"{int(chat_id)}:{int(msg_id)}")
+
+    async def restart_common(
+        self,
+        msg_obj: InlineCall | Message,
+        secure_boot: bool = False,
+    ):
+        if (
+            hasattr(msg_obj, "form")
+            and isinstance(msg_obj.form, dict)
+            and "uid" in msg_obj.form
+            and msg_obj.form["uid"] in self.inline._units
+            and "message" in self.inline._units[msg_obj.form["uid"]]
+        ):
+            message = self.inline._units[msg_obj.form["uid"]]["message"]
+        else:
+            message = msg_obj
+
+        if secure_boot:
+            self._db.set(loader.__name__, "secure_boot", True)
+
+        # Never use Rich for restart status (must be editable by user/bot cleanly)
+        caption = self.strings["restarting_caption"].format(
+            utils.get_platform_emoji()
+            if getattr(self._client, "hikkari_me", None)
+            and self._client.hikkari_me.premium
+            else "Hikkari"
+        )
+        existing = self.get("selfupdatemsg")
+        is_call = type(msg_obj).__name__ in (
+            "InlineCall",
+            "BotInlineCall",
+            "ChosenInlineCall",
+            "BotInlineMessage",
+        )
+        if isinstance(existing, str) and existing.startswith("bot:"):
+            # Legacy bot-ref — convert path no longer used for new updates
+            pass
+        elif isinstance(existing, str) and ":" in existing and not existing.startswith("{"):
+            # Owner status message already posted (update button) — keep it
+            pass
+        elif is_call:
+            # Should not post as bot; send owner status if missing
+            if not existing:
+                peer = getattr(self.inline, "bot_id", None) or self.tg_id
+                with contextlib.suppress(Exception):
+                    status_msg = await self._client.send_message(peer, caption)
+                    if status_msg is not None:
+                        self.set(
+                            "selfupdatemsg",
+                            f"{utils.get_chat_id(status_msg)}:{status_msg.id}",
+                        )
+        else:
+            # User invoked .restart / .update from a chat — edit THAT message only
+            new_msg = None
+            try:
+                new_msg = await utils.answer(msg_obj, caption, skip_rich=True)
+            except Exception as e:
+                logger.warning("restart caption edit failed (%s)", e)
+            if new_msg is not None:
+                msg_obj = new_msg
+            with contextlib.suppress(Exception):
+                await self.process_restart_message(msg_obj)
+
+        self.db.set("Updater", "modules_count", len(self.allmodules.modules))
+
+        self.set("restart_ts", time.time())
+
+        handler = logging.getLogger().handlers[0]
+        handler.setLevel(logging.CRITICAL)
+
+        # Resolve user client: BotInlineCall / InlineCall have no .client
+        main_client = self._client
+        with contextlib.suppress(Exception):
+            if hasattr(message, "client") and message.client is not None:
+                main_client = message.client
+            elif hasattr(msg_obj, "client") and getattr(msg_obj, "client", None):
+                main_client = msg_obj.client
+
+        for client in self.allclients:
+            # Terminate main loop of all running clients
+            if client is not main_client:
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
+
+        with contextlib.suppress(Exception):
+            await main_client.disconnect()
+        restart()
+
+    async def download_common(self):
+        self._save_pre_update_sha()
+        branch = self._current_branch()
+
+        def _sync():
+            try:
+                with Repo(os.path.dirname(utils.get_base_dir())) as repo:
+                    origin = repo.remote("origin")
+                    logger.debug("Fetching updates from %s branch=%s", origin.url, branch)
+                    try:
+                        origin.fetch(
+                            refspec=f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+                        )
+                    except Exception:
+                        origin.fetch()
+                    # Stay on preferred branch — never force master
+                    try:
+                        if branch not in repo.heads:
+                            repo.create_head(branch, f"origin/{branch}")
+                        repo.heads[branch].checkout(force=True)
+                        with contextlib.suppress(Exception):
+                            repo.heads[branch].set_tracking_branch(
+                                origin.refs[branch]
+                            )
+                    except Exception as ce:
+                        logger.debug("checkout %s before pull: %s", branch, ce)
+                    old = repo.head.commit.hexsha
+                    try:
+                        r = origin.pull(branch)
+                    except Exception:
+                        repo.git.pull("origin", branch)
+                        r = []
+                    new_commit = repo.head.commit
+                    if new_commit.hexsha != old:
+                        try:
+                            for d in new_commit.diff(repo.commit(old)):
+                                if d.b_path == "requirements.txt":
+                                    return True
+                        except Exception:
+                            pass
+                    for info in r or []:
+                        if getattr(info, "old_commit", None):
+                            for d in new_commit.diff(info.old_commit):
+                                if d.b_path == "requirements.txt":
+                                    return True
+                return False
+            except git.exc.InvalidGitRepositoryError:
+                repo = Repo.init(os.path.dirname(utils.get_base_dir()))
+                with repo:
+                    origin = repo.create_remote("origin", self.config["GIT_ORIGIN_URL"])
+                    logger.debug("Fetching initial updates from %s", origin.url)
+                    br = branch or "master"
+                    try:
+                        origin.fetch(
+                            refspec=f"+refs/heads/{br}:refs/remotes/origin/{br}"
+                        )
+                    except Exception:
+                        origin.fetch()
+                    ref = getattr(origin.refs, br, None) or origin.refs.master
+                    if br not in repo.heads:
+                        repo.create_head(br, ref)
+                    repo.heads[br].set_tracking_branch(ref)
+                    repo.heads[br].checkout(True)
+                return False
+
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync),
+            timeout=120,
+        )
+
+    @staticmethod
+    def req_common():
+        # Now we have downloaded new code, install requirements
+        logger.debug("Installing new requirements...")
+        is_venv = hasattr(sys, "real_prefix") or (
+            hasattr(sys, "base_prefix") and sys.prefix != sys.base_prefix
+        )
+        # --user breaks installs inside venv (and Docker with VIRTUAL_ENV)
+        use_user = (
+            not is_venv
+            and "VIRTUAL_ENV" not in os.environ
+            and "PIP_TARGET" not in os.environ
+        )
+        req_path = os.path.join(
+            os.path.dirname(utils.get_base_dir()),
+            "requirements.txt",
+        )
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "-q",
+            "--disable-pip-version-check",
+            "--no-warn-script-location",
+            "--prefer-binary",
+            *([] if not use_user else ["--user"]),
+            "-r",
+            req_path,
+        ]
+        try:
+            r = subprocess.run(
+                cmd,
+                check=False,
+                timeout=600,
+                capture_output=True,
+            )
+            if r.returncode != 0:
+                err = ((r.stderr or r.stdout) or b"").decode(errors="ignore")
+                logger.error(
+                    "Req install failed (rc=%s): %s",
+                    r.returncode,
+                    err[-1200:] if err else "<no output>",
+                )
+                # Soft fallback: try critical packages without full freeze
+                for pkg in ("sympy", "mpmath", "meval"):
+                    with contextlib.suppress(Exception):
+                        subprocess.run(
+                            [
+                                sys.executable,
+                                "-m",
+                                "pip",
+                                "install",
+                                "-q",
+                                "--prefer-binary",
+                                *([] if not use_user else ["--user"]),
+                                pkg,
+                            ],
+                            check=False,
+                            timeout=180,
+                            capture_output=True,
+                        )
+        except (subprocess.TimeoutExpired, OSError):
+            logger.exception("Req install failed")
+
+    @loader.command()
+    async def update(self, message: Message):
+        if NO_GIT:
+            await utils.answer(
+                message,
+                "<b>Git disabled via --no-git.</b>",
+            )
+            return
+        try:
+            args = utils.get_args_raw(message)
+            current = utils.get_git_hash() or ""
+            with git.Repo() as repo:
+                upcoming = next(
+                    repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
+                ).hexsha
+            if "-f" in args or not self.inline.init_complete:
+                await self.inline_update(message)
+                return
+            form_ok = await self.inline.form(
+                message=message,
+                text=(
+                    self.strings["update_confirm"].format(
+                        current, current[:8], upcoming, upcoming[:8]
+                    )
+                    if upcoming != current
+                    else self.strings["no_update"]
+                ),
+                reply_markup=[
+                    {
+                        "text": self.strings["btn_update"],
+                        "callback": self.inline_update,
+                        "style": "primary",
+                        "emoji_id": 5258382512656253510,
+                    },
+                    {
+                        "text": self.strings["cancel"],
+                        "action": "close",
+                        "style": "danger",
+                    },
+                ],
+            )
+            if not form_ok:
+                tip = "\n\n<code>.update -f</code>"
+                body = (
+                    self.strings["update_confirm"].format(
+                        current, current[:8], upcoming, upcoming[:8]
+                    )
+                    if upcoming != current
+                    else self.strings["no_update"]
+                )
+                await utils.answer(message, body + tip)
+        except Exception:
+            logger.exception("update form failed")
+            with contextlib.suppress(Exception):
+                await utils.answer(
+                    message,
+                    "Update form failed. Use <code>.update -f</code>",
+                )
+
+    @loader.command()
+    async def autoupdate(self, message: Message):
+        """Autoupdate is disabled — use .update manually"""
+        self.config["autoupdate"] = False
+        await utils.answer(
+            message,
+            "\U0001f6ab <b>Autoupdate is disabled</b>\n"
+            "Use <code>.update</code> manually.",
+        )
+
+    async def _edit_update_status(self, msg_obj, text: str):
+        """Edit progress on bot-PM card or owner message."""
+        if getattr(self, "inline", None):
+            with contextlib.suppress(Exception):
+                text = self.inline.sanitise_text(text)
+        # Prefer explicit bot:chat:mid ref
+        ref = self.get("selfupdatemsg")
+        if isinstance(ref, str) and ref.startswith("bot:"):
+            parts = ref.split(":")
+            if len(parts) == 3:
+                try:
+                    chat_id, message_id = int(parts[1]), int(parts[2])
+                    await self.inline.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        disable_web_page_preview=True,
+                    )
+                    return msg_obj
+                except Exception:
+                    logger.debug("bot status edit failed", exc_info=True)
+        mid = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
+        if mid is None:
+            m = getattr(msg_obj, "message", None)
+            mid = getattr(m, "message_id", None) or getattr(m, "id", None)
+        if mid is not None and getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+            try:
+                await self.inline.bot.edit_message_text(
+                    chat_id=self.tg_id,
+                    message_id=int(mid),
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+                return msg_obj
+            except Exception:
+                logger.debug("bot edit by mid failed", exc_info=True)
+        with contextlib.suppress(Exception):
+            return await utils.answer(msg_obj, text, skip_rich=True)
+        return msg_obj
+
+    async def inline_update(
+        self,
+        msg_obj: InlineCall | Message,
+        hard: bool = False,
+    ):
+        # Strict order: download → install requirements → restart (never restart first)
+        if hard:
+            os.system(f"cd {utils.get_base_dir()} && cd .. && git reset --hard HEAD")
+
+        try:
+            msg_obj = await self._edit_update_status(
+                msg_obj, self.strings["downloading"]
+            )
+
+            try:
+                req_update = await self.download_common()
+                if self._try_auto_rollback():
+                    raise RuntimeError("Hikkari update auto-rollback")
+            except TimeoutError:
+                logger.exception("Timed out while fetching updates from git remote")
+                with contextlib.suppress(Exception):
+                    await self._edit_update_status(
+                        msg_obj, "❌ <b>Timeout while downloading update</b>"
+                    )
+                return
+
+            msg_obj = await self._edit_update_status(
+                msg_obj, self.strings["installing"]
+            )
+
+            if req_update:
+                self.req_common()
+
+            await self.restart_common(msg_obj)
+        except GitCommandError:
+            if not hard:
+                await self.inline_update(msg_obj, True)
+                return
+
+            logger.critical("Got update loop. Update manually via .terminal")
+
+    # Official beta access list on GitHub (master branch = source of truth)
+    _BETA_LIST_URLS = (
+        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/beta_users.txt",
+        "https://cdn.jsdelivr.net/gh/Wers1xx/Hikkari@master/assets/beta_users.txt",
+    )
+    _BETA_CREATOR_ID = 8798148758
+    _beta_list_cache: set | None = None
+    _beta_list_cache_at: float = 0.0
+    _BETA_LIST_TTL = 300.0  # 5 min
+
+    async def _fetch_github_beta_ids(self) -> set[int]:
+        """Load beta user IDs from GitHub assets/beta_users.txt."""
+        import time as _time
+        import aiohttp
+
+        now = _time.time()
+        if (
+            self._beta_list_cache is not None
+            and now - self._beta_list_cache_at < self._BETA_LIST_TTL
+        ):
+            return self._beta_list_cache
+
+        ids: set[int] = {self._BETA_CREATOR_ID}
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for url in self._BETA_LIST_URLS:
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            continue
+                        text = await resp.text()
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            # allow "123456" or "123456  # comment"
+                            part = line.split("#", 1)[0].strip().split()[0]
+                            if part.isdigit():
+                                ids.add(int(part))
+                        self._beta_list_cache = ids
+                        self._beta_list_cache_at = now
+                        logger.info("beta_users list loaded from GitHub (%s ids)", len(ids))
+                        return ids
+                except Exception as e:
+                    logger.warning("beta list fetch %s failed: %s", url, e)
+        if len(ids) <= 1:
+            try:
+                import requests as _req
+                for url in self._BETA_LIST_URLS:
+                    try:
+                        r = await utils.run_sync(_req.get, url, timeout=12)
+                        if getattr(r, "status_code", 0) != 200:
+                            continue
+                        for line in r.text.splitlines():
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            part = line.split("#", 1)[0].strip().split()[0]
+                            if part.isdigit():
+                                ids.add(int(part))
+                        if len(ids) > 1:
+                            break
+                    except Exception as e:
+                        logger.warning("beta list requests %s failed: %s", url, e)
+            except Exception:
+                logger.debug("beta list requests fallback failed", exc_info=True)
+        self._beta_list_cache = ids
+        self._beta_list_cache_at = now
+        logger.info("beta_users final list size=%s", len(ids))
+        return ids
+
+    async def _can_use_beta(self, uid: int, *, force_refresh: bool = False) -> bool:
+        """Beta only if Telegram ID is in GitHub assets/beta_users.txt (or creator)."""
+        uid = int(uid)
+        if uid == self._BETA_CREATOR_ID:
+            return True
+        # Owners / local cfg do NOT grant beta — only the GitHub list.
+        try:
+            if force_refresh:
+                self._beta_list_cache = None
+                self._beta_list_cache_at = 0.0
+            gh = await self._fetch_github_beta_ids()
+            if uid in gh:
+                return True
+            logger.info(
+                "beta access denied for %s (github list has %s ids)",
+                uid,
+                len(gh) if gh else 0,
+            )
+        except Exception:
+            logger.exception("github beta check failed — deny by default")
+        return False
+
+
+    @loader.command(
+        ru_doc="<master|beta> — переключить ветку обновлений (beta только с доступом)",
+        en_doc="<master|beta> — switch update branch (beta requires access)",
+    )
+    async def branch(self, message: Message):
+        """Switch between master and beta branches"""
+        args = (utils.get_args_raw(message) or "").strip().lower()
+        try:
+            uid = message.sender_id if not message.out else self._client.tg_id
+        except Exception:
+            uid = getattr(self._client, "tg_id", 0)
+
+        if not args:
+            cur = getattr(version, "branch", "master")
+            await utils.answer(
+                message,
+                f"<b>Current branch:</b> <code>{cur}</code>\n"
+                f"<i>Usage:</i> <code>{utils.escape_html(self.get_prefix())}branch master</code> "
+                f"or <code>beta</code>",
+            )
+            return
+
+        if args not in ("master", "beta", "main"):
+            await utils.answer(message, "❌ Use <code>master</code> or <code>beta</code>")
+            return
+        if args == "main":
+            args = "master"
+
+        if args == "beta":
+            allowed = await self._can_use_beta(uid, force_refresh=True)
+            if not allowed:
+                await utils.answer(
+                    message,
+                    "🚫 <b>Нет доступа к ветке beta</b>\n\n"
+                    f"ID: <code>{uid}</code>\n"
+                    "Переход на beta разрешён только ID из списка на GitHub:\n"
+                    "<code>assets/beta_users.txt</code>\n"
+                    '<a href="https://github.com/Wers1xx/Hikkari/blob/master/assets/beta_users.txt">'
+                    "Открыть список</a>\n\n"
+                    "<i>Если тебя нет в файле — beta недоступна.</i>",
+                )
+                return
+
+        if NO_GIT:
+            await utils.answer(message, "❌ Git disabled")
+            return
+
+        try:
+            import git as gitmod
+            with gitmod.Repo() as repo:
+                try:
+                    origin = repo.remote("origin")
+                except Exception:
+                    origin = repo.create_remote(
+                        "origin",
+                        self.config.get("GIT_ORIGIN_URL")
+                        or "https://github.com/Wers1xx/Hikkari",
+                    )
+                # Single-branch clones never have origin/beta — fetch it explicitly
+                for attempt in (
+                    lambda: origin.fetch(
+                        refspec=f"+refs/heads/{args}:refs/remotes/origin/{args}"
+                    ),
+                    lambda: repo.git.fetch(
+                        "origin",
+                        f"+refs/heads/{args}:refs/remotes/origin/{args}",
+                    ),
+                    lambda: repo.git.fetch("origin", args),
+                    lambda: origin.fetch(),
+                ):
+                    try:
+                        attempt()
+                        break
+                    except Exception as fe:
+                        logger.debug("branch fetch attempt failed: %s", fe)
+
+                remote_has = False
+                try:
+                    for ref in list(origin.refs):
+                        name = str(
+                            getattr(ref, "remote_head", None)
+                            or getattr(ref, "name", "")
+                            or ""
+                        )
+                        if name == args or name.endswith("/" + args):
+                            remote_has = True
+                            break
+                except Exception:
+                    pass
+                if not remote_has:
+                    try:
+                        for r in repo.refs:
+                            n = str(getattr(r, "name", "") or "")
+                            if n.endswith("/" + args) or n == "origin/" + args:
+                                remote_has = True
+                                break
+                    except Exception:
+                        pass
+                if not remote_has:
+                    try:
+                        out = repo.git.ls_remote("--heads", "origin", args)
+                        remote_has = bool(out and args in out)
+                    except Exception as e:
+                        logger.warning("ls-remote failed: %s", e)
+                if not remote_has:
+                    await utils.answer(
+                        message,
+                        f"❌ Remote branch <code>{args}</code> not found on origin\n"
+                        f"<i>Проверь:</i> <code>git ls-remote --heads origin</code>",
+                    )
+                    return
+
+                try:
+                    repo.git.checkout("-B", args, f"origin/{args}")
+                except Exception:
+                    if args in repo.heads:
+                        repo.heads[args].checkout(force=True)
+                    else:
+                        target = None
+                        for r in repo.refs:
+                            n = str(getattr(r, "name", "") or "")
+                            if n.endswith("/" + args):
+                                target = r
+                                break
+                        if target is None:
+                            raise RuntimeError(
+                                f"no local ref for {args} after fetch"
+                            )
+                        repo.create_head(args, target).checkout()
+                # Pin upstream so future pulls/polls stay on this branch
+                with contextlib.suppress(Exception):
+                    repo.heads[args].set_tracking_branch(
+                        repo.remotes.origin.refs[args]
+                    )
+                try:
+                    repo.git.pull("origin", args)
+                except Exception as pe:
+                    logger.debug("pull after branch switch: %s", pe)
+
+            self._persist_branch(args)
+            await utils.answer(
+                message,
+                f"✅ Switched to <code>{args}</code>\n"
+                f"Restarting to apply…",
+            )
+            try:
+                await self.invoke("restart", "-f", peer=utils.get_chat_id(message))
+            except Exception:
+                from .. import version as _v
+                _v.restart()
+        except Exception as e:
+            logger.exception("branch switch failed")
+            await utils.answer(
+                message,
+                f"❌ Branch switch failed: <code>{utils.escape_html(str(e))}</code>",
+            )
 
 
     async def source(self, message: Message):
