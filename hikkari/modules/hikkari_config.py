@@ -94,14 +94,63 @@ class HikkariConfigMod(loader.Module):
         )
 
 
+    def _cfg_rich_html(self, body: str, *, title: str = "Hikkari Config") -> str:
+        """Wrap config body as Rich HTML (Heroku 2.2 style)."""
+        import html as html_mod
+        from .._internal import normalize_rich_html
+
+        banner = ""
+        try:
+            url = str(self.config.get("banner_url") or "").strip()
+            if url.startswith(("http://", "https://")) and not url.lower().endswith(
+                (".mp4", ".webm", ".mov", ".gif")
+            ):
+                banner = f'<figure><img src="{html_mod.escape(url)}"/></figure>'
+        except Exception:
+            pass
+        body = body or ""
+        # Already rich-ish
+        if "<details" in body or "<h2" in body or "<p>" in body:
+            html = banner + body
+        else:
+            # Convert classic HTML/br text into paragraphs
+            lines = [
+                ln.strip()
+                for ln in body.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").split("\n")
+                if ln.strip()
+            ]
+            paras = "".join(f"<p>{ln}</p>" for ln in lines) or f"<p>{body}</p>"
+            html = f"{banner}<h2>{html_mod.escape(title)}</h2>{paras}"
+        return normalize_rich_html(html)
+
+    def _cfg_use_rich(self) -> bool:
+        try:
+            me = getattr(self._client, "hikkari_me", None)
+            if me is not None and getattr(me, "premium", False):
+                return True
+        except Exception:
+            pass
+        return False
+
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner when available."""
+        """form() with config banner / Rich when available."""
         kw = dict(kwargs)
-        kw.update(self._cfg_banner_kwargs())
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
-        # silent form avoids ✨ hang
         kw.setdefault("silent", True)
+
+        # Prefer native Rich form with working callback buttons (Heroku 2.2 path)
+        if self._cfg_use_rich() and not any(
+            k in kw for k in ("photo", "video", "gif", "file", "audio")
+        ):
+            rich = kw.pop("rich_message", None) or self._cfg_rich_html(
+                text, title="⚙️ Hikkari Config"
+            )
+            kw["rich_message"] = rich
+            # placeholder caption for non-rich clients
+            return await self.inline.form("⚙️", message=message, **kw)
+
+        kw.update(self._cfg_banner_kwargs())
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
@@ -979,22 +1028,33 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config form; always clip for media caption and never hang on error."""
+        """Edit config form; Rich when possible so buttons keep working."""
         try:
             with contextlib.suppress(Exception):
                 await call.answer()
         except Exception:
             pass
-        text = self._clip_cfg_text(text, 950)
+
+        # Prefer Rich edit (Heroku 2.2 style) — text + buttons update in place
+        if self._cfg_use_rich() and "rich_message" not in kwargs:
+            try:
+                kwargs["rich_message"] = self._cfg_rich_html(
+                    text, title="⚙️ Hikkari Config"
+                )
+            except Exception:
+                pass
+
+        text_clip = self._clip_cfg_text(text, 950)
         try:
-            return await call.edit(text, reply_markup=reply_markup, **kwargs)
+            return await call.edit(
+                text_clip, reply_markup=reply_markup, **kwargs
+            )
         except Exception:
             logger.debug("cfg edit failed, hard clip", exc_info=True)
             with contextlib.suppress(Exception):
                 return await call.edit(
                     self._clip_cfg_text(text, 500),
                     reply_markup=reply_markup,
-                    **kwargs,
                 )
             return False
 

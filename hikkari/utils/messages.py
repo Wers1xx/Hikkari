@@ -337,6 +337,38 @@ def looks_like_rich_html(text: str) -> bool:
     return bool(_RICH_TAG_HINT.search(text))
 
 
+
+async def answer_with_media_fallback(message, *args, **kwargs):
+    """Heroku-compatible: send rich_message or classic answer, strip imgs on media errors."""
+    rich_message = kwargs.pop("rich_message", None)
+    try:
+        if rich_message is not None:
+            # Prefer native / via@ rich
+            ok = await answer_rich(
+                message,
+                rich_message if isinstance(rich_message, str) else str(rich_message),
+                title=kwargs.pop("title", "Hikkari"),
+                description=kwargs.pop("description", "Rich"),
+                reply_markup=kwargs.pop("reply_markup", None),
+                silent=kwargs.pop("silent", True),
+            )
+            if ok:
+                return ok
+            return await answer(message, rich_message if isinstance(rich_message, str) else str(args[0] if args else ""), **kwargs)
+        return await answer(message, *args, **kwargs)
+    except Exception as e:
+        name = type(e).__name__
+        if name in {"WebpageMediaEmptyError", "RPCError"} or "RICH_MESSAGE" in str(e):
+            import re as _re
+            body = rich_message if isinstance(rich_message, str) else (args[0] if args else "")
+            body = _re.sub(r"<figure>.*?</figure>", "", str(body), flags=_re.S | _re.I)
+            body = _re.sub(r"<img\b[^>]*>", "", body, flags=_re.I)
+            try:
+                return await answer_rich(message, body, silent=True)
+            except Exception:
+                return await answer(message, body)
+        raise
+
 async def answer_rich(
     message,
     html: str,

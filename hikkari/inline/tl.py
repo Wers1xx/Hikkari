@@ -338,6 +338,108 @@ class TelethonBot:
     async def get_me(self):
         return await self.client.get_me()
 
+
+    def _rich_input(self, html=None, markdown=None, rich_message=None):
+        from hikkaritl.tl import types
+        from .._internal import normalize_rich_html
+        if rich_message is not None:
+            return rich_message
+        if html is not None:
+            return types.InputRichMessageHTML(html=normalize_rich_html(html))
+        if markdown is not None:
+            return types.InputRichMessageMarkdown(markdown=markdown)
+        raise ValueError("One of html, markdown or rich_message is required")
+
+    def _rich_fallback_text(self, html=None, markdown=None, rich_message=None):
+        from hikkaritl.extensions import html as html_parser
+        if html is not None:
+            text, _ = html_parser.parse(html)
+            return text
+        if markdown is not None:
+            return markdown
+        if rich_message is not None:
+            h = getattr(rich_message, "html", None)
+            if h:
+                text, _ = html_parser.parse(h)
+                return text
+            return getattr(rich_message, "markdown", None) or ""
+        return ""
+
+    async def send_rich_message(
+        self,
+        chat_id,
+        html: str | None = None,
+        *,
+        markdown: str | None = None,
+        rich_message=None,
+        reply_markup=None,
+        message_thread_id: int | None = None,
+        disable_notification: bool | None = None,
+    ):
+        from hikkaritl.tl.functions.messages import SendMessageRequest
+        from hikkaritl.tl.types import InputReplyToMessage
+
+        entity = await self.client.get_input_entity(chat_id)
+        rich_input = self._rich_input(html, markdown, rich_message)
+        markup = self._build_reply_markup(reply_markup)
+        request = SendMessageRequest(
+            peer=entity,
+            message=self._rich_fallback_text(html, markdown, rich_message),
+            no_webpage=True,
+            silent=disable_notification,
+            reply_to=(
+                InputReplyToMessage(message_thread_id)
+                if message_thread_id is not None
+                else None
+            ),
+            reply_markup=markup,
+            rich_message=rich_input,
+        )
+        result = await self.client(request)
+        return self._with_message_id_alias(
+            self.client._get_response_message(request, result, entity)
+        )
+
+    async def edit_rich_message(
+        self,
+        html: str | None = None,
+        *,
+        markdown: str | None = None,
+        rich_message=None,
+        inline_message_id=None,
+        chat_id=None,
+        message_id=None,
+        reply_markup=None,
+    ):
+        from hikkaritl.tl.functions.messages import (
+            EditInlineBotMessageRequest,
+            EditMessageRequest,
+        )
+
+        markup = self._build_reply_markup(reply_markup)
+        rich_input = self._rich_input(html, markdown, rich_message)
+        fallback_text = self._rich_fallback_text(html, markdown, rich_message)
+        if inline_message_id is not None:
+            request = EditInlineBotMessageRequest(
+                id=self._coerce_inline_message_id(inline_message_id),
+                message=fallback_text,
+                no_webpage=True,
+                rich_message=rich_input,
+                reply_markup=markup,
+            )
+            return await self.client(request)
+
+        entity = await self.client.get_input_entity(chat_id)
+        request = EditMessageRequest(
+            peer=entity,
+            id=message_id,
+            message=fallback_text,
+            no_webpage=True,
+            rich_message=rich_input,
+            reply_markup=markup,
+        )
+        return await self.client(request)
+
     async def send_message(
         self,
         chat_id,

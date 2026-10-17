@@ -602,6 +602,7 @@ class Utils(InlineUnit):
         inline_message_id: str | None = None,
         chat_id: int | None = None,
         message_id: int | None = None,
+        rich_message: typing.Any = None,
     ) -> bool:
         """
         Edits unit message
@@ -620,7 +621,38 @@ class Utils(InlineUnit):
         :param query: Callback query
         :return: Status of edit
         """
+
         reply_markup = self._validate_markup(reply_markup) or []
+
+        # Persist rich payload on unit for subsequent edits
+        if unit_id and unit_id in self._units and rich_message is not None:
+            self._units[unit_id]["rich_message"] = rich_message
+
+        # Prefer native / bot Rich edit when unit is rich or rich_message passed
+        if rich_message is not None or (
+            unit_id
+            and unit_id in self._units
+            and self._units[unit_id].get("rich_message") is not None
+        ):
+            rm = rich_message if rich_message is not None else self._units[unit_id].get("rich_message")
+            try:
+                mid = inline_message_id
+                if mid is None and unit_id in self._units:
+                    mid = self._units[unit_id].get("inline_message_id")
+                markup = self.generate_markup(reply_markup) if reply_markup else None
+                if mid and hasattr(self.bot, "edit_rich_message"):
+                    await self.bot.edit_rich_message(
+                        html=rm if isinstance(rm, str) else None,
+                        rich_message=None if isinstance(rm, str) else rm,
+                        inline_message_id=mid,
+                        reply_markup=markup,
+                    )
+                    if unit_id in self._units and text is not None:
+                        self._units[unit_id]["text"] = text
+                    return True
+            except Exception:
+                logger.debug("rich edit_unit failed, classic path", exc_info=True)
+
 
         if text is not None and not isinstance(text, str):
             logger.error(
