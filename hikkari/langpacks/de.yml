@@ -484,8 +484,8 @@ updater:
   more: "\n<i><b>🎥 Und noch {}...</b></i>"
   _cfg_doc_disable_notifications: "Update-Benachrichtigungen deaktivieren"
   latest_disabled: "Benachrichtigungen über das neueste Update wurden deaktiviert"
-  update: "🔄 Aktualisieren"
-  ignore: "🚫 Ignorieren"
+  update: "Aktualisieren"
+  ignore: "Ignorieren"
   changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Änderungsprotokoll des letzten großen Updates:</b><blockquote expandable>{}</blockquote>'
 
   name: Updater

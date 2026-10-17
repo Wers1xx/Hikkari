@@ -623,8 +623,8 @@ A new Hikkari version is out.
   more: "\n<i><b>🎥 And {} more...</b></i>"
   _cfg_doc_disable_notifications: "Disable update notifications"
   latest_disabled: "Notifications about the latest update have been suppressed"
-  update: "🔄 Update"
-  ignore: "🚫 Ignore"
+  update: "Update"
+  ignore: "Ignore"
   changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Recent updates & fixes:</b><blockquote expandable>{}</blockquote>'
   changelog_empty: '<emoji document_id=5283176512747507510>✨</emoji> <b>Changelog is empty</b>'
 

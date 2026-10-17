@@ -484,8 +484,8 @@ updater:
   more: "\n<i><b>🎥 І ще {}...</b></i>"
   _cfg_doc_disable_notifications: "Вимкнути сповіщення про оновлення"
   latest_disabled: "Повідомлення про останнє оновлення було вимкнено"
-  update: "🔄 Оновити"
-  ignore: "🚫 Ігнорувати"
+  update: "Обновить"
+  ignore: "Игнорировать"
   changelog: '<tg-emoji emoji-id=5434144690511290129>📰</tg-emoji> <b>Список змін останнього великого оновлення:</b><blockquote expandable>{}</blockquote>'
 
   name: Updater

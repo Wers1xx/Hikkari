@@ -326,26 +326,68 @@ class UpdaterMod(loader.Module):
         except Exception:
             return False
 
-    def _update_markup_rows(self):
-        """Hikkari dict buttons for TelethonBot.send_message → TL ReplyInlineMarkup."""
+    def _strip_btn_emoji(self, text: str) -> str:
+        """Remove leading unicode emoji so only premium icon_custom_emoji shows."""
+        import re as _re
+        if not text:
+            return text
+        # strip leading emoji + spaces
+        return _re.sub(
+            r"^[\s\W]*?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF]+\s*)+",
+            "",
+            str(text),
+            count=1,
+        ).strip() or str(text)
+
+    def _update_markup_rows(self, *, for_bot_api: bool = False):
+        """Update/Ignore buttons with premium emoji (no unicode in text)."""
         defs = getattr(self, "_upd_btn_defs", None)
         if not defs:
             defs = [
                 {
-                    "text": self.strings.get("update", "Update"),
+                    "text": "Обновить",
                     "data": "hikkari/update",
                     "style": "primary",
                     "emoji_id": 5258382512656253510,
                 },
                 {
-                    "text": self.strings.get("ignore", "Ignore"),
+                    "text": "Игнорировать",
                     "data": "hikkari/ignore_upd",
                     "style": "danger",
                     "emoji_id": 5255949705740843980,
                 },
             ]
-        # one row: [Update] [Ignore]
-        return [list(defs)]
+        rows = []
+        row = []
+        for d in defs:
+            text = self._strip_btn_emoji(
+                d.get("text") or self.strings.get("update", "Update")
+            )
+            # Prefer strings if present but still strip unicode
+            if d.get("data") == "hikkari/update":
+                text = self._strip_btn_emoji(self.strings.get("update", text)) or "Обновить"
+            elif d.get("data") == "hikkari/ignore_upd":
+                text = self._strip_btn_emoji(self.strings.get("ignore", text)) or "Игнорировать"
+            eid = d.get("emoji_id") or d.get("icon_custom_emoji_id") or d.get("icon")
+            if for_bot_api:
+                item = {
+                    "text": text,
+                    "callback_data": d.get("data") or d.get("callback_data") or "noop",
+                }
+                if eid:
+                    item["icon_custom_emoji_id"] = str(eid)
+                # style via Bot API not standard; omit
+                row.append(item)
+            else:
+                item = {
+                    "text": text,
+                    "data": d.get("data"),
+                    "style": d.get("style"),
+                }
+                if eid:
+                    item["emoji_id"] = int(eid) if str(eid).isdigit() else eid
+                row.append(item)
+        return [row]
 
     async def _notify_owner(self, text: str, reply_markup=None, **kwargs):
         """Send update notice via inline bot if available, else user client to Saved Messages."""
@@ -353,13 +395,46 @@ class UpdaterMod(loader.Module):
         if callable(reply_markup):
             reply_markup = reply_markup()
         if self._inline_bot_ok():
+            # 1) Prefer HTTP Bot API — real icon_custom_emoji_id on buttons
             try:
-                # TelethonBot expects list-of-rows of dicts / Button, NOT Bot API
-                # {"inline_keyboard": ...} — that was rendered as a broken empty button.
+                token = None
+                with contextlib.suppress(Exception):
+                    token = getattr(self.inline, "token", None) or getattr(
+                        self.inline, "_token", None
+                    )
+                if not token:
+                    with contextlib.suppress(Exception):
+                        token = self._db.get("hikka.inline", "bot_token") or self._db.get(
+                            "hikkari.inline", "bot_token"
+                        )
+                if token:
+                    import aiohttp
+                    bot_rows = self._update_markup_rows(for_bot_api=True)
+                    payload = {
+                        "chat_id": int(self.tg_id),
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": bool(disable_preview),
+                        "reply_markup": {"inline_keyboard": bot_rows},
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=20),
+                        ) as resp:
+                            data = await resp.json()
+                            if data.get("ok"):
+                                return data.get("result")
+                            logger.warning("Bot API notify failed: %s", data)
+            except Exception:
+                logger.debug("Bot API notify path failed", exc_info=True)
+
+            try:
+                # TelethonBot expects list-of-rows of dicts / Button
                 if reply_markup is None:
-                    reply_markup = self._update_markup_rows()
+                    reply_markup = self._update_markup_rows(for_bot_api=False)
                 elif isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup:
-                    # unwrap accidental Bot API shape
                     reply_markup = reply_markup.get("inline_keyboard") or self._update_markup_rows()
                 return await self.inline.bot.send_message(
                     self.tg_id,
@@ -1503,13 +1578,13 @@ class UpdaterMod(loader.Module):
         # Bot API keyboard (send_message via inline bot). TL generate_markup is wrong here.
         self._upd_btn_defs = [
             {
-                "text": self.strings["update"],
+                "text": self._strip_btn_emoji(self.strings.get("update", "Обновить")),
                 "data": "hikkari/update",
                 "style": "primary",
                 "emoji_id": 5258382512656253510,
             },
             {
-                "text": self.strings["ignore"],
+                "text": self._strip_btn_emoji(self.strings.get("ignore", "Игнорировать")),
                 "data": "hikkari/ignore_upd",
                 "style": "danger",
                 "emoji_id": 5255949705740843980,
