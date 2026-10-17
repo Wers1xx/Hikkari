@@ -817,23 +817,53 @@ class UpdaterMod(loader.Module):
             else "Hikkari"
         )
         target = _status_target or self._capture_status_target(msg_obj)
-        self._persist_status_target(target)
         try:
             await self._edit_update_status(msg_obj, caption, target=target)
         except Exception:
             logger.exception("restart caption edit failed")
-        # Ensure Telegram delivers the edit before we kill the process
-        await asyncio.sleep(0.5)
+
+        # ALWAYS also pin a bot-PM status message we can edit after boot (HTTP)
+        owner = int(self.tg_id)
+        bot_mid = None
+        # Prefer editing existing bot: ref
+        ref_now = None
+        with contextlib.suppress(Exception):
+            if target.get("via_bot") and target.get("chat_id") and target.get("message_id"):
+                if int(target["chat_id"]) == owner:
+                    ok = await self._http_bot_edit(owner, int(target["message_id"]), caption)
+                    if ok:
+                        bot_mid = int(target["message_id"])
+        if bot_mid is None:
+            # try load previous
+            old_ref = self._load_status_ref()
+            if isinstance(old_ref, str) and old_ref.startswith("bot:"):
+                with contextlib.suppress(Exception):
+                    _, c, m = old_ref.split(":", 2)
+                    if int(c) == owner:
+                        ok = await self._http_bot_edit(owner, int(m), caption)
+                        if ok:
+                            bot_mid = int(m)
+        if bot_mid is None:
+            bot_mid = await self._http_bot_send(owner, caption)
+        if bot_mid is not None:
+            target = {
+                "chat_id": owner,
+                "message_id": int(bot_mid),
+                "via_bot": True,
+                "inline_message_id": None,
+            }
+        self._persist_status_target(target)
+        await asyncio.sleep(0.4)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
-        self.set("restart_ts", time.time())
+        ts = time.time()
+        self.set("restart_ts", ts)
         with contextlib.suppress(Exception):
-            self._db.set("Updater", "restart_ts", time.time())
-        # Hard flush so post-boot edit has the ref
+            self._db.set("Updater", "restart_ts", ts)
+            self._db.set("UpdaterMod", "restart_ts", ts)
         with contextlib.suppress(Exception):
             self._db.save()
         with contextlib.suppress(Exception):
-            # second flush after tiny yield
             import time as _t
             _t.sleep(0.05)
             self._db.save()
@@ -1124,15 +1154,139 @@ class UpdaterMod(loader.Module):
             logger.debug("capture status target failed", exc_info=True)
         return target
 
+    def _restart_status_paths(self) -> list:
+        """All durable paths for restart status sidecar."""
+        paths = []
+        seen = set()
+        candidates = []
+        with contextlib.suppress(Exception):
+            from .. import main as _main
+            candidates.append(Path(getattr(_main, "BASE_PATH", Path.cwd())))
+            candidates.append(Path(getattr(_main, "BASE_DIR", Path.cwd())))
+        with contextlib.suppress(Exception):
+            candidates.append(Path(utils.get_base_dir()))
+            candidates.append(Path(utils.get_base_dir()).parent)
+        candidates.append(Path.cwd())
+        candidates.append(Path.home() / ".hikkari")
+        for base in candidates:
+            try:
+                base = Path(base)
+                for p in (base / ".hikkari_restart_status.json", base / "data" / ".hikkari_restart_status.json"):
+                    s = str(p.resolve()) if p.parent.exists() or True else str(p)
+                    if s not in seen:
+                        seen.add(s)
+                        paths.append(Path(s))
+            except Exception:
+                continue
+        return paths or [Path.cwd() / ".hikkari_restart_status.json"]
+
     def _restart_status_path(self) -> Path:
+        return self._restart_status_paths()[0]
+
+    def _resolve_bot_token(self) -> str | None:
+        """Load bot token without requiring inline manager to be ready."""
+        for key in ("hikkari.inline", "hikka.inline"):
+            with contextlib.suppress(Exception):
+                tok = self._db.get(key, "bot_token", None)
+                if tok and isinstance(tok, str) and ":" in tok:
+                    return tok.strip()
+        with contextlib.suppress(Exception):
+            tok = getattr(getattr(self, "inline", None), "_token", None) or getattr(
+                getattr(self, "inline", None), "token", None
+            )
+            if tok and isinstance(tok, str) and ":" in tok:
+                return tok.strip()
+        with contextlib.suppress(Exception):
+            from ..inline.token_obtainment import _load_bot_token
+            tok = _load_bot_token(self._db, tg_id=getattr(self, "tg_id", None))
+            if tok and isinstance(tok, str) and ":" in tok:
+                return tok.strip()
+        # raw files
+        with contextlib.suppress(Exception):
+            from ..inline.token_obtainment import _token_backup_paths
+            for p in _token_backup_paths(getattr(self, "tg_id", None)):
+                if Path(p).is_file():
+                    raw = Path(p).read_text(encoding="utf-8").strip()
+                    if ":" in raw and len(raw) > 20:
+                        return raw.split()[0]
+        return None
+
+    async def _http_bot_edit(self, chat_id: int, message_id: int, text: str) -> bool:
+        token = self._resolve_bot_token()
+        if not token:
+            logger.warning("no bot token for HTTP edit")
+            return False
         try:
-            base = Path(utils.get_base_dir())
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{token}/editMessageText",
+                    json={
+                        "chat_id": int(chat_id),
+                        "message_id": int(message_id),
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        return True
+                    # message not modified = still ok for us
+                    desc = str(data.get("description", ""))
+                    if "not modified" in desc.lower():
+                        return True
+                    logger.warning("HTTP editMessageText failed: %s", data)
         except Exception:
-            base = Path.cwd()
-        return base / ".hikkari_restart_status.json"
+            logger.exception("HTTP editMessageText exception")
+        return False
+
+    async def _http_bot_send(self, chat_id: int, text: str) -> int | None:
+        token = self._resolve_bot_token()
+        if not token:
+            return None
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={
+                        "chat_id": int(chat_id),
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        return int(data["result"]["message_id"])
+                    logger.warning("HTTP sendMessage failed: %s", data)
+        except Exception:
+            logger.exception("HTTP sendMessage exception")
+        return None
+
+    async def _http_bot_delete(self, chat_id: int, message_id: int) -> bool:
+        token = self._resolve_bot_token()
+        if not token:
+            return False
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{token}/deleteMessage",
+                    json={"chat_id": int(chat_id), "message_id": int(message_id)},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    data = await resp.json()
+                    return bool(data.get("ok"))
+        except Exception:
+            logger.debug("HTTP delete failed", exc_info=True)
+        return False
 
     def _persist_status_target(self, target: dict) -> None:
-        """Save restart message ref to DB + sidecar file (survives kill before db flush)."""
+        """Save restart message ref to DB + all sidecar paths."""
         ref = None
         try:
             if target.get("inline_message_id"):
@@ -1145,45 +1299,50 @@ class UpdaterMod(loader.Module):
             if not ref:
                 return
             self.set("selfupdatemsg", ref)
-            # also under fixed key (class rename safe)
             with contextlib.suppress(Exception):
                 self._db.set("Updater", "selfupdatemsg", ref)
             with contextlib.suppress(Exception):
-                import json as _json
-                payload = {
+                self._db.set("UpdaterMod", "selfupdatemsg", ref)
+            import json as _json
+            payload = _json.dumps(
+                {
                     "ref": ref,
                     "ts": time.time(),
                     "via_bot": bool(target.get("via_bot")),
                     "chat_id": target.get("chat_id"),
                     "message_id": target.get("message_id"),
                     "inline_message_id": target.get("inline_message_id"),
+                    "owner_id": int(getattr(self, "tg_id", 0) or 0),
                 }
-                p = self._restart_status_path()
-                p.write_text(_json.dumps(payload), encoding="utf-8")
+            )
+            for p in self._restart_status_paths():
+                with contextlib.suppress(Exception):
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text(payload, encoding="utf-8")
         except Exception:
-            logger.debug("persist status target failed", exc_info=True)
+            logger.exception("persist status target failed")
 
     def _load_status_ref(self) -> str | None:
-        """Load status message ref: module db → Updater db → sidecar file."""
         for getter in (
             lambda: self.get("selfupdatemsg"),
             lambda: self._db.get("Updater", "selfupdatemsg", None),
+            lambda: self._db.get("UpdaterMod", "selfupdatemsg", None),
         ):
             with contextlib.suppress(Exception):
                 v = getter()
                 if v:
-                    return v
-        with contextlib.suppress(Exception):
-            import json as _json
-            p = self._restart_status_path()
-            if p.is_file():
-                data = _json.loads(p.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and data.get("ref"):
-                    return str(data["ref"])
-                if isinstance(data, dict) and data.get("chat_id") and data.get("message_id"):
-                    if data.get("via_bot"):
-                        return f"bot:{int(data['chat_id'])}:{int(data['message_id'])}"
-                    return f"{int(data['chat_id'])}:{int(data['message_id'])}"
+                    return str(v)
+        import json as _json
+        for p in self._restart_status_paths():
+            with contextlib.suppress(Exception):
+                if p.is_file():
+                    data = _json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and data.get("ref"):
+                        return str(data["ref"])
+                    if isinstance(data, dict) and data.get("chat_id") and data.get("message_id"):
+                        if data.get("via_bot"):
+                            return f"bot:{int(data['chat_id'])}:{int(data['message_id'])}"
+                        return f"{int(data['chat_id'])}:{int(data['message_id'])}"
         return None
 
     def _clear_status_ref(self) -> None:
@@ -1192,7 +1351,11 @@ class UpdaterMod(loader.Module):
         with contextlib.suppress(Exception):
             self._db.set("Updater", "selfupdatemsg", None)
         with contextlib.suppress(Exception):
-            self._restart_status_path().unlink(missing_ok=True)
+            self._db.set("UpdaterMod", "selfupdatemsg", None)
+        for p in self._restart_status_paths():
+            with contextlib.suppress(Exception):
+                p.unlink(missing_ok=True)
+
 
     async def _edit_update_status(self, msg_obj, text: str, target: dict | None = None):
         """Always try: call.edit → bot API → client edit. Never silent-fail the UI."""
@@ -1650,22 +1813,32 @@ class UpdaterMod(loader.Module):
         ]
         self._markup = self._update_markup_rows
 
-        # Always complete restart UI after boot (DB or sidecar file)
-        if self._load_status_ref() is not None:
-            try:
-                await self.update_complete()
-            except Exception:
-                logger.exception("Failed to complete update!")
-
-            async def _full_later():
-                await asyncio.sleep(6)
+        # Always complete restart UI after boot (DB / sidecar / multi-path)
+        async def _finish_restart_ui():
+            # Wait briefly so network/token files settle
+            for attempt in range(8):
+                ref = self._load_status_ref()
+                if not ref:
+                    await asyncio.sleep(1)
+                    continue
+                try:
+                    await self.update_complete()
+                except Exception:
+                    logger.exception("update_complete attempt %s failed", attempt)
+                await asyncio.sleep(5)
                 try:
                     if self._load_status_ref() is not None:
                         await self.full_restart_complete()
                 except Exception:
-                    logger.exception("full_restart_complete failed")
+                    logger.exception("full_restart_complete attempt %s failed", attempt)
+                # if cleared, done
+                if self._load_status_ref() is None:
+                    return
+                await asyncio.sleep(2)
+            logger.warning("restart UI finish gave up; ref=%s", self._load_status_ref())
 
-            asyncio.ensure_future(_full_later())
+        if self._load_status_ref() is not None or self.get("restart_ts") or self._db.get("Updater", "restart_ts", None):
+            asyncio.ensure_future(_finish_restart_ui())
 
         if self.get("do_not_create", False):
             pass
@@ -1818,7 +1991,10 @@ class UpdaterMod(loader.Module):
             try:
                 if via_bot and chat_id is not None and message_id is not None:
                     with contextlib.suppress(Exception):
-                        await self.inline.bot.delete_message(chat_id, message_id)
+                        await self._http_bot_delete(int(chat_id), int(message_id))
+                    with contextlib.suppress(Exception):
+                        if getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+                            await self.inline.bot.delete_message(chat_id, message_id)
                     return
                 if chat_id is not None and message_id is not None:
                     with contextlib.suppress(Exception):
@@ -1878,7 +2054,7 @@ class UpdaterMod(loader.Module):
                 await self._schedule_delete_status(ms=ms, delay=delete_after)
             return ok
 
-        # bot:chat:mid — message in bot PM
+        # bot:chat:mid — bot PM (HTTP first — works even if inline not ready)
         if isinstance(ms, str) and ms.startswith("bot:"):
             via_bot = True
             try:
@@ -1886,7 +2062,8 @@ class UpdaterMod(loader.Module):
                 chat_id, message_id = int(chat_s), int(msg_s)
             except Exception:
                 return False
-            if bot:
+            ok = await self._http_bot_edit(chat_id, message_id, text)
+            if not ok and bot:
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
@@ -1897,37 +2074,6 @@ class UpdaterMod(loader.Module):
                     ok = True
                 except Exception as e:
                     logger.warning("bot PM status edit failed (%s)", e)
-            if not ok:
-                # HTTP Bot API fallback
-                try:
-                    token = getattr(self.inline, "token", None) or getattr(
-                        self.inline, "_token", None
-                    )
-                    if not token:
-                        token = self._db.get("hikka.inline", "bot_token") or self._db.get(
-                            "hikkari.inline", "bot_token"
-                        )
-                    if token:
-                        import aiohttp
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(
-                                f"https://api.telegram.org/bot{token}/editMessageText",
-                                json={
-                                    "chat_id": int(chat_id),
-                                    "message_id": int(message_id),
-                                    "text": text,
-                                    "parse_mode": "HTML",
-                                    "disable_web_page_preview": True,
-                                },
-                                timeout=aiohttp.ClientTimeout(total=15),
-                            ) as resp:
-                                data = await resp.json()
-                                if data.get("ok"):
-                                    ok = True
-                                else:
-                                    logger.warning("HTTP editMessageText: %s", data)
-                except Exception:
-                    logger.debug("HTTP bot edit failed", exc_info=True)
             if ok and delete_after:
                 await self._schedule_delete_status(
                     chat_id=chat_id,
