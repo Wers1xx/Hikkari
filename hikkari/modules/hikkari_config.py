@@ -148,7 +148,7 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Prefer Bot API Rich with in-message tg-buttons; fallback form without photo."""
+        """Open config UI with banner from the first message (same as after Back)."""
         from .. import utils as _u
         import logging
         import contextlib
@@ -157,11 +157,13 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio"):
             kwargs.pop(k, None)
 
+        # Always full Rich HTML with <figure> banner (edit path already had it)
         rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
             text, title="⚙️ Hikkari Config"
         )
         markup = reply_markup if reply_markup is not None else []
 
+        # 1) Bot API sendRichMessage — banner + tg-buttons, no via@
         try:
             from ..utils.rich_api import (
                 markup_to_tg_rows,
@@ -218,9 +220,7 @@ class HikkariConfigMod(loader.Module):
                         mapped.append(tg_button_row(new_row, align="center"))
                 rows_html = "".join(mapped) if mapped else markup_to_tg_rows(markup)
 
-            html = to_rich_compatible(rich + rows_html)
-            html = normalize_rich_html(html)
-
+            html = normalize_rich_html(to_rich_compatible(rich + rows_html))
             chat = None
             if hasattr(message, "peer_id") or hasattr(message, "chat_id"):
                 chat = _u.get_chat_id(message)
@@ -235,8 +235,11 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg try_send_rich failed")
 
+        # 2) Inline form — SetInlineBotResults strips external media, so after
+        #    the message lands we immediately edit with full rich (with banner),
+        #    same code path as Back → choose_category.
         try:
-            return await self.inline.form(
+            form_msg = await self.inline.form(
                 text="⚙️",
                 message=message,
                 rich_message=rich,
@@ -244,14 +247,25 @@ class HikkariConfigMod(loader.Module):
                 silent=True,
                 force_me=kwargs.get("force_me", True),
             )
+            if form_msg:
+                # Re-apply full Rich HTML with banner (like _safe_cfg_edit on Back)
+                with contextlib.suppress(Exception):
+                    await form_msg.edit(
+                        text or "⚙️",
+                        reply_markup=markup,
+                        rich_message=rich,
+                    )
+                return form_msg
         except Exception:
             _log.exception("cfg form rich failed")
+
         return await self.inline.form(
             text=text,
             message=message,
             reply_markup=markup,
             silent=True,
         )
+
 
     def _cfg_banner_kwargs(self) -> dict:
         """Banner for config forms: photo / gif / video by URL or local path."""
