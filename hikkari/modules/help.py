@@ -764,12 +764,18 @@ class Help(loader.Module):
                 loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
-                rich_message = normalize_rich_html(rich_message)
-                # Official in-Rich buttons (tg-button-row) — Heroku-style inside message
+                # In-message Rich buttons (Bot API 10.3 / <tg-button-row>)
+                # MUST stay inside HTML. Do NOT pass reply_markup — that forces via@ form.
                 try:
                     from ..utils.rich_api import tg_button, tg_button_row
                     rich_message += tg_button_row(
                         [
+                            tg_button(
+                                "🔄 Обновить",
+                                type="callback_data",
+                                data="hkhelp|refresh",
+                                style="primary",
+                            ),
                             tg_button(
                                 "🔻 Закрыть",
                                 type="callback_data",
@@ -781,20 +787,8 @@ class Help(loader.Module):
                     )
                 except Exception:
                     pass
-                # Prefer native send; with reply_markup form if we need live callbacks
-                try:
-                    await _u.answer(
-                        message,
-                        "✨",
-                        rich_message=rich_message,
-                        reply_markup=[
-                            [{"text": "🔻 Закрыть", "action": "close"}],
-                        ],
-                        silent=True,
-                    )
-                    return
-                except Exception:
-                    logger.exception("help rich+buttons failed")
+                rich_message = normalize_rich_html(rich_message)
+                # Exact Heroku path: native SendMessageRequest(rich_message=...) only
                 await _u.answer_with_media_fallback(
                     message, rich_message=rich_message
                 )
