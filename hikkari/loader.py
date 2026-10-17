@@ -1460,6 +1460,21 @@ class Modules:
         except Exception as e:
             logger.exception("Failed to send mod init complete signal due to %s", e)
 
+    async def send_inline_ready_one(self, mod):
+        try:
+            fn = getattr(mod, "inline_ready", None)
+            if fn:
+                await fn()
+        except Exception:
+            logger.exception("Failed to call inline_ready of %s", mod)
+
+    async def send_inline_ready(self):
+        import asyncio
+        await asyncio.gather(
+            *[self.send_inline_ready_one(mod) for mod in list(self.modules)],
+            return_exceptions=True,
+        )
+
     async def send_ready(self):
         """Send all data to all modules"""
         await asyncio.gather(

@@ -303,6 +303,14 @@ class InlineManager(
 
         self.init_complete = True
 
+        try:
+            import asyncio
+            am = getattr(self, "_allmodules", None)
+            if am and hasattr(am, "send_inline_ready"):
+                asyncio.ensure_future(am.send_inline_ready())
+        except Exception:
+            pass
+
         bot_uid = self._token.split(":", 1)[0]
         self._cleanup_stale_bot_sessions(bot_uid)
         self._bot_client = TelegramClient(

@@ -143,6 +143,9 @@ class Module:
         self.tg_id: int = self._client.tg_id
         self._tg_id: int = self._client.tg_id
 
+    async def inline_ready(self):
+        """Called when inline bot becomes ready (Heroku 2.2 parity)."""
+
     async def on_unload(self):
         """Called after unloading / reloading module"""
 
@@ -1228,3 +1231,11 @@ def get_watchers(mod: Module) -> dict:
         "is_watcher",
         strict=True,
     )
+
+class InlineDownError(AttributeError):
+    """Raised when inline bot is not running (Heroku 2.2 parity)."""
+
+    def __init__(self, *args):
+        super().__init__(
+            *(args or ("Inline bot is not running. Use .ch_hikkari_bot / enable Inline Mode.",))
+        )
