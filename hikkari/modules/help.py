@@ -765,7 +765,36 @@ class Help(loader.Module):
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 rich_message = normalize_rich_html(rich_message)
-                # Native Rich (Heroku) — details sections, no broken callbacks
+                # Official in-Rich buttons (tg-button-row) — Heroku-style inside message
+                try:
+                    from ..utils.rich_api import tg_button, tg_button_row
+                    rich_message += tg_button_row(
+                        [
+                            tg_button(
+                                "🔻 Закрыть",
+                                type="callback_data",
+                                data="hkhelp|close",
+                                style="danger",
+                            ),
+                        ],
+                        align="center",
+                    )
+                except Exception:
+                    pass
+                # Prefer native send; with reply_markup form if we need live callbacks
+                try:
+                    await _u.answer(
+                        message,
+                        "✨",
+                        rich_message=rich_message,
+                        reply_markup=[
+                            [{"text": "🔻 Закрыть", "action": "close"}],
+                        ],
+                        silent=True,
+                    )
+                    return
+                except Exception:
+                    logger.exception("help rich+buttons failed")
                 await _u.answer_with_media_fallback(
                     message, rich_message=rich_message
                 )

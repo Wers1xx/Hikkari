@@ -496,6 +496,21 @@ class TestMod(loader.Module):
                 )
                 if btn_html:
                     html = html + "\n" + btn_html
+                # Prefer native Rich like .info (no via@)
+                try:
+                    await utils.answer_with_media_fallback(
+                        message, rich_message=html
+                    )
+                    return
+                except Exception:
+                    logger.warning("ping native rich failed", exc_info=True)
+                chat = utils.get_chat_id(message)
+                if await try_send_rich(self._client, chat, html):
+                    with contextlib.suppress(Exception):
+                        if getattr(message, "out", False):
+                            await message.delete()
+                    return
+                # Last: via@ only if native/bot API both fail
                 m = await self.inline.rich(
                     message,
                     html,
@@ -505,13 +520,6 @@ class TestMod(loader.Module):
                     silent=True,
                 )
                 if m:
-                    return
-                # Fallback: Bot API sendRichMessage (still real Rich)
-                chat = utils.get_chat_id(message)
-                if await try_send_rich(self._client, chat, html):
-                    with contextlib.suppress(Exception):
-                        if getattr(message, "out", False):
-                            await message.delete()
                     return
             elif can_use_rich(self._client, self._db):
                 logger.info("ping rich: inline bot not ready (.yesbot / .ch_bot_token)")

@@ -1670,14 +1670,7 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
-        banner_kw = self._cfg_banner_kwargs()
-        await utils.answer(
-            call,
-            self.strings["choose_core"],
-            photo=banner_kw.get("photo"),
-            video=banner_kw.get("video"),
-            gif=banner_kw.get("gif"),
-            reply_markup=[
+        markup = [
                 [
                     {
                         "text": self.strings["builtin"],
@@ -1710,10 +1703,22 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510}
+                        "style": "danger",
+                        "emoji_id": 5283176512747507510,
+                    }
                 ],
-            ],
-        )
+            ]
+        # Rich only (no photo) — banner inside Rich HTML
+        if isinstance(call, InlineCall) or getattr(call, "inline_message_id", None):
+            await self._safe_cfg_edit(
+                call, self.strings["choose_core"], reply_markup=markup
+            )
+        else:
+            await self._cfg_form(
+                self.strings["choose_core"],
+                message=call,
+                reply_markup=markup,
+            )
 
     async def _send_initial_config_form(
         self,
