@@ -209,6 +209,23 @@ class InlineManager(
     def _web_document(url: str | None, **kwargs):
         return web_document(url, **kwargs)
 
+
+    async def ensure_inline_ready(self, *, force: bool = False) -> bool:
+        """Re-bind inline bot if token exists but client dropped. Never wipes token."""
+        if self.init_complete and self._bot_client and self.bot_username and not force:
+            try:
+                # cheap health: is connected
+                if getattr(self._bot_client, "is_connected", lambda: True)():
+                    return True
+            except Exception:
+                pass
+        try:
+            await self.register_manager(ignore_token_checks=True)
+            return bool(self.init_complete and self.bot_username)
+        except Exception:
+            logger.exception("ensure_inline_ready failed")
+            return False
+
     def _register_bot_handler(
         self,
         handler: typing.Callable,

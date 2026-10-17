@@ -552,8 +552,11 @@ class Form(InlineUnit):
             logger.error("inline.rich: empty html")
             return False
 
-        if not self.init_complete:
-            await self.register_manager(ignore_token_checks=True)
+        if not self.init_complete or not self.bot_username:
+            if hasattr(self, "ensure_inline_ready"):
+                await self.ensure_inline_ready()
+            else:
+                await self.register_manager(ignore_token_checks=True)
         if not self.bot_username:
             logger.error("inline.rich: no bot username")
             return False
@@ -755,6 +758,12 @@ class Form(InlineUnit):
                     if qid is not None:
                         break
                 html = form.get("rich_html") or form.get("text") or ""
+                try:
+                    from ..utils.rich_api import strip_external_media_for_inline
+                    html = strip_external_media_for_inline(html)
+                except Exception:
+                    pass
+
                 # Soft length guard — oversized HTML breaks answerInlineQuery
                 if len(html) > 28000:
                     html = html[:27900] + "\n<p>…</p>"
@@ -868,6 +877,20 @@ class Form(InlineUnit):
                             rich_value = normalize_rich_html(str(rich_value))
                         except Exception:
                             rich_value = str(rich_value)
+                    # Inline rich cannot embed external <figure>/<img>/<video> URLs
+                    try:
+                        from ..utils.rich_api import strip_external_media_for_inline
+                        rich_value = strip_external_media_for_inline(str(rich_value))
+                    except Exception:
+                        # manual strip
+                        import re as _re
+                        rich_value = _re.sub(
+                            r"<figure\b[^>]*>.*?</figure>",
+                            "",
+                            str(rich_value),
+                            flags=_re.I | _re.S,
+                        )
+                        rich_value = _re.sub(r"<img\b[^>]*/?>", "", rich_value, flags=_re.I)
                     btns = self.generate_markup(form["uid"])
                     try:
                         await inline_query.answer(
