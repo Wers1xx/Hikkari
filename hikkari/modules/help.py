@@ -764,31 +764,10 @@ class Help(loader.Module):
                 loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
-                # In-message Rich buttons (Bot API 10.3 / <tg-button-row>)
-                # MUST stay inside HTML. Do NOT pass reply_markup — that forces via@ form.
-                try:
-                    from ..utils.rich_api import tg_button, tg_button_row
-                    rich_message += tg_button_row(
-                        [
-                            tg_button(
-                                "🔄 Обновить",
-                                type="callback_data",
-                                data="hkhelp|refresh",
-                                style="primary",
-                            ),
-                            tg_button(
-                                "🔻 Закрыть",
-                                type="callback_data",
-                                data="hkhelp|close",
-                                style="danger",
-                            ),
-                        ],
-                        align="center",
-                    )
-                except Exception:
-                    pass
+                # Exact Heroku path — NO tg-button / NO reply_markup.
+                # callback tg-buttons → ButtonTypeInvalidError on user SendMessageRequest → via@ fallback.
+                # «Показать больше» is Telegram client UI for long <details>, not a custom button.
                 rich_message = normalize_rich_html(rich_message)
-                # Exact Heroku path: native SendMessageRequest(rich_message=...) only
                 await _u.answer_with_media_fallback(
                     message, rich_message=rich_message
                 )
