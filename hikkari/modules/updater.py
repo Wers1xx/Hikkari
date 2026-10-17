@@ -739,16 +739,21 @@ class UpdaterMod(loader.Module):
             # Owner status message already posted (update button) — keep it
             pass
         elif is_call:
-            # Should not post as bot; send owner status if missing
-            if not existing:
-                peer = getattr(self.inline, "bot_id", None) or self.tg_id
-                with contextlib.suppress(Exception):
-                    status_msg = await self._client.send_message(peer, caption)
-                    if status_msg is not None:
-                        self.set(
-                            "selfupdatemsg",
-                            f"{utils.get_chat_id(status_msg)}:{status_msg.id}",
-                        )
+            # Edit the form message in the SAME chat — never spawn bot-PM status
+            with contextlib.suppress(Exception):
+                await msg_obj.edit(caption)
+            # Remember chat:mid if unit has message
+            try:
+                form = getattr(msg_obj, "form", None) or {}
+                unit = self.inline._units.get(form.get("uid")) if form.get("uid") else None
+                m = (unit or {}).get("message")
+                if m is not None:
+                    self.set(
+                        "selfupdatemsg",
+                        f"{utils.get_chat_id(m)}:{getattr(m, 'id', getattr(m, 'message_id', 0))}",
+                    )
+            except Exception:
+                pass
         else:
             # User invoked .restart / .update from a chat — edit THAT message only
             new_msg = None
@@ -992,41 +997,50 @@ class UpdaterMod(loader.Module):
         )
 
     async def _edit_update_status(self, msg_obj, text: str):
-        """Edit progress on bot-PM card or owner message."""
+        """Edit progress in the SAME chat where update was started (never jump to bot PM)."""
         if getattr(self, "inline", None):
             with contextlib.suppress(Exception):
                 text = self.inline.sanitise_text(text)
-        # Prefer explicit bot:chat:mid ref
-        ref = self.get("selfupdatemsg")
-        if isinstance(ref, str) and ref.startswith("bot:"):
-            parts = ref.split(":")
-            if len(parts) == 3:
-                try:
-                    chat_id, message_id = int(parts[1]), int(parts[2])
-                    await self.inline.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=text,
-                        disable_web_page_preview=True,
-                    )
-                    return msg_obj
-                except Exception:
-                    logger.debug("bot status edit failed", exc_info=True)
-        mid = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
-        if mid is None:
-            m = getattr(msg_obj, "message", None)
-            mid = getattr(m, "message_id", None) or getattr(m, "id", None)
-        if mid is not None and getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+
+        # 1) InlineCall / form unit — edit in place
+        if hasattr(msg_obj, "edit") and callable(getattr(msg_obj, "edit", None)):
             try:
-                await self.inline.bot.edit_message_text(
-                    chat_id=self.tg_id,
-                    message_id=int(mid),
-                    text=text,
-                    disable_web_page_preview=True,
-                )
+                await msg_obj.edit(text)
                 return msg_obj
             except Exception:
-                logger.debug("bot edit by mid failed", exc_info=True)
+                logger.debug("status call.edit failed", exc_info=True)
+
+        # 2) Explicit chat:mid ref saved at start of update
+        ref = self.get("selfupdatemsg")
+        if isinstance(ref, str) and ":" in ref and not ref.startswith("{"):
+            parts = ref.split(":")
+            try:
+                if parts[0] == "bot" and len(parts) == 3:
+                    chat_id, message_id = int(parts[1]), int(parts[2])
+                elif len(parts) == 2:
+                    chat_id, message_id = int(parts[0]), int(parts[1])
+                else:
+                    chat_id = message_id = None
+                if chat_id is not None and message_id is not None:
+                    # Prefer user client edit in that chat
+                    try:
+                        await self._client.edit_message(chat_id, message_id, text)
+                        return msg_obj
+                    except Exception:
+                        pass
+                    if getattr(self, "inline", None) and getattr(self.inline, "bot", None):
+                        with contextlib.suppress(Exception):
+                            await self.inline.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text=text,
+                                disable_web_page_preview=True,
+                            )
+                            return msg_obj
+            except Exception:
+                logger.debug("status ref edit failed", exc_info=True)
+
+        # 3) Plain Message in the original chat
         with contextlib.suppress(Exception):
             return await utils.answer(msg_obj, text, skip_rich=True)
         return msg_obj
@@ -1036,6 +1050,26 @@ class UpdaterMod(loader.Module):
         msg_obj: InlineCall | Message,
         hard: bool = False,
     ):
+        # Pin status target to THIS chat (form/message), never bot PM by default
+        try:
+            from hikkaritl.tl.types import Message as _Msg
+            if isinstance(msg_obj, _Msg):
+                self.set(
+                    "selfupdatemsg",
+                    f"{utils.get_chat_id(msg_obj)}:{msg_obj.id}",
+                )
+            elif hasattr(msg_obj, "form"):
+                form = getattr(msg_obj, "form", None) or {}
+                unit = self.inline._units.get(form.get("uid")) if getattr(self, "inline", None) else None
+                m = (unit or {}).get("message")
+                if m is not None:
+                    self.set(
+                        "selfupdatemsg",
+                        f"{utils.get_chat_id(m)}:{getattr(m, 'id', 0)}",
+                    )
+        except Exception:
+            logger.debug("pin selfupdatemsg failed", exc_info=True)
+
         # Strict order: download → install requirements → restart (never restart first)
         if hard:
             os.system(f"cd {utils.get_base_dir()} && cd .. && git reset --hard HEAD")

@@ -330,16 +330,37 @@ class CommandDispatcher:
         initiator = int(initiator) if initiator else 0
 
         main_prefix = self._db.get(main.__name__, "command_prefix", ".")
-        if initiator == self._client.tg_id:
-            prefix = main_prefix
-        else:
-            prefix = self._db.get(main.__name__, "command_prefixes", {})
-            prefix = prefix.get(str(initiator), main_prefix)
-
+        # Heroku-style: multiple prefixes — owner main + per-user + all registered
+        try:
+            all_prefixes = set(self._modules.get_prefixes() or set())
+        except Exception:
+            all_prefixes = set()
+        all_prefixes.add(main_prefix or ".")
+        if initiator != self._client.tg_id:
+            try:
+                per = self._db.get(main.__name__, "command_prefixes", {}) or {}
+                if str(initiator) in per:
+                    all_prefixes.add(per[str(initiator)])
+            except Exception:
+                pass
+        # Longest match first so multi-char prefixes work
+        candidates = sorted(
+            (p for p in all_prefixes if p),
+            key=lambda p: len(str(p)),
+            reverse=True,
+        )
         message = utils.censor(event.message)
-
         if not event.message.message:
             return False
+        text0 = event.message.message
+        prefix = main_prefix
+        for p in candidates:
+            if text0.startswith(p):
+                prefix = p
+                break
+        else:
+            # layout-translated prefix check later
+            prefix = main_prefix
 
         if (
             message.out
@@ -368,17 +389,37 @@ class CommandDispatcher:
                     )
                 return False
 
-        match True:
-            case _ if (
-                event.message.message.startswith(
-                    str.translate(prefix, _LAYOUT_TRANSLATION)
-                )
-                and str.translate(prefix, _LAYOUT_TRANSLATION) != prefix
+        # Accept any known prefix (incl. layout-translated)
+        def _msg_starts_with_prefix(msg: str, pfx: str) -> bool:
+            if msg.startswith(pfx):
+                return True
+            tp = str.translate(pfx, _LAYOUT_TRANSLATION)
+            return bool(tp) and tp != pfx and msg.startswith(tp)
+
+        matched_prefix = None
+        for p in candidates:
+            if _msg_starts_with_prefix(event.message.message, p):
+                matched_prefix = p
+                break
+        if matched_prefix is None:
+            # last chance: layout of chosen prefix
+            tp = str.translate(prefix, _LAYOUT_TRANSLATION)
+            if tp != prefix and event.message.message.startswith(tp):
+                matched_prefix = prefix
+                message.message = str.translate(message.message, _LAYOUT_TRANSLATION)
+                message.text = str.translate(message.text, _LAYOUT_TRANSLATION)
+            else:
+                return False
+        else:
+            prefix = matched_prefix
+            tp = str.translate(prefix, _LAYOUT_TRANSLATION)
+            if (
+                tp != prefix
+                and event.message.message.startswith(tp)
+                and not event.message.message.startswith(prefix)
             ):
                 message.message = str.translate(message.message, _LAYOUT_TRANSLATION)
                 message.text = str.translate(message.text, _LAYOUT_TRANSLATION)
-            case _ if not event.message.message.startswith(prefix):
-                return False
 
         if (
             event.sticker

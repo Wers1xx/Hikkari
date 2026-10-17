@@ -331,6 +331,7 @@ class HikkariFindMod(loader.Module):
                     "text": "⬅️",
                     "callback": self._find_page,
                     "args": (page - 1,),
+                    "emoji_id": 5469737533045626725,
                 }
             )
         nav.append(
@@ -347,6 +348,7 @@ class HikkariFindMod(loader.Module):
                     "text": "➡️",
                     "callback": self._find_page,
                     "args": (page + 1,),
+                    "emoji_id": 5469737533045626725,
                 }
             )
         rows = [nav, [{"text": self.strings["close_btn"], "action": "close"}]]

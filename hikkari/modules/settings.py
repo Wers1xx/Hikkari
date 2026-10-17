@@ -656,16 +656,19 @@ class CoreMod(loader.Module):
                 aliases.append(last[0].lower())
                 command = last[1]
             else:
+                # .addalias <alias> <command> [args...]
+                # e.g. addalias рест restart -f
+                #      addalias фк fcfg tester banner_url
                 args = line.split(maxsplit=1)
                 if len(args) < 2:
                     await utils.answer(message, self.strings["alias_args"])
                     return
 
                 aliases = [args[0].lower()]
-                command = args[1]
+                command = args[1].strip()
 
             command_parts = command.split(maxsplit=1)
-            cmd = command_parts[0]
+            cmd = command_parts[0].lstrip(".")  # allow ".restart -f"
             rest = command_parts[1] if len(command_parts) > 1 else None
 
             if cmd not in self.allmodules.commands:

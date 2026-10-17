@@ -248,13 +248,16 @@ class HikkariConfigMod(loader.Module):
                 force_me=kwargs.get("force_me", True),
             )
             if form_msg:
-                # Re-apply full Rich HTML with banner (like _safe_cfg_edit on Back)
-                with contextlib.suppress(Exception):
-                    await form_msg.edit(
-                        text or "⚙️",
-                        reply_markup=markup,
-                        rich_message=rich,
-                    )
+                # Re-apply banner ASAP (same path as Back). Fire without blocking return.
+                async def _banner_edit():
+                    with contextlib.suppress(Exception):
+                        await form_msg.edit(
+                            text or "⚙️",
+                            reply_markup=markup,
+                            rich_message=rich,
+                        )
+                import asyncio as _aio
+                _aio.ensure_future(_banner_edit())
                 return form_msg
         except Exception:
             _log.exception("cfg form rich failed")
