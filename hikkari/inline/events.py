@@ -431,6 +431,50 @@ class Events(InlineUnit):
                 with contextlib.suppress(Exception):
                     await call.answer("Error", show_alert=True)
 
+
+        # --- Hikkari Config Rich buttons (Bot API sendRichMessage + tg-button) ---
+        if isinstance(call_data, str) and call_data.startswith("cfg|"):
+            try:
+                with contextlib.suppress(Exception):
+                    await call.answer()
+                action = call_data.split("|", 1)[1] if "|" in call_data else ""
+                # Find HikkariConfig / Config module
+                mod = None
+                for m in getattr(self._allmodules, "modules", []) or []:
+                    n = getattr(m, "name", "") or getattr(getattr(m, "strings", {}), "get", lambda *_: "")("name")
+                    if n in ("HikkariConfig", "Config", "Hikkari Config") or "config" in str(type(m).__name__).lower():
+                        if hasattr(m, "inline__global_config") or hasattr(m, "inline__choose_category"):
+                            mod = m
+                            break
+                if mod is None:
+                    for m in getattr(self._allmodules, "modules", []) or []:
+                        if hasattr(m, "inline__global_config"):
+                            mod = m
+                            break
+                if mod is None:
+                    await call.answer("Config module not found", show_alert=True)
+                    return
+                # Wrap as BotInlineCall-like for existing handlers
+                from .types import BotInlineCall, InlineCall
+                icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+                    call, self, None
+                )
+                if action == "builtin":
+                    await mod.inline__global_config(icall, obj_type=True)
+                elif action == "external":
+                    await mod.inline__global_config(icall, obj_type=False)
+                elif action == "close":
+                    with contextlib.suppress(Exception):
+                        await call.delete()
+                else:
+                    await call.answer(action or "ok")
+                return
+            except Exception:
+                logger.exception("cfg rich callback failed")
+                with contextlib.suppress(Exception):
+                    await call.answer("Error", show_alert=True)
+                return
+
         for func in self._allmodules.callback_handlers.values():
             if await self.check_inline_security(func=func, user=user_id):
                 try:

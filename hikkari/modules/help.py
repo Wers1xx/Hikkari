@@ -751,11 +751,11 @@ class Help(loader.Module):
                     for item in plain_ + (no_commands_ if force else [])
                 )
                 if only_core:
-                    sections = [("🛡 Core", rich_core)]
+                    sections = [(self.strings.get("rich_core", "Встроенные модули"), rich_core)]
                 elif only_loaded:
-                    sections = [("📦 Modules", rich_modules)]
+                    sections = [(self.strings.get("rich_modules", "Модули"), rich_modules)]
                 else:
-                    sections = [("🛡 Core", rich_core), ("📦 Modules", rich_modules)]
+                    sections = [(self.strings.get("rich_core", "Встроенные модули"), rich_core), (self.strings.get("rich_modules", "Модули"), rich_modules)]
                 rich_message += "".join(
                     f"<details><summary>{title}</summary>{content}</details>"
                     for title, content in sections

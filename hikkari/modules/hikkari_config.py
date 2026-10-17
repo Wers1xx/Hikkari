@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -147,12 +148,12 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Always Rich form + buttons (no photo Inline Mode)."""
+        """Prefer Bot API Rich with in-message tg-buttons; fallback form without photo."""
         from .. import utils as _u
         import logging
+        import contextlib
         _log = logging.getLogger(__name__)
 
-        # Strip any media — classic photo form is forbidden here
         for k in ("photo", "video", "gif", "file", "audio"):
             kwargs.pop(k, None)
 
@@ -161,43 +162,96 @@ class HikkariConfigMod(loader.Module):
         )
         markup = reply_markup if reply_markup is not None else []
 
-        # 1) form with rich_message (buttons + input work via@)
         try:
-            res = await self.inline.form(
+            from ..utils.rich_api import (
+                markup_to_tg_rows,
+                tg_button,
+                tg_button_row,
+                try_send_rich,
+                to_rich_compatible,
+            )
+            from .._internal import normalize_rich_html
+
+            rows_html = ""
+            if markup:
+                mapped = []
+                for row in markup if isinstance(markup, list) else []:
+                    if not isinstance(row, (list, tuple)):
+                        row = [row]
+                    new_row = []
+                    for btn in row:
+                        if not isinstance(btn, dict):
+                            continue
+                        t = str(btn.get("text") or "•")
+                        cb = btn.get("callback")
+                        action = btn.get("action")
+                        data = None
+                        style = btn.get("style")
+                        if action == "close":
+                            data = "cfg|close"
+                            style = "danger"
+                        elif cb is not None and "global_config" in str(
+                            getattr(cb, "__name__", cb)
+                        ):
+                            kw = btn.get("kwargs") or {}
+                            ot = kw.get("obj_type", None)
+                            if ot is True:
+                                data = "cfg|builtin"
+                            elif ot is False:
+                                data = "cfg|external"
+                            elif ot == "library":
+                                data = "cfg|library"
+                            style = style or "primary"
+                        if data:
+                            new_row.append(
+                                tg_button(
+                                    t, type="callback_data", data=data, style=style
+                                )
+                            )
+                        elif btn.get("url"):
+                            new_row.append(
+                                tg_button(
+                                    t, type="url", url=str(btn["url"]), style=style
+                                )
+                            )
+                    if new_row:
+                        mapped.append(tg_button_row(new_row, align="center"))
+                rows_html = "".join(mapped) if mapped else markup_to_tg_rows(markup)
+
+            html = to_rich_compatible(rich + rows_html)
+            html = normalize_rich_html(html)
+
+            chat = None
+            if hasattr(message, "peer_id") or hasattr(message, "chat_id"):
+                chat = _u.get_chat_id(message)
+            elif isinstance(message, int):
+                chat = message
+
+            if chat is not None and await try_send_rich(self._client, chat, html):
+                with contextlib.suppress(Exception):
+                    if getattr(message, "out", False):
+                        await message.delete()
+                return True
+        except Exception:
+            _log.exception("cfg try_send_rich failed")
+
+        try:
+            return await self.inline.form(
                 text="⚙️",
                 message=message,
                 rich_message=rich,
                 reply_markup=markup,
                 silent=True,
                 force_me=kwargs.get("force_me", True),
-                always_allow=kwargs.get("always_allow"),
-                disable_security=kwargs.get("disable_security", False),
-            )
-            if res:
-                return res
-        except Exception:
-            _log.exception("cfg form(rich_message) failed")
-
-        # 2) utils.answer path
-        try:
-            return await _u.answer(
-                message,
-                "⚙️",
-                rich_message=rich,
-                reply_markup=markup,
-                silent=True,
             )
         except Exception:
-            _log.exception("cfg answer(rich) failed")
-
-        # 3) last resort: classic form WITHOUT photo (HTML caption only)
+            _log.exception("cfg form rich failed")
         return await self.inline.form(
             text=text,
             message=message,
             reply_markup=markup,
             silent=True,
         )
-
 
     def _cfg_banner_kwargs(self) -> dict:
         """Banner for config forms: photo / gif / video by URL or local path."""
