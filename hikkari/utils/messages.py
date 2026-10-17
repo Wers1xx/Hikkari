@@ -347,13 +347,19 @@ async def _send_rich_message(
     reply_markup=None,
     silent: bool | None = None,
 ):
-    return await message.client.send_rich_message(
-        message.peer_id,
-        html,
-        reply_to=reply_to,
-        buttons=reply_markup,
-        silent=silent,
-    )
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        return await message.client.send_rich_message(
+            message.peer_id,
+            html,
+            reply_to=reply_to,
+            buttons=reply_markup if reply_markup not in (None, [], [[]]) else None,
+            silent=silent,
+        )
+    except Exception:
+        _log.exception("send_rich_message failed")
+        raise
 
 
 async def _edit_rich_message(
@@ -617,7 +623,8 @@ async def answer(
         # Buttons / non-premium → via@ form with rich_message (working callbacks)
         me = getattr(getattr(message, "client", None), "hikkari_me", None)
         premium = bool(getattr(me, "premium", False))
-        if reply_markup or not premium:
+        _has_btns = bool(reply_markup) and reply_markup not in ([], [[]])
+        if _has_btns or not premium:
             inline = message.client.loader.inline
             form_kwargs = {
                 key: kwargs[key]

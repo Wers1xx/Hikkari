@@ -353,97 +353,105 @@ class TestMod(loader.Module):
 
     @loader.command()
     async def ping(self, message: Message):
-        """- Find out your userbot ping (Heroku-style Rich when enabled)"""
+        """Heroku-style Rich ping with banner + full placeholders."""
         import contextlib
+        import getpass
+        import psutil
+        import platform as lib_platform
         from .. import version as _ver
+        from .._internal import normalize_rich_html
 
         start = time.perf_counter_ns()
-        message = await utils.answer(message, self.config.get("ping_emoji") or "✨")
-
+        # measure against a quick no-op answer then replace with rich
+        probe = await utils.answer(message, self.config.get("ping_emoji") or "✨")
         ping_ms = round((time.perf_counter_ns() - start) / 10**6, 3)
-        uptime = utils.formatted_uptime()
-        hint = ""
-        with contextlib.suppress(Exception):
-            if self.config.get("hint") and random.choice([0, 0, 1]) == 1:
-                hint = str(self.config["hint"])
 
-        build = ""
+        me_name = ""
         with contextlib.suppress(Exception):
-            build = str(utils.get_commit_url())
-        ver = ".".join(map(str, getattr(_ver, "__version__", (0, 0, 0))))
+            me_name = utils.get_display_name(self._client.hikkari_me) or ""
 
         class _Safe(dict):
             def __missing__(self, key):
-                return "{" + key + "}"
+                return ""
 
-        placeholders = _Safe(
+        data = _Safe(
             ping=ping_ms,
-            uptime=uptime,
-            ping_hint=hint,
-            version=ver,
-            build=build,
+            uptime=utils.formatted_uptime(),
+            ping_hint="",
+            version=".".join(map(str, getattr(_ver, "__version__", (0, 0, 0)))),
+            build=str(utils.get_commit_url()) if hasattr(utils, "get_commit_url") else "",
             branch=getattr(_ver, "branch", "master"),
+            me=me_name,
+            owner=me_name,
+            me_plain=me_name,
+            prefix=self.get_prefix(),
+            platform=utils.get_named_platform() if hasattr(utils, "get_named_platform") else utils.get_platform_name(),
+            ram_usage=f"{utils.get_ram_usage()} MB",
+            cpu_usage=str(utils.get_cpu_usage()),
+            hostname=lib_platform.node(),
+            kernel=lib_platform.release(),
+            user=getpass.getuser(),
+            os=lib_platform.system(),
+            python_ver=lib_platform.python_version(),
+            upd="",
+            time=__import__("datetime").datetime.now().strftime("%H:%M:%S"),
+            date=__import__("datetime").datetime.now().strftime("%d.%m.%Y"),
         )
+        with contextlib.suppress(Exception):
+            if self.config.get("hint") and random.choice([0, 0, 1]) == 1:
+                data["ping_hint"] = str(self.config["hint"])
 
         template = self.config.get("custom_message")
         if isinstance(template, str) and template.strip():
-            try:
-                text = template.format_map(placeholders)
-            except Exception:
-                text = (
-                    f"<b>Ping:</b> <code>{ping_ms}</code> ms\n"
-                    f"<b>Uptime:</b> <code>{uptime}</code>"
-                )
+            text = template.format_map(data)
         else:
             text = (
-                f"<tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> "
-                f"<b>Ping:</b> <code>{ping_ms}</code> <b>ms</b>\n"
-                f"<tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji> "
-                f"<b>Uptime:</b> <code>{uptime}</code>"
+                f"<p><tg-emoji emoji-id=5920515922505765329>⚡️</tg-emoji> "
+                f"<b>Ping:</b> <code>{ping_ms}</code> ms</p>"
+                f"<p><tg-emoji emoji-id=5900104897885376843>🕓</tg-emoji> "
+                f"<b>Uptime:</b> <code>{data['uptime']}</code></p>"
             )
 
         if self.config.get("rich_mode", True):
-            from .._internal import normalize_rich_html
-
             rich = text.replace("\r\n", "<br>").replace("\n", "<br>")
             if "<p>" not in rich and "<details>" not in rich:
-                rich = "".join(
-                    f"<p>{ln}</p>" for ln in rich.split("<br>") if ln.strip()
-                )
-            banner = str(self.config.get("banner_url") or "").strip()
-            # RandomLink may be a list
-            if isinstance(self.config.get("banner_url"), list):
-                try:
-                    import random as _r
-
-                    banner = str(_r.choice(self.config["banner_url"]) or "")
-                except Exception:
-                    banner = ""
+                rich = "".join(f"<p>{ln}</p>" for ln in rich.split("<br>") if ln.strip())
+            # banner
+            banner = self.config.get("banner_url")
+            if isinstance(banner, list) and banner:
+                banner = random.choice(banner)
+            banner = str(banner or "").strip()
             if banner.startswith("local:"):
-                name = banner[6:].lstrip("/")
                 banner = (
-                    f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
+                    + banner[6:].lstrip("/")
                 )
-            if banner.startswith(("http://", "https://")) and not banner.lower().endswith(
-                (".mp4", ".webm", ".gif", ".mov")
-            ):
+            if banner and not banner.startswith("http"):
+                banner = (
+                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
+                    + banner.lstrip("/")
+                )
+            if not banner.startswith("http"):
+                banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg"
+            if not banner.lower().endswith((".mp4", ".webm", ".gif", ".mov")):
                 if "<figure" not in rich.lower():
                     rich = f'<figure><img src="{banner}"/></figure>' + rich
             rich = normalize_rich_html(rich)
+            try:
+                # Prefer native send into same chat (Heroku path)
+                chat = utils.get_chat_id(probe) if probe else utils.get_chat_id(message)
+                with contextlib.suppress(Exception):
+                    if probe and getattr(probe, "out", False):
+                        await probe.delete()
+                sent = await self._client.send_rich_message(chat, rich)
+                if sent:
+                    return
+            except Exception:
+                logger.exception("native rich ping failed")
             await utils.answer_with_media_fallback(message, rich_message=rich)
             return
 
-        banner = self.config.get("banner_url")
-        media = None
-        if banner:
-            with contextlib.suppress(Exception):
-                from hikkaritl.types import InputMediaWebPage
-
-                if self.config.get("quote_media"):
-                    media = InputMediaWebPage(str(banner), optional=True)
-                else:
-                    media = banner
-        await utils.answer_with_media_fallback(message, text, file=media)
+        await utils.answer(probe or message, text)
 
 
     async def usinfo(self, message: Message):

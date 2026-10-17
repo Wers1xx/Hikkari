@@ -147,50 +147,57 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Rich form + working buttons/input (Heroku answer path)."""
+        """Always Rich form + buttons (no photo Inline Mode)."""
         from .. import utils as _u
+        import logging
+        _log = logging.getLogger(__name__)
 
-        kw = dict(kwargs)
-        media_keys = ("photo", "video", "gif", "file", "audio")
-        if any(k in kw for k in media_keys):
-            if reply_markup is not None:
-                kw["reply_markup"] = reply_markup
-            kw.setdefault("silent", True)
-            return await self.inline.form(text, message=message, **kw)
+        # Strip any media — classic photo form is forbidden here
+        for k in ("photo", "video", "gif", "file", "audio"):
+            kwargs.pop(k, None)
 
-        rich = kw.pop("rich_message", None) or self._cfg_rich_html(
+        rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
             text, title="⚙️ Hikkari Config"
         )
-        # Force Heroku answer(): rich_message + reply_markup → form with Rich + buttons
+        markup = reply_markup if reply_markup is not None else []
+
+        # 1) form with rich_message (buttons + input work via@)
+        try:
+            res = await self.inline.form(
+                text="⚙️",
+                message=message,
+                rich_message=rich,
+                reply_markup=markup,
+                silent=True,
+                force_me=kwargs.get("force_me", True),
+                always_allow=kwargs.get("always_allow"),
+                disable_security=kwargs.get("disable_security", False),
+            )
+            if res:
+                return res
+        except Exception:
+            _log.exception("cfg form(rich_message) failed")
+
+        # 2) utils.answer path
         try:
             return await _u.answer(
                 message,
                 "⚙️",
                 rich_message=rich,
-                reply_markup=reply_markup if reply_markup is not None else [],
+                reply_markup=markup,
                 silent=True,
-                force_me=kw.get("force_me", True),
-                always_allow=kw.get("always_allow"),
-                disable_security=kw.get("disable_security", False),
             )
         except Exception:
-            logger.exception("cfg rich answer failed, form fallback")
-            try:
-                return await self.inline.form(
-                    "⚙️",
-                    message=message,
-                    rich_message=rich,
-                    reply_markup=reply_markup or [],
-                    silent=True,
-                )
-            except Exception:
-                logger.exception("cfg form rich failed, banner form")
-                kw2 = dict(kwargs)
-                if reply_markup is not None:
-                    kw2["reply_markup"] = reply_markup
-                kw2.setdefault("silent", True)
-                kw2.update(self._cfg_banner_kwargs())
-                return await self.inline.form(text, message=message, **kw2)
+            _log.exception("cfg answer(rich) failed")
+
+        # 3) last resort: classic form WITHOUT photo (HTML caption only)
+        return await self.inline.form(
+            text=text,
+            message=message,
+            reply_markup=markup,
+            silent=True,
+        )
+
 
     def _cfg_banner_kwargs(self) -> dict:
         """Banner for config forms: photo / gif / video by URL or local path."""
