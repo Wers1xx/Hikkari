@@ -130,16 +130,36 @@ class HikkariConfigMod(loader.Module):
             pass
 
         body = body or ""
-        if "<details" in body or "<h2" in body or "<p>" in body:
-            html = banner + body
+        # Keep localized page text (Выбери параметр / Текущие настройки) intact
+        if body.strip():
+            if "<details" in body or "<h2" in body or "<p>" in body:
+                html = banner + body
+            else:
+                chunks = [
+                    c.strip()
+                    for c in body.replace("<br>", "
+")
+                    .replace("<br/>", "
+")
+                    .replace("<br />", "
+")
+                    .replace("
+", "
+")
+                    .split("
+
+")
+                    if c.strip()
+                ]
+                if not chunks:
+                    chunks = [body.strip()]
+                paras = "".join(
+                    "<p>" + ch.replace("
+", "<br/>") + "</p>" for ch in chunks
+                )
+                html = banner + paras
         else:
-            lines = [
-                ln.strip()
-                for ln in body.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").split("\n")
-                if ln.strip()
-            ]
-            paras = "".join(f"<p>{ln}</p>" for ln in lines) or f"<p>{body}</p>"
-            html = f"{banner}<h2>{html_mod.escape(title)}</h2>{paras}"
+            html = banner + f"<h2>{html_mod.escape(title)}</h2>"
         return normalize_rich_html(html)
 
 
@@ -1090,33 +1110,49 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config form; Rich when possible so buttons keep working."""
+        """Edit config form — push full page text (configuring_mod / settings list)."""
         try:
             with contextlib.suppress(Exception):
                 await call.answer()
         except Exception:
             pass
-        if self._cfg_use_rich() and "rich_message" not in kwargs:
-            try:
-                kwargs["rich_message"] = self._cfg_rich_html(
-                    text, title="⚙️ Hikkari Config"
-                )
-            except Exception:
-                pass
 
-        text_clip = self._clip_cfg_text(text, 950)
+        # Never keep a caller/stale rich blob; rebuild from this page's text only
+        kwargs = dict(kwargs)
+        kwargs.pop("rich_message", None)
+
+        text_clip = self._clip_cfg_text(text, 3500)
+
+        # Classic text edit first — shows "Выбери параметр… / Текущие настройки"
         try:
             return await call.edit(
-                text_clip, reply_markup=reply_markup, **kwargs
+                text_clip,
+                reply_markup=reply_markup,
+                **kwargs,
             )
         except Exception:
-            logger.debug("cfg edit failed, hard clip", exc_info=True)
-            with contextlib.suppress(Exception):
+            logger.debug("cfg classic edit failed", exc_info=True)
+
+        rich = None
+        with contextlib.suppress(Exception):
+            rich = self._cfg_rich_html(text or "", title="⚙️ Hikkari Config")
+        if rich:
+            try:
                 return await call.edit(
-                    self._clip_cfg_text(text, 500),
+                    text_clip,
                     reply_markup=reply_markup,
+                    rich_message=rich,
+                    **kwargs,
                 )
-            return False
+            except Exception:
+                logger.debug("cfg rich edit failed", exc_info=True)
+
+        with contextlib.suppress(Exception):
+            return await call.edit(
+                self._clip_cfg_text(text, 500),
+                reply_markup=reply_markup,
+            )
+        return False
 
 
     async def inline__configure_option(
