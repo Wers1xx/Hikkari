@@ -150,36 +150,25 @@ class HikkariConfigMod(loader.Module):
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
         """Config UI only via inline form in the SAME chat (no bot-PM / rich divert)."""
         import logging
-        import contextlib
         _log = logging.getLogger(__name__)
 
         for k in ("photo", "video", "gif", "file", "audio"):
             kwargs.pop(k, None)
 
-        rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
-            text, title="⚙️ Hikkari Config"
-        )
         markup = reply_markup if reply_markup is not None else []
         banner = self._cfg_banner_kwargs()
-
-        # Single path: inline form in command chat (Saved Messages / groups / private)
-        try:
-            form_msg = await self.inline.form(
-                text=text or "⚙️",
-                message=message,
-                rich_message=rich,
-                reply_markup=markup,
-                silent=True,
-                force_me=True,
-                **banner,
+        # Video/gif banners cannot be embedded in rich HTML inline results —
+        # rich_message would win over media and the banner would never show.
+        use_media = bool(banner.get("video") or banner.get("gif") or banner.get("audio"))
+        rich = None
+        if not use_media:
+            rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
+                text, title="⚙️ Hikkari Config"
             )
-            if form_msg:
-                return form_msg
-        except Exception:
-            _log.exception("cfg form failed")
+        else:
+            kwargs.pop("rich_message", None)
 
-        # Last resort: plain form without rich
-        return await self.inline.form(
+        form_kwargs = dict(
             text=text or "⚙️",
             message=message,
             reply_markup=markup,
@@ -187,6 +176,18 @@ class HikkariConfigMod(loader.Module):
             force_me=True,
             **banner,
         )
+        if rich is not None:
+            form_kwargs["rich_message"] = rich
+
+        try:
+            form_msg = await self.inline.form(**form_kwargs)
+            if form_msg:
+                return form_msg
+        except Exception:
+            _log.exception("cfg form failed")
+
+        form_kwargs.pop("rich_message", None)
+        return await self.inline.form(**form_kwargs)
 
 
     def _cfg_banner_kwargs(self) -> dict:
@@ -217,6 +218,7 @@ class HikkariConfigMod(loader.Module):
         return {"photo": url}
 
 
+    @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
         if isinstance(value, str):
             return f"<b><code>{utils.escape_html(value.strip())}</code></b>"
