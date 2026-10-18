@@ -2259,6 +2259,30 @@ class UpdaterMod(loader.Module):
 
         if legacy:
             chat_id, message_id = legacy
+            owner = int(getattr(self, "tg_id", 0) or 0)
+            # Bot-PM messages (chat == owner) must be edited via Bot API, not user client
+            if owner and int(chat_id) == owner:
+                ok = await self._http_bot_edit(chat_id, message_id, text)
+                if not ok:
+                    bot = getattr(getattr(self, "inline", None), "bot", None)
+                    if bot:
+                        with contextlib.suppress(Exception):
+                            await bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text=text,
+                                disable_web_page_preview=True,
+                            )
+                            ok = True
+                if ok and delete_after:
+                    await self._schedule_delete_status(
+                        chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
+                    )
+                if ok:
+                    return True
+                logger.warning("bot-PM status edit failed chat=%s mid=%s", chat_id, message_id)
+                return False
+
             try:
                 await self._client.edit_message(chat_id, message_id, text)
                 if delete_after:
@@ -2268,30 +2292,13 @@ class UpdaterMod(loader.Module):
                 return True
             except Exception as e:
                 logger.warning("client edit status failed: %s", e)
-                bot = getattr(getattr(self, "inline", None), "bot", None)
-                if bot:
-                    with contextlib.suppress(Exception):
-                        await bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            text=text,
-                            disable_web_page_preview=True,
-                        )
-                        if delete_after:
-                            await self._schedule_delete_status(
-                                chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
-                            )
-                        return True
-                # HTTP fallback for bot-owned messages
-                with contextlib.suppress(Exception):
-                    ok = await self._http_bot_edit(chat_id, message_id, text)
-                    if ok and delete_after:
-                        await self._schedule_delete_status(
-                            chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
-                        )
-                    if ok:
-                        return True
-                return False
+                # maybe it was bot-owned after all
+                ok = await self._http_bot_edit(chat_id, message_id, text)
+                if ok and delete_after:
+                    await self._schedule_delete_status(
+                        chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
+                    )
+                return ok
 
         # bot:chat:mid
         if isinstance(ms, str) and ms.startswith("bot:"):
