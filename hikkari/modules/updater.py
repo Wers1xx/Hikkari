@@ -149,8 +149,15 @@ class UpdaterMod(loader.Module):
             if now >= self._git_fetch_backoff_until:
                 if now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL:
                     logger.debug("Fetching changelog from %s", origin.url)
+                    br = version.branch
                     subprocess.run(
-                        ["git", "fetch", "--quiet", "origin"],
+                        [
+                            "git",
+                            "fetch",
+                            "--quiet",
+                            "origin",
+                            f"+refs/heads/{br}:refs/remotes/origin/{br}",
+                        ],
                         cwd=repo.working_dir,
                         timeout=60,
                         capture_output=True,
@@ -189,11 +196,15 @@ class UpdaterMod(loader.Module):
             return ""
         try:
             with git.Repo() as repo:
+                br = version.branch
                 with contextlib.suppress(Exception):
-                    repo.remote("origin").fetch(prune=True)
+                    repo.git.fetch(
+                        "origin",
+                        f"+refs/heads/{br}:refs/remotes/origin/{br}",
+                    )
                 try:
                     return next(
-                        repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                        repo.iter_commits(f"origin/{br}", max_count=1)
                     ).hexsha
                 except Exception:
                     return next(repo.iter_commits("origin/HEAD", max_count=1)).hexsha
@@ -601,10 +612,22 @@ class UpdaterMod(loader.Module):
             try:
                 with Repo(base) as repo:
                     origin = repo.remote("origin")
-                    logger.info("Fetching from %s", origin.url)
-                    origin.fetch(prune=True)
-
                     branch = version.branch
+                    logger.info("Fetching from %s (branch %s)", origin.url, branch)
+                    # Important: many installs only track master in remote.origin.fetch
+                    # Explicitly update origin/{branch} ref so beta/dev updates work
+                    try:
+                        repo.git.fetch(
+                            "origin",
+                            f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+                            prune=True,
+                        )
+                    except Exception:
+                        with contextlib.suppress(Exception):
+                            origin.fetch(prune=True)
+                        with contextlib.suppress(Exception):
+                            repo.git.fetch("origin", branch)
+
                     remote_ref = f"origin/{branch}"
                     # Prefer configured branch; fall back to remote HEAD
                     try:
@@ -700,11 +723,15 @@ class UpdaterMod(loader.Module):
             args = utils.get_args_raw(message)
             current = utils.get_git_hash() or ""
             with git.Repo() as repo:
+                br = version.branch
                 with contextlib.suppress(Exception):
-                    repo.remote("origin").fetch(prune=True)
+                    repo.git.fetch(
+                        "origin",
+                        f"+refs/heads/{br}:refs/remotes/origin/{br}",
+                    )
                 try:
                     upcoming = next(
-                        repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                        repo.iter_commits(f"origin/{br}", max_count=1)
                     ).hexsha
                 except Exception:
                     upcoming = next(repo.iter_commits("origin/HEAD", max_count=1)).hexsha
