@@ -809,30 +809,40 @@ class UpdaterMod(loader.Module):
         if secure_boot:
             self._db.set(loader.__name__, "secure_boot", True)
 
-        # Show restart caption in the SAME place (Heroku-style, no bot-PM spam)
+        # Caption already set by inline_update when _status_target is passed.
+        # Only set caption if restart was invoked directly (.restart).
         caption = self.strings["restarting_caption"].format(
             utils.get_platform_emoji()
             if getattr(self._client, "hikkari_me", None)
             and getattr(self._client.hikkari_me, "premium", False)
             else "Hikkari"
         )
-        try:
-            msg_obj = await utils.answer(msg_obj, caption, skip_rich=True)
-        except Exception:
-            logger.exception("restart caption failed")
-            with contextlib.suppress(Exception):
-                if hasattr(msg_obj, "edit"):
-                    await msg_obj.edit(caption)
-
-        await self.process_restart_message(msg_obj)
+        if _status_target is not None:
+            # Status message already edited in inline_update; just ensure ref is saved
+            self._persist_status_target(_status_target)
+            if not self.get("selfupdatemsg"):
+                await self.process_restart_message(msg_obj)
+        else:
+            try:
+                msg_obj = await utils.answer(msg_obj, caption, skip_rich=True)
+            except Exception:
+                logger.exception("restart caption failed")
+                with contextlib.suppress(Exception):
+                    if hasattr(msg_obj, "edit"):
+                        await msg_obj.edit(caption)
+            await self.process_restart_message(msg_obj)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
         ts = time.time()
         self.set("restart_ts", ts)
         with contextlib.suppress(Exception):
             self._db.set("Updater", "restart_ts", ts)
+            # mirror ref under fixed key
+            ref = self.get("selfupdatemsg")
+            if ref:
+                self._db.set("Updater", "selfupdatemsg", ref)
             self._db.save()
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.4)
 
         handler = logging.getLogger().handlers[0]
         handler.setLevel(logging.CRITICAL)
@@ -1547,11 +1557,21 @@ class UpdaterMod(loader.Module):
                 else "Hikkari"
             )
             await self._edit_update_status(msg_obj, caption, target=target)
-            # Give Telegram time to deliver the edit
-            await asyncio.sleep(0.6)
-            # Persist for post-restart success message
-            self.set("restart_ts", time.time())
+            await asyncio.sleep(0.5)
             self._persist_status_target(target)
+            # Also try to capture from msg_obj after edits (form may have message id now)
+            await self.process_restart_message(msg_obj)
+            # Prefer chat:mid from form unit if available
+            with contextlib.suppress(Exception):
+                form = getattr(msg_obj, "form", None)
+                if isinstance(form, dict) and form.get("uid"):
+                    unit = self.inline._units.get(form["uid"]) or {}
+                    if unit.get("chat") is not None and unit.get("message_id") is not None:
+                        ref = f"{int(unit['chat'])}:{int(unit['message_id'])}"
+                        self.set("selfupdatemsg", ref)
+                        self._db.set("Updater", "selfupdatemsg", ref)
+            self.set("restart_ts", time.time())
+            self._db.set("Updater", "restart_ts", time.time())
             with contextlib.suppress(Exception):
                 self._db.save()
 
@@ -1858,31 +1878,37 @@ class UpdaterMod(loader.Module):
                 self._db.set("Updater", "restart_ts", None)
                 self._db.set("Updater", "selfupdatemsg", None)
 
-        async def _finish_restart_ui():
-            # Wait briefly so network/token files settle
-            for attempt in range(8):
-                ref = self._load_status_ref()
-                if not ref:
-                    await asyncio.sleep(1)
-                    continue
-                try:
-                    await self.update_complete()
-                except Exception:
-                    logger.exception("update_complete attempt %s failed", attempt)
+        # Heroku-style post-boot status: success → (5s) full_success → auto-delete
+        has_ref = (
+            self.get("selfupdatemsg") is not None
+            or self._db.get("Updater", "selfupdatemsg", None) is not None
+            or (hasattr(self, "_load_status_ref") and self._load_status_ref() is not None)
+        )
+        if has_ref or self.get("restart_ts") or self._db.get("Updater", "restart_ts", None):
+            if self.get("selfupdatemsg") is None:
+                with contextlib.suppress(Exception):
+                    self.set(
+                        "selfupdatemsg",
+                        self._db.get("Updater", "selfupdatemsg")
+                        or (self._load_status_ref() if hasattr(self, "_load_status_ref") else None),
+                    )
+            try:
+                await self.update_complete()
+            except Exception:
+                logger.exception("Failed to complete update!")
+
+            async def _full_later():
                 await asyncio.sleep(5)
                 try:
-                    if self._load_status_ref() is not None:
+                    if (
+                        self.get("selfupdatemsg") is not None
+                        or self._db.get("Updater", "selfupdatemsg", None)
+                    ):
                         await self.full_restart_complete()
                 except Exception:
-                    logger.exception("full_restart_complete attempt %s failed", attempt)
-                # if cleared, done
-                if self._load_status_ref() is None:
-                    return
-                await asyncio.sleep(2)
-            logger.warning("restart UI finish gave up; ref=%s", self._load_status_ref())
+                    logger.exception("full_restart_complete failed")
 
-        if self._load_status_ref() is not None or self.get("restart_ts") or self._db.get("Updater", "restart_ts", None):
-            asyncio.ensure_future(_finish_restart_ui())
+            asyncio.ensure_future(_full_later())
 
         if self.get("do_not_create", False):
             pass
@@ -2173,6 +2199,105 @@ class UpdaterMod(loader.Module):
                 logger.debug("inline_message_id status edit failed", exc_info=True)
         return False
 
+
+    async def _edit_status_after_boot(self, ms, text: str, *, delete_after: int | None = None) -> bool:
+        """Heroku-style post-boot edit. chat:mid via user client; imid via bot."""
+        if not ms:
+            return False
+        if getattr(self, "inline", None):
+            with contextlib.suppress(Exception):
+                text = self.inline.sanitise_text(text)
+
+        # chat:mid (user message / via@ form message)
+        legacy = None
+        if isinstance(ms, str) and ":" in ms and not ms.startswith(("imid:", "bot:", "{")):
+            # strip optional msg: prefix
+            raw = ms[4:] if ms.startswith("msg:") else ms
+            parts = raw.split(":")
+            if len(parts) == 2:
+                try:
+                    legacy = (int(parts[0]), int(parts[1]))
+                except ValueError:
+                    legacy = None
+        if legacy is None:
+            with contextlib.suppress(Exception):
+                legacy = self._parse_legacy_update_message_ref(ms)
+
+        if legacy:
+            chat_id, message_id = legacy
+            try:
+                await self._client.edit_message(chat_id, message_id, text)
+                if delete_after:
+                    await self._schedule_delete_status(
+                        chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=False
+                    )
+                return True
+            except Exception as e:
+                logger.warning("client edit status failed: %s", e)
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot:
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=text,
+                            disable_web_page_preview=True,
+                        )
+                        if delete_after:
+                            await self._schedule_delete_status(
+                                chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
+                            )
+                        return True
+                # HTTP fallback for bot-owned messages
+                with contextlib.suppress(Exception):
+                    ok = await self._http_bot_edit(chat_id, message_id, text)
+                    if ok and delete_after:
+                        await self._schedule_delete_status(
+                            chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
+                        )
+                    if ok:
+                        return True
+                return False
+
+        # bot:chat:mid
+        if isinstance(ms, str) and ms.startswith("bot:"):
+            try:
+                _, c, m = ms.split(":", 2)
+                chat_id, message_id = int(c), int(m)
+            except Exception:
+                return False
+            ok = await self._http_bot_edit(chat_id, message_id, text)
+            if not ok:
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot:
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            chat_id=chat_id, message_id=message_id, text=text, disable_web_page_preview=True
+                        )
+                        ok = True
+            if ok and delete_after:
+                await self._schedule_delete_status(
+                    chat_id=chat_id, message_id=message_id, delay=delete_after, via_bot=True
+                )
+            return ok
+
+        # inline_message_id (serialized JSON or imid: prefix)
+        imid = ms[5:] if isinstance(ms, str) and ms.startswith("imid:") else ms
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+        if bot:
+            try:
+                await bot.edit_message_text(
+                    inline_message_id=self._deserialize_inline_message_id(str(imid)),
+                    text=text,
+                    disable_web_page_preview=True,
+                )
+                if delete_after:
+                    await self._schedule_delete_status(ms=str(ms), delay=delete_after)
+                return True
+            except Exception as e:
+                logger.warning("imid status edit failed: %s", e)
+        return False
+
     async def update_complete(self):
         logger.info("Self update successful — editing restart status")
         start = self.get("restart_ts") or self._db.get("Updater", "restart_ts", None)
@@ -2184,21 +2309,20 @@ class UpdaterMod(loader.Module):
             took = "n/a"
 
         msg = self.strings["success"].format(utils.ascii_face(), took)
-        ms = self._load_status_ref()
+        ms = (
+            self.get("selfupdatemsg")
+            or self._db.get("Updater", "selfupdatemsg", None)
+            or (self._load_status_ref() if hasattr(self, "_load_status_ref") else None)
+        )
         if not ms:
-            logger.warning("update_complete: no selfupdatemsg ref found")
+            logger.warning("update_complete: no selfupdatemsg ref")
             return
-        # Keep ref for full_restart_complete
-        ok = await self._edit_restart_status(ms, msg)
+        ok = await self._edit_status_after_boot(ms, msg)
         if not ok:
-            # retry a few times (bot/client may not be fully up)
-            for delay in (2, 4, 6):
+            for delay in (1, 2, 4):
                 await asyncio.sleep(delay)
-                ok = await self._edit_restart_status(ms, msg)
-                if ok:
+                if await self._edit_status_after_boot(ms, msg):
                     break
-            if not ok:
-                logger.warning("update_complete: failed to edit status after retries (%s)", ms)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -2213,7 +2337,11 @@ class UpdaterMod(loader.Module):
         self.set("restart_ts", None)
         with contextlib.suppress(Exception):
             self._db.set("Updater", "restart_ts", None)
-        ms = self._load_status_ref()
+        ms = (
+            self.get("selfupdatemsg")
+            or self._db.get("Updater", "selfupdatemsg", None)
+            or (self._load_status_ref() if hasattr(self, "_load_status_ref") else None)
+        )
 
         # Only REAL register_all failures. modules_count delta is a false
         # positive (update, soft client_ready, etc.) and must not show as error.
@@ -2246,7 +2374,7 @@ class UpdaterMod(loader.Module):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
         # Edit success then auto-delete; clear ref only after successful edit attempt
-        ok = await self._edit_restart_status(ms, msg, delete_after=60)
+        ok = await self._edit_status_after_boot(ms, msg, delete_after=60)
         if not ok:
             for delay in (2, 4):
                 await asyncio.sleep(delay)
