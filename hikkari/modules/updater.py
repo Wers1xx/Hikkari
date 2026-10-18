@@ -432,6 +432,16 @@ class UpdaterMod(loader.Module):
         if not isinstance(message_ref, str):
             return None
 
+        # bot:chat:mid or msg:chat:mid
+        if message_ref.startswith(("bot:", "msg:")):
+            parts = message_ref.split(":")
+            if len(parts) == 3:
+                try:
+                    return int(parts[1]), int(parts[2])
+                except ValueError:
+                    return None
+            return None
+
         parts = message_ref.split(":")
         if len(parts) != 2:
             return None
@@ -805,7 +815,21 @@ class UpdaterMod(loader.Module):
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
-            await self._client.edit_message(chat_id, message_id, msg)
+            via_bot = isinstance(ms, str) and ms.startswith("bot:")
+            if via_bot or chat_id == int(getattr(self, "tg_id", 0) or 0):
+                # bot-PM status message
+                try:
+                    await self.inline.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=self.inline.sanitise_text(msg),
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await self._client.edit_message(chat_id, message_id, msg)
+            else:
+                await self._client.edit_message(chat_id, message_id, msg)
             return
 
         await self.inline.bot.edit_message_text(
@@ -847,9 +871,27 @@ class UpdaterMod(loader.Module):
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
-            await self._client.edit_message(chat_id, message_id, msg)
-            await asyncio.sleep(60)
-            await self._client.delete_messages(chat_id, message_id)
+            via_bot = isinstance(ms, str) and ms.startswith("bot:")
+            if via_bot or chat_id == int(getattr(self, "tg_id", 0) or 0):
+                try:
+                    await self.inline.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=self.inline.sanitise_text(msg),
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await self._client.edit_message(chat_id, message_id, msg)
+                await asyncio.sleep(60)
+                with contextlib.suppress(Exception):
+                    await self.inline.bot.delete_message(chat_id, message_id)
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(chat_id, message_id)
+            else:
+                await self._client.edit_message(chat_id, message_id, msg)
+                await asyncio.sleep(60)
+                await self._client.delete_messages(chat_id, message_id)
             return
 
         await self.inline.bot.edit_message_text(
