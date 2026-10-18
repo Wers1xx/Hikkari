@@ -148,8 +148,7 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Open config UI with banner from the first message (same as after Back)."""
-        from .. import utils as _u
+        """Config UI only via inline form in the SAME chat (no bot-PM / rich divert)."""
         import logging
         import contextlib
         _log = logging.getLogger(__name__)
@@ -157,114 +156,31 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio"):
             kwargs.pop(k, None)
 
-        # Always full Rich HTML with <figure> banner (edit path already had it)
         rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
             text, title="⚙️ Hikkari Config"
         )
         markup = reply_markup if reply_markup is not None else []
-
-        # 1) Bot API sendRichMessage — banner + tg-buttons, no via@
-        try:
-            from ..utils.rich_api import (
-                markup_to_tg_rows,
-                tg_button,
-                tg_button_row,
-                try_send_rich,
-                to_rich_compatible,
-            )
-            from .._internal import normalize_rich_html
-
-            rows_html = ""
-            if markup:
-                mapped = []
-                for row in markup if isinstance(markup, list) else []:
-                    if not isinstance(row, (list, tuple)):
-                        row = [row]
-                    new_row = []
-                    for btn in row:
-                        if not isinstance(btn, dict):
-                            continue
-                        t = str(btn.get("text") or "•")
-                        cb = btn.get("callback")
-                        action = btn.get("action")
-                        data = None
-                        style = btn.get("style")
-                        if action == "close":
-                            data = "cfg|close"
-                            style = "danger"
-                        elif cb is not None and "global_config" in str(
-                            getattr(cb, "__name__", cb)
-                        ):
-                            kw = btn.get("kwargs") or {}
-                            ot = kw.get("obj_type", None)
-                            if ot is True:
-                                data = "cfg|builtin"
-                            elif ot is False:
-                                data = "cfg|external"
-                            elif ot == "library":
-                                data = "cfg|library"
-                            style = style or "primary"
-                        if data:
-                            new_row.append(
-                                tg_button(
-                                    t, type="callback_data", data=data, style=style
-                                )
-                            )
-                        elif btn.get("url"):
-                            new_row.append(
-                                tg_button(
-                                    t, type="url", url=str(btn["url"]), style=style
-                                )
-                            )
-                    if new_row:
-                        mapped.append(tg_button_row(new_row, align="center"))
-                rows_html = "".join(mapped) if mapped else markup_to_tg_rows(markup)
-
-            html = normalize_rich_html(to_rich_compatible(rich + rows_html))
-            chat = None
-            if hasattr(message, "peer_id") or hasattr(message, "chat_id"):
-                chat = _u.get_chat_id(message)
-            elif isinstance(message, int):
-                chat = message
-
-            if chat is not None and await try_send_rich(self._client, chat, html):
-                with contextlib.suppress(Exception):
-                    if getattr(message, "out", False):
-                        await message.delete()
-                return True
-        except Exception:
-            _log.exception("cfg try_send_rich failed")
-
-        # 2) Inline form in the SAME chat as the command (incl. Saved Messages)
         banner = self._cfg_banner_kwargs()
+
+        # Single path: inline form in command chat (Saved Messages / groups / private)
         try:
             form_msg = await self.inline.form(
                 text=text or "⚙️",
                 message=message,
                 rich_message=rich,
                 reply_markup=markup,
-                silent=True,  # stay in same chat (Saved Messages / groups)
-                force_me=kwargs.get("force_me", True),
+                silent=True,
+                force_me=True,
                 **banner,
             )
             if form_msg:
-                # Keep banner via URL on edit (no local download)
-                async def _banner_edit():
-                    with contextlib.suppress(Exception):
-                        await form_msg.edit(
-                            text or "⚙️",
-                            reply_markup=markup,
-                            rich_message=rich,
-                            **banner,
-                        )
-                import asyncio as _aio
-                _aio.ensure_future(_banner_edit())
                 return form_msg
         except Exception:
-            _log.exception("cfg form rich failed")
+            _log.exception("cfg form failed")
 
+        # Last resort: plain form without rich
         return await self.inline.form(
-            text=text,
+            text=text or "⚙️",
             message=message,
             reply_markup=markup,
             silent=True,

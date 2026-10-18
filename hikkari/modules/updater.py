@@ -769,33 +769,24 @@ class UpdaterMod(loader.Module):
         return None
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
-        # Prefer already stored bot: ref from update_call
-        existing = self.get("selfupdatemsg")
-        if isinstance(existing, str) and existing.startswith("bot:"):
-            return
+        """Store chat:mid or inline_message_id for post-boot edit (Heroku-style)."""
         inline_message_id = getattr(msg_obj, "inline_message_id", None)
         if inline_message_id is not None:
-            self.set(
-                "selfupdatemsg",
-                self._serialize_inline_message_id(inline_message_id),
-            )
+            ref = self._serialize_inline_message_id(inline_message_id)
+            self.set("selfupdatemsg", ref)
+            with contextlib.suppress(Exception):
+                self._db.set("Updater", "selfupdatemsg", ref)
             return
         chat_id = getattr(msg_obj, "chat_id", None)
         if chat_id is None:
             with contextlib.suppress(Exception):
                 chat_id = utils.get_chat_id(msg_obj)
-        msg_id = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
-        is_bot_call = type(msg_obj).__name__ in (
-            "BotInlineCall",
-            "InlineCall",
-            "BotInlineMessage",
-            "ChosenInlineCall",
-        )
-        if is_bot_call and chat_id is not None and msg_id is not None:
-            self.set("selfupdatemsg", f"bot:{int(chat_id)}:{int(msg_id)}")
-            return
+        msg_id = getattr(msg_obj, "id", None) or getattr(msg_obj, "message_id", None)
         if chat_id is not None and msg_id is not None:
-            self.set("selfupdatemsg", f"{int(chat_id)}:{int(msg_id)}")
+            ref = f"{int(chat_id)}:{int(msg_id)}"
+            self.set("selfupdatemsg", ref)
+            with contextlib.suppress(Exception):
+                self._db.set("Updater", "selfupdatemsg", ref)
 
     async def restart_common(
         self,
@@ -818,64 +809,30 @@ class UpdaterMod(loader.Module):
         if secure_boot:
             self._db.set(loader.__name__, "secure_boot", True)
 
-        # Always show restart caption on the SAME status message (chat form or bot PM)
+        # Show restart caption in the SAME place (Heroku-style, no bot-PM spam)
         caption = self.strings["restarting_caption"].format(
             utils.get_platform_emoji()
             if getattr(self._client, "hikkari_me", None)
             and getattr(self._client.hikkari_me, "premium", False)
             else "Hikkari"
         )
-        target = _status_target or self._capture_status_target(msg_obj)
         try:
-            await self._edit_update_status(msg_obj, caption, target=target)
+            msg_obj = await utils.answer(msg_obj, caption, skip_rich=True)
         except Exception:
-            logger.exception("restart caption edit failed")
+            logger.exception("restart caption failed")
+            with contextlib.suppress(Exception):
+                if hasattr(msg_obj, "edit"):
+                    await msg_obj.edit(caption)
 
-        # ALWAYS also pin a bot-PM status message we can edit after boot (HTTP)
-        owner = int(self.tg_id)
-        bot_mid = None
-        # Prefer editing existing bot: ref
-        ref_now = None
-        with contextlib.suppress(Exception):
-            if target.get("via_bot") and target.get("chat_id") and target.get("message_id"):
-                if int(target["chat_id"]) == owner:
-                    ok = await self._http_bot_edit(owner, int(target["message_id"]), caption)
-                    if ok:
-                        bot_mid = int(target["message_id"])
-        if bot_mid is None:
-            # try load previous
-            old_ref = self._load_status_ref()
-            if isinstance(old_ref, str) and old_ref.startswith("bot:"):
-                with contextlib.suppress(Exception):
-                    _, c, m = old_ref.split(":", 2)
-                    if int(c) == owner:
-                        ok = await self._http_bot_edit(owner, int(m), caption)
-                        if ok:
-                            bot_mid = int(m)
-        if bot_mid is None:
-            bot_mid = await self._http_bot_send(owner, caption)
-        if bot_mid is not None:
-            target = {
-                "chat_id": owner,
-                "message_id": int(bot_mid),
-                "via_bot": True,
-                "inline_message_id": None,
-            }
-        self._persist_status_target(target)
-        await asyncio.sleep(0.4)
+        await self.process_restart_message(msg_obj)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
         ts = time.time()
         self.set("restart_ts", ts)
         with contextlib.suppress(Exception):
             self._db.set("Updater", "restart_ts", ts)
-            self._db.set("UpdaterMod", "restart_ts", ts)
-        with contextlib.suppress(Exception):
             self._db.save()
-        with contextlib.suppress(Exception):
-            import time as _t
-            _t.sleep(0.05)
-            self._db.save()
+        await asyncio.sleep(0.3)
 
         handler = logging.getLogger().handlers[0]
         handler.setLevel(logging.CRITICAL)
@@ -1892,7 +1849,15 @@ class UpdaterMod(loader.Module):
         ]
         self._markup = self._update_markup_rows
 
-        # Always complete restart UI after boot (DB / sidecar / multi-path)
+        # Ignore restart state older than 15 minutes (dead process / stale timer)
+        with contextlib.suppress(Exception):
+            ts = self.get("restart_ts") or self._db.get("Updater", "restart_ts", None)
+            if ts is not None and (time.time() - float(ts)) > 900:
+                self.set("restart_ts", None)
+                self.set("selfupdatemsg", None)
+                self._db.set("Updater", "restart_ts", None)
+                self._db.set("Updater", "selfupdatemsg", None)
+
         async def _finish_restart_ui():
             # Wait briefly so network/token files settle
             for attempt in range(8):
@@ -2213,6 +2178,8 @@ class UpdaterMod(loader.Module):
         start = self.get("restart_ts") or self._db.get("Updater", "restart_ts", None)
         try:
             took = round(time.time() - float(start))
+            if took < 0 or took > 600:
+                took = "n/a"
         except Exception:
             took = "n/a"
 
@@ -2237,7 +2204,9 @@ class UpdaterMod(loader.Module):
         start = self.get("restart_ts")
 
         try:
-            took = round(time.time() - start)
+            took = round(time.time() - float(start))
+            if took < 0 or took > 600:
+                took = "n/a"
         except Exception:
             took = "n/a"
 
