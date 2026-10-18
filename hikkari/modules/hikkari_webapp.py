@@ -33,14 +33,14 @@ class HikkariWebAppMod(loader.Module):
             "Полный доступ — только owner / co-owner."
         ),
         "btn_open": "⤵️ Открыть",
-        "btn_cancel": "<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Отмена",
+        "btn_cancel": "🚫 Отмена",
         "cancelled": "<emoji document_id=5872829476143894491>🚫</emoji> Отменено",
-        "denied": "<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Нет доступа к управлению WebApp.",
-        "stopped": "<tg-emoji emoji-id="5980953710157632545">❌</tg-emoji> WebApp остановлен",
+        "denied": "<tg-emoji emoji-id='5240241223632954241'>🚫</tg-emoji> Нет доступа к управлению WebApp.",
+        "stopped": "<tg-emoji emoji-id='5980953710157632545'>❌</tg-emoji> WebApp остановлен",
         "not_running": "WebApp не запущен",
         "error": "WebApp error: <code>{}</code>",
         "info": (
-            "<tg-emoji emoji-id="5283176512747507510">✨</tg-emoji> <b>WebApp Hikkari</b>\n"
+            "<tg-emoji emoji-id='5283176512747507510'>✨</tg-emoji> <b>WebApp Hikkari</b>\n"
             "• В <b>Избранном</b> и <b>ЛС с инлайн-ботом</b> — сразу ссылка\n"
             "• В чатах и ЛС с людьми — сначала подтверждение\n"
             "• Полный доступ: owner / co-owner\n"
