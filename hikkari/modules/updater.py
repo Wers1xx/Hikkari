@@ -189,9 +189,14 @@ class UpdaterMod(loader.Module):
             return ""
         try:
             with git.Repo() as repo:
-                return next(
-                    repo.iter_commits(f"origin/{version.branch}", max_count=1)
-                ).hexsha
+                with contextlib.suppress(Exception):
+                    repo.remote("origin").fetch(prune=True)
+                try:
+                    return next(
+                        repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                    ).hexsha
+                except Exception:
+                    return next(repo.iter_commits("origin/HEAD", max_count=1)).hexsha
         except Exception:
             return ""
 
@@ -451,39 +456,70 @@ class UpdaterMod(loader.Module):
         except ValueError:
             return None
 
+    @staticmethod
+    def _valid_telegram_message_id(mid) -> int | None:
+        """Telegram message ids are int32; reject imid garbage."""
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            return None
+        if -2147483648 <= mid <= 2147483647:
+            return mid
+        return None
+
     async def process_restart_message(self, msg_obj: InlineCall | Message):
-        """Save ref for post-boot edit. Prefer chat:mid / bot:chat:mid over imid."""
-        mid = getattr(msg_obj, "id", None) or getattr(msg_obj, "message_id", None)
-        chat_id = None
-        with contextlib.suppress(Exception):
-            chat_id = utils.get_chat_id(msg_obj)
-        if chat_id is None:
-            chat_id = getattr(msg_obj, "chat_id", None)
+        """Save ref for post-boot edit. Prefer real imid, then chat:mid (int32)."""
+        # Nested message from form/callback
+        nested = getattr(msg_obj, "message", None)
 
-        # Bot PM / callback: always bot:owner:mid when we have message id
-        owner = int(getattr(self, "tg_id", 0) or 0)
-        name = type(msg_obj).__name__
-        is_bot_side = name in ("BotInlineCall", "InlineCall", "BotInlineMessage") or (
-            chat_id is not None and owner and int(chat_id) == owner
-        )
-        if mid is not None and is_bot_side and owner:
-            self.set("selfupdatemsg", f"bot:{owner}:{int(mid)}")
-            return
+        imid = getattr(msg_obj, "inline_message_id", None)
+        if imid is None and nested is not None:
+            imid = getattr(nested, "inline_message_id", None)
 
-        inline_message_id = getattr(msg_obj, "inline_message_id", None)
-        if inline_message_id is not None:
-            # only store real imid objects/strings, not our bot: refs
+        if imid is not None:
             try:
-                self.set(
-                    "selfupdatemsg",
-                    self._serialize_inline_message_id(inline_message_id),
-                )
-                return
+                s = self._serialize_inline_message_id(imid)
+                # reject our own bot:/msg: markers if somehow present
+                if isinstance(s, str) and not s.startswith(("bot:", "msg:")):
+                    self.set("selfupdatemsg", s)
+                    return
             except Exception:
                 pass
 
-        if chat_id is not None and mid is not None:
-            self.set("selfupdatemsg", f"{int(chat_id)}:{int(mid)}")
+        mid = self._valid_telegram_message_id(
+            getattr(msg_obj, "message_id", None)
+            or getattr(msg_obj, "id", None)
+            or (getattr(nested, "id", None) if nested is not None else None)
+            or (getattr(nested, "message_id", None) if nested is not None else None)
+        )
+        chat_id = None
+        with contextlib.suppress(Exception):
+            chat_id = utils.get_chat_id(msg_obj)
+        if chat_id is None and nested is not None:
+            with contextlib.suppress(Exception):
+                chat_id = utils.get_chat_id(nested)
+        if chat_id is None:
+            chat_id = getattr(msg_obj, "chat_id", None)
+
+        if mid is not None and chat_id is not None:
+            owner = int(getattr(self, "tg_id", 0) or 0)
+            name = type(msg_obj).__name__
+            via_bot = name in (
+                "BotInlineCall",
+                "InlineCall",
+                "BotInlineMessage",
+                "ChosenInlineCall",
+            ) or (owner and int(chat_id) == owner)
+            if via_bot:
+                self.set("selfupdatemsg", f"bot:{owner or int(chat_id)}:{mid}")
+            else:
+                self.set("selfupdatemsg", f"{int(chat_id)}:{mid}")
+            return
+
+        logger.warning(
+            "process_restart_message: could not resolve status target (%s)",
+            type(msg_obj).__name__,
+        )
 
     async def restart_common(
         self,
@@ -532,34 +568,66 @@ class UpdaterMod(loader.Module):
         restart()
 
     async def download_common(self):
+        """Fetch origin and hard-reset to origin/{branch}. Returns True if requirements changed."""
         def _sync():
+            base = os.path.dirname(utils.get_base_dir())
             try:
-                with Repo(os.path.dirname(utils.get_base_dir())) as repo:
+                with Repo(base) as repo:
                     origin = repo.remote("origin")
-                    logger.debug("Fetching updates from %s", origin.url)
-                    r = origin.pull()
-                    new_commit = repo.head.commit
-                    for info in r:
-                        if info.old_commit:
-                            for d in new_commit.diff(info.old_commit):
-                                if d.b_path == "requirements.txt":
-                                    return True
-                return False
+                    logger.info("Fetching from %s", origin.url)
+                    origin.fetch(prune=True)
+
+                    branch = version.branch
+                    remote_ref = f"origin/{branch}"
+                    # Prefer configured branch; fall back to remote HEAD
+                    try:
+                        target = repo.commit(remote_ref)
+                    except Exception:
+                        remote_ref = "origin/HEAD"
+                        target = repo.commit(remote_ref)
+                        logger.warning("Branch %s missing on remote, using %s", branch, remote_ref)
+
+                    old = repo.head.commit.hexsha
+                    repo.git.reset("--hard", target.hexsha)
+                    # keep branch pointer updated
+                    with contextlib.suppress(Exception):
+                        if branch in repo.heads:
+                            repo.heads[branch].set_commit(target.hexsha)
+                            if not repo.head.is_detached:
+                                repo.heads[branch].checkout(force=True)
+                    new = repo.head.commit.hexsha
+                    logger.info("Updated %s -> %s via %s", old[:8], new[:8], remote_ref)
+
+                    if old == new:
+                        return False
+                    try:
+                        for d in repo.head.commit.diff(old):
+                            if d.b_path == "requirements.txt" or d.a_path == "requirements.txt":
+                                return True
+                    except Exception:
+                        pass
+                    return False
             except git.exc.InvalidGitRepositoryError:
-                repo = Repo.init(os.path.dirname(utils.get_base_dir()))
+                repo = Repo.init(base)
                 with repo:
                     origin = repo.create_remote("origin", self.config["GIT_ORIGIN_URL"])
-                    logger.debug("Fetching initial updates from %s", origin.url)
+                    logger.info("Initial fetch from %s", origin.url)
                     origin.fetch()
-                    repo.create_head("master", origin.refs.master)
-                    repo.heads.master.set_tracking_branch(origin.refs.master)
-                    repo.heads.master.checkout(True)
+                    # checkout default
+                    with contextlib.suppress(Exception):
+                        repo.create_head("master", origin.refs.master)
+                        repo.heads.master.set_tracking_branch(origin.refs.master)
+                        repo.heads.master.checkout(True)
                 return False
+            except Exception:
+                logger.exception("download_common failed")
+                raise
 
         return await asyncio.wait_for(
             asyncio.to_thread(_sync),
-            timeout=120,
+            timeout=180,
         )
+
 
     @staticmethod
     def req_common():
@@ -598,9 +666,14 @@ class UpdaterMod(loader.Module):
             args = utils.get_args_raw(message)
             current = utils.get_git_hash() or ""
             with git.Repo() as repo:
-                upcoming = next(
-                    repo.iter_commits(f"origin/{version.branch}", max_count=1)
-                ).hexsha
+                with contextlib.suppress(Exception):
+                    repo.remote("origin").fetch(prune=True)
+                try:
+                    upcoming = next(
+                        repo.iter_commits(f"origin/{version.branch}", max_count=1)
+                    ).hexsha
+                except Exception:
+                    upcoming = next(repo.iter_commits("origin/HEAD", max_count=1)).hexsha
             if (
                 "-f" not in args
                 and self.inline.init_complete
@@ -838,6 +911,9 @@ class UpdaterMod(loader.Module):
         legacy = self._parse_legacy_update_message_ref(ms)
         if legacy:
             chat_id, message_id = legacy
+            if self._valid_telegram_message_id(message_id) is None:
+                logger.warning("dropping status ref with non-int32 mid: %r", ms)
+                return False
             via_bot = isinstance(ms, str) and (
                 ms.startswith("bot:") or int(chat_id) == int(getattr(self, "tg_id", 0) or 0)
             )
