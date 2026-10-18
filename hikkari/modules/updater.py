@@ -610,8 +610,40 @@ class UpdaterMod(loader.Module):
         except ValueError:
             return None
 
+    def _store_status_delete_target(self, chat_id, message_id) -> None:
+        try:
+            chat_id = int(chat_id)
+            message_id = int(message_id)
+        except (TypeError, ValueError):
+            return
+        if not (-2147483648 <= message_id <= 2147483647):
+            return
+        self.set("selfupdate_chat", chat_id)
+        self.set("selfupdate_mid", message_id)
+        with contextlib.suppress(Exception):
+            self.db.set("Updater", "selfupdate_chat", chat_id)
+            self.db.set("Updater", "selfupdate_mid", message_id)
+
+    def _load_status_delete_target(self) -> tuple[int | None, int | None]:
+        chat_id = self.get("selfupdate_chat")
+        message_id = self.get("selfupdate_mid")
+        if chat_id is None or message_id is None:
+            with contextlib.suppress(Exception):
+                chat_id = self.db.get("Updater", "selfupdate_chat")
+                message_id = self.db.get("Updater", "selfupdate_mid")
+        try:
+            return int(chat_id), int(message_id)
+        except (TypeError, ValueError):
+            return None, None
+
+    def _clear_status_delete_target(self) -> None:
+        self.set("selfupdate_chat", None)
+        self.set("selfupdate_mid", None)
+        with contextlib.suppress(Exception):
+            self.db.set("Updater", "selfupdate_chat", None)
+            self.db.set("Updater", "selfupdate_mid", None)
+
     async def process_restart_message(self, msg_obj: InlineCall | Message):
-        """Remember which message to edit after restart (inline form first)."""
         imid = getattr(msg_obj, "inline_message_id", None)
         unit_msg = None
         form = getattr(msg_obj, "form", None)
@@ -623,17 +655,12 @@ class UpdaterMod(loader.Module):
             if imid is None and unit_msg is not None:
                 imid = getattr(unit_msg, "inline_message_id", None)
 
-        # Keep chat message id for deletion after full load (via forms still live in chat)
         target = unit_msg if unit_msg is not None else msg_obj
         with contextlib.suppress(Exception):
             mid = getattr(target, "id", None) or getattr(target, "message_id", None)
             chat_id = utils.get_chat_id(target) if mid is not None else None
             if mid is not None and chat_id is not None:
-                self.set("selfupdate_chat", int(chat_id))
-                self.set("selfupdate_mid", int(mid))
-            else:
-                self.set("selfupdate_chat", None)
-                self.set("selfupdate_mid", None)
+                self._store_status_delete_target(chat_id, mid)
 
         if imid is not None:
             with contextlib.suppress(Exception):
@@ -674,6 +701,11 @@ class UpdaterMod(loader.Module):
         )
 
         await self.process_restart_message(msg_obj)
+        # answer() result may carry a concrete chat message id
+        with contextlib.suppress(Exception):
+            mid = getattr(msg_obj, "id", None) or getattr(msg_obj, "message_id", None)
+            if mid is not None and -2147483648 <= int(mid) <= 2147483647:
+                self._store_status_delete_target(utils.get_chat_id(msg_obj), mid)
 
         self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
@@ -1538,22 +1570,50 @@ class UpdaterMod(loader.Module):
         except Exception:
             logger.warning("inline full_restart edit failed", exc_info=True)
 
-        self.set("selfupdatemsg", None)
-
-        chat_id = self.get("selfupdate_chat")
-        message_id = self.get("selfupdate_mid")
-        self.set("selfupdate_chat", None)
-        self.set("selfupdate_mid", None)
-
-        async def _delete_status_later():
-            await asyncio.sleep(60)
-            if chat_id is not None and message_id is not None:
-                with contextlib.suppress(Exception):
-                    await self._client.delete_messages(int(chat_id), int(message_id))
+        chat_id, message_id = self._load_status_delete_target()
+        if not edited and chat_id is not None and message_id is not None:
+            try:
+                await self._client.edit_message(chat_id, message_id, msg)
+                edited = True
+            except Exception:
                 bot = getattr(getattr(self, "inline", None), "bot", None)
                 if bot is not None:
                     with contextlib.suppress(Exception):
-                        await bot.delete_message(int(chat_id), int(message_id))
+                        await bot.edit_message_text(
+                            text=self.inline.sanitise_text(msg),
+                            chat_id=int(chat_id),
+                            message_id=int(message_id),
+                            disable_web_page_preview=True,
+                        )
+                        edited = True
+
+        self.set("selfupdatemsg", None)
+
+        async def _delete_status_later(
+            chat_id=chat_id,
+            message_id=message_id,
+            imid_ref=str(ms) if ms is not None else None,
+        ):
+            await asyncio.sleep(45)
+            # 1) user client delete (via@ messages are owned by the user)
+            if chat_id is not None and message_id is not None:
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(int(chat_id), [int(message_id)])
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(int(chat_id), int(message_id))
+            # 2) bot API delete
+            bot = getattr(getattr(self, "inline", None), "bot", None)
+            if bot is not None and chat_id is not None and message_id is not None:
+                with contextlib.suppress(Exception):
+                    await bot.delete_message(int(chat_id), int(message_id))
+            # 3) last resort: collapse inline text
+            if imid_ref and bot is not None:
+                with contextlib.suppress(Exception):
+                    await bot.edit_message_text(
+                        inline_message_id=self._deserialize_inline_message_id(imid_ref),
+                        text=".",
+                    )
+            self._clear_status_delete_target()
 
         asyncio.ensure_future(_delete_status_later())
 
