@@ -158,25 +158,22 @@ class HikkariConfigMod(loader.Module):
 
         markup = reply_markup if reply_markup is not None else []
         banner = self._cfg_banner_kwargs()
-        # Video/gif as media (no local download — URL only). Rich HTML cannot
-        # embed external video, so skip rich when media banner is present.
-        use_media = bool(
-            banner.get("video") or banner.get("gif") or banner.get("photo") or banner.get("audio")
+        # Always build rich body so text never disappears.
+        rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
+            text, title="⚙️ Hikkari Config"
         )
-        rich = kwargs.pop("rich_message", None)
-        if not use_media:
-            rich = rich or self._cfg_rich_html(text, title="⚙️ Hikkari Config")
-
+        # Prefer text+rich. Optional photo only if TG can fetch it (trusted host).
         form_kwargs = dict(
             text=text or "⚙️",
             message=message,
             reply_markup=markup,
             silent=True,
             force_me=True,
-            **banner,
+            rich_message=rich,
         )
-        if rich is not None and not use_media:
-            form_kwargs["rich_message"] = rich
+        # Do not pass photo together with rich — media caption path drops body text
+        # Photo-only without rich if explicitly photo banner and no need for rich
+        # Keep rich always so config pages keep full text.
 
         try:
             form_msg = await self.inline.form(**form_kwargs)
@@ -194,7 +191,12 @@ class HikkariConfigMod(loader.Module):
 
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner from URL only — no download, no RAM. TG fetches by link."""
+        """Banner media for forms.
+
+        Video URLs almost always fail TG WebpageCurl on SendInlineBotResult —
+        never attach them (value still stored in config). Photos only from
+        hosts Telegram can reliably fetch; otherwise empty → text+rich form.
+        """
         from urllib.parse import urlparse
 
         raw = None
@@ -209,16 +211,25 @@ class HikkariConfigMod(loader.Module):
         url = str(raw).strip()
         low = url.lower()
         path = (urlparse(url).path or "").lower()
+        host = (urlparse(url).hostname or "").lower()
 
-        # Prefer explicit media keys so form/inline uses remote URL (no local file)
+        # Video: never attach to inline form (curl fails → form dies, text lost)
         if any(x in low or path.endswith(x) for x in (".mp4", ".mov", ".webm", "mime=video")):
-            return {"video": url}
+            return {}
         if any(x in low or path.endswith(x) for x in (".gif", ".mp4.gif", "format=gif")):
-            return {"gif": url}
-        if any(x in low or path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            return {}
+
+        # Photos: only trusted hosts (TG servers can fetch these)
+        trusted = (
+            host.endswith("github.com")
+            or host.endswith("githubusercontent.com")
+            or host.endswith("telegram.org")
+            or host.endswith("telesco.pe")
+            or host.endswith("cdn-telegram.org")
+        )
+        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")) and trusted:
             return {"photo": url}
-        # Unknown — try photo URL (preview); if TG rejects, form still shows text
-        return {"photo": url}
+        return {}
 
 
     @staticmethod

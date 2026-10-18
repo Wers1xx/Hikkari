@@ -28,19 +28,19 @@ class HikkariWebAppMod(loader.Module):
         "name": "HikkariWebApp",
         "link": '<a href="{url}">WebApp Hikkari</a>',
         "confirm": (
-            "<emoji document_id=5283176512747507510>✨</emoji> <b>Открыть WebApp Hikkari?</b>\n\n"
+            "<tg-emoji emoji-id=\"5283176512747507510\">✨</tg-emoji> <b>Открыть WebApp Hikkari?</b>\n\n"
             "Подтверди, чтобы получить ссылку.\n"
             "Полный доступ — только owner / co-owner."
         ),
-        "btn_open": "<emoji document_id=5256182535917940722>⤵️</emoji> Открыть",
-        "btn_cancel": "<emoji document_id=5240241223632954241>🚫</emoji> Отмена",
+        "btn_open": "⤵️ Открыть",
+        "btn_cancel": "<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Отмена",
         "cancelled": "<emoji document_id=5872829476143894491>🚫</emoji> Отменено",
-        "denied": "<emoji document_id=5240241223632954241>🚫</emoji> Нет доступа к управлению WebApp.",
-        "stopped": "<emoji document_id=5980953710157632545>❌</emoji> WebApp остановлен",
+        "denied": "<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Нет доступа к управлению WebApp.",
+        "stopped": "<tg-emoji emoji-id="5980953710157632545">❌</tg-emoji> WebApp остановлен",
         "not_running": "WebApp не запущен",
         "error": "WebApp error: <code>{}</code>",
         "info": (
-            "<emoji document_id=5283176512747507510>✨</emoji> <b>WebApp Hikkari</b>\n"
+            "<tg-emoji emoji-id="5283176512747507510">✨</tg-emoji> <b>WebApp Hikkari</b>\n"
             "• В <b>Избранном</b> и <b>ЛС с инлайн-ботом</b> — сразу ссылка\n"
             "• В чатах и ЛС с людьми — сначала подтверждение\n"
             "• Полный доступ: owner / co-owner\n"
@@ -126,17 +126,41 @@ class HikkariWebAppMod(loader.Module):
             return int(s.getsockname()[1])
 
     def _public_host(self) -> str:
+        import os
+        from pathlib import Path as _P
+
+        # Explicit override for Docker / reverse-proxy setups
+        env_host = (os.environ.get("WEBAPP_PUBLIC_HOST") or "").strip()
+        if env_host:
+            return env_host
+
         host = self.config["host"]
-        if host in {"0.0.0.0", "::"}:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                ip = s.getsockname()[0]
-                s.close()
-                return ip
-            except Exception:
+        if host not in {"0.0.0.0", "::"}:
+            return host
+
+        # Docker bridge IP (172.17.x) is not reachable from the user's browser
+        in_docker = _P("/.dockerenv").exists()
+        if in_docker:
+            # Prefer host gateway if exposed; else loopback (needs -p publish)
+            for candidate in (
+                os.environ.get("WEBAPP_HOST_IP"),
+                "host.docker.internal",
+                "127.0.0.1",
+            ):
+                if candidate:
+                    return candidate
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            # Still hide pure docker bridge from the link if it looks like one
+            if ip.startswith("172.17.") or ip.startswith("172.18."):
                 return "127.0.0.1"
-        return host
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     def _url(self, *, admin: bool = True) -> str:
         tok = self._web_token if admin else self._web_view_token

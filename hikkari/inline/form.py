@@ -450,6 +450,14 @@ class Form(InlineUnit):
                 del self._units[unit_id]
             return False
         except Exception as e:
+            ename = type(e).__name__
+            # Media URL Telegram cannot fetch — drop media flags so next form works
+            if "WebpageCurl" in ename or "WebpageCurl" in str(e):
+                logger.warning(
+                    "form media URL rejected by Telegram (WebpageCurlFailed); "
+                    "retry as text-only is not possible for this query — "
+                    "open config again without external video banner"
+                )
             logger.exception("Can't send form")
 
             with contextlib.suppress(Exception):
