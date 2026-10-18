@@ -615,7 +615,14 @@ class UpdaterMod(loader.Module):
                         logger.warning("Branch %s missing on remote, using %s", branch, remote_ref)
 
                     old = repo.head.commit.hexsha
+                    # Discard ALL local modifications so update cannot fail on dirty tree
+                    with contextlib.suppress(Exception):
+                        repo.git.reset("--hard", "HEAD")
+                    with contextlib.suppress(Exception):
+                        repo.git.clean("-fd")
                     repo.git.reset("--hard", target.hexsha)
+                    with contextlib.suppress(Exception):
+                        repo.git.clean("-fd")
                     # keep branch pointer updated
                     with contextlib.suppress(Exception):
                         if branch in repo.heads:
