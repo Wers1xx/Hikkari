@@ -496,7 +496,6 @@ class TestMod(loader.Module):
                 )
                 if btn_html:
                     html = html + "\n" + btn_html
-                # Prefer native Rich like .info (no via@)
                 try:
                     await utils.answer_with_media_fallback(
                         message, rich_message=html

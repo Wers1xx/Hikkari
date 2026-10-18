@@ -685,7 +685,6 @@ async def answer(
                 return
 
             reply_markup = message.client.loader.inline._normalize_markup(reply_markup)
-            # Prefer silent form: avoid <emoji document_id=5283176512747507510>✨</emoji> "opening..." hang; delete cmd after click
             kwargs.setdefault("silent", True)
             form_kw = dict(kwargs)
             # Heroku 2.2: if response is Rich HTML, send as native rich form with buttons
@@ -816,8 +815,6 @@ async def answer(
                     await message.delete()
 
                 return result
-
-        # Heroku-style: always pop file/invert_media/photo (photo is only for inline.list)
         file = kwargs.pop("file", None)
         invert_media = kwargs.pop("invert_media", False)
         kwargs.pop("photo", None)  # not a Telethon edit_message kwarg

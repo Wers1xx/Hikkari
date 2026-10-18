@@ -181,8 +181,6 @@ class HikkariInfoMod(loader.Module):
                 return (
                     "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji>"
                 )
-
-        # Rich mode: Heroku-style tree cards (works in normal messages).
         # Real <table> Rich Messages only via Bot API sendRichMessage in infocmd.
         try:
             from ..utils.rich import is_rich_enabled
@@ -326,8 +324,6 @@ class HikkariInfoMod(loader.Module):
         start = time.perf_counter_ns()
         from .. import main as _main
         from .._internal import normalize_rich_html
-
-        # --- Heroku-style native Rich info ---
         if self.config.get("rich_mode", True):
             try:
                 data = await self._info_placeholders(start)

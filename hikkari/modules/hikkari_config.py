@@ -441,8 +441,6 @@ class HikkariConfigMod(loader.Module):
                     "style": "danger", "emoji_id": 5283176512747507510},
             ]
         ]
-
-        # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
         try:
             if imid is not None:
                 await call.edit(text, reply_markup=markup, inline_message_id=imid)
@@ -1070,8 +1068,6 @@ class HikkariConfigMod(loader.Module):
                 await call.answer()
         except Exception:
             pass
-
-        # Prefer Rich edit (Heroku 2.2 style) — text + buttons update in place
         if self._cfg_use_rich() and "rich_message" not in kwargs:
             try:
                 kwargs["rich_message"] = self._cfg_rich_html(

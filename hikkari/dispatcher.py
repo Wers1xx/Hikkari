@@ -330,7 +330,6 @@ class CommandDispatcher:
         initiator = int(initiator) if initiator else 0
 
         main_prefix = self._db.get(main.__name__, "command_prefix", ".")
-        # Heroku-style: multiple prefixes — owner main + per-user + all registered
         try:
             all_prefixes = set(self._modules.get_prefixes() or set())
         except Exception:
