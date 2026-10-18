@@ -129,7 +129,6 @@ class UpdaterMod(loader.Module):
             self._db.set("Updater", "preferred_branch", name)
         with contextlib.suppress(Exception):
             version.branch = name
-        # Survive container recreation / code tree resets
         with contextlib.suppress(Exception):
             marker = os.path.join(self._repo_dir(), ".hikkari_branch")
             with open(marker, "w", encoding="utf-8") as f:
@@ -176,7 +175,6 @@ class UpdaterMod(loader.Module):
                 "Updater", "preferred_branch", None
             )
         if not isinstance(pref, str) or not pref.strip():
-            # adopt current git as preferred so it survives
             cur = self._current_branch()
             self._persist_branch(cur)
             return
@@ -326,10 +324,8 @@ class UpdaterMod(loader.Module):
             return ""
 
     async def client_ready(self):
-        # Restore preferred branch (beta must survive restarts / container recreation)
         with contextlib.suppress(Exception):
             await self._ensure_preferred_branch()
-        # Immediate update check on start (don't wait for first poll interval)
         async def _boot_check():
             await asyncio.sleep(3)  # let inline bot / net settle
             with contextlib.suppress(Exception):
@@ -393,7 +389,6 @@ class UpdaterMod(loader.Module):
             return
 
         if self._pending not in {current, self._notified}:
-            # Autoupdate removed: only notify, never auto-pull
             m = await self.inline.bot.send_message(
                 self.tg_id,
                 self.strings["update_required"].format(
@@ -616,15 +611,32 @@ class UpdaterMod(loader.Module):
             return None
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
+        form = getattr(msg_obj, "form", None)
+        if isinstance(form, dict) and form.get("uid") and getattr(self, "inline", None):
+            unit = self.inline._units.get(form["uid"]) or {}
+            m = unit.get("message")
+            if m is not None:
+                with contextlib.suppress(Exception):
+                    self.set(
+                        "selfupdatemsg",
+                        f"{utils.get_chat_id(m)}:{getattr(m, 'id', None) or getattr(m, 'message_id', None)}",
+                    )
+                    return
+
         inline_message_id = getattr(msg_obj, "inline_message_id", None)
-        self.set(
-            "selfupdatemsg",
-            (
-                self._serialize_inline_message_id(inline_message_id)
-                if inline_message_id is not None
-                else f"{utils.get_chat_id(msg_obj)}:{msg_obj.id}"
-            ),
-        )
+        if inline_message_id is not None:
+            with contextlib.suppress(Exception):
+                self.set(
+                    "selfupdatemsg",
+                    self._serialize_inline_message_id(inline_message_id),
+                )
+                return
+
+        with contextlib.suppress(Exception):
+            self.set(
+                "selfupdatemsg",
+                f"{utils.get_chat_id(msg_obj)}:{getattr(msg_obj, 'id', None) or getattr(msg_obj, 'message_id', None)}",
+            )
 
     async def restart_common(
         self,
@@ -644,8 +656,6 @@ class UpdaterMod(loader.Module):
 
         if secure_boot:
             self._db.set(loader.__name__, "secure_boot", True)
-
-        # Never use Rich for restart status (must be editable by user/bot cleanly)
         msg_obj = await utils.answer(
             msg_obj,
             self.strings["restarting_caption"].format(
@@ -689,7 +699,6 @@ class UpdaterMod(loader.Module):
                         )
                     except Exception:
                         origin.fetch()
-                    # Stay on preferred branch — never force master
                     try:
                         if branch not in repo.heads:
                             repo.create_head(branch, f"origin/{branch}")
@@ -746,7 +755,7 @@ class UpdaterMod(loader.Module):
 
     @staticmethod
     def req_common():
-        # Now we have downloaded new code, install requirements
+        # Install requirements after pull
         logger.debug("Installing new requirements...")
         is_venv = hasattr(sys, "real_prefix") or (
             hasattr(sys, "base_prefix") and sys.prefix != sys.base_prefix
@@ -1056,7 +1065,6 @@ class UpdaterMod(loader.Module):
                         self.config.get("GIT_ORIGIN_URL")
                         or "https://github.com/Wers1xx/Hikkari",
                     )
-                # Single-branch clones never have origin/beta — fetch it explicitly
                 for attempt in (
                     lambda: origin.fetch(
                         refspec=f"+refs/heads/{args}:refs/remotes/origin/{args}"
@@ -1424,13 +1432,22 @@ class UpdaterMod(loader.Module):
             try:
                 await self._client.edit_message(chat_id, message_id, msg)
             except Exception as e:
-                # via-bot / InlineBotRequiredError — send new + delete old
-                logger.warning("restart edit failed (%s), fallback send", e)
-                try:
-                    await self._client.send_message(chat_id, msg)
-                    await self._client.delete_messages(chat_id, message_id)
-                except Exception:
-                    logger.debug("restart fallback failed", exc_info=True)
+                logger.warning("restart edit failed (%s), trying bot", e)
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                ok = False
+                if bot is not None:
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            text=self.inline.sanitise_text(msg),
+                            chat_id=int(chat_id),
+                            message_id=int(message_id),
+                            disable_web_page_preview=True,
+                        )
+                        ok = True
+                if not ok:
+                    with contextlib.suppress(Exception):
+                        await self._client.send_message(chat_id, msg)
+                        await self._client.delete_messages(chat_id, message_id)
             return
 
         try:
@@ -1439,7 +1456,7 @@ class UpdaterMod(loader.Module):
                 text=self.inline.sanitise_text(msg),
             )
         except Exception:
-            logger.debug("inline restart edit failed", exc_info=True)
+            logger.warning("inline restart edit failed", exc_info=True)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -1451,9 +1468,6 @@ class UpdaterMod(loader.Module):
 
         self.set("restart_ts", None)
         ms = self.get("selfupdatemsg")
-
-        # Only REAL register_all failures. modules_count delta is a false
-        # positive (update, soft client_ready, etc.) and must not show as error.
         failed_names = list(
             getattr(self.allmodules, "_failed_module_names", None) or []
         )
@@ -1477,26 +1491,43 @@ class UpdaterMod(loader.Module):
         if ms is None:
             return
 
-        self.set("selfupdatemsg", None)
-        # Keep modules_count in sync so next restart does not false-fail
         with contextlib.suppress(Exception):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
+
+        edited = False
 
         if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
             chat_id, message_id = legacy_message_ref
             try:
                 await self._client.edit_message(chat_id, message_id, msg)
+                edited = True
             except Exception as e:
-                logger.warning("full_restart edit failed (%s), fallback", e)
-                try:
-                    await self._client.send_message(chat_id, msg)
-                except Exception:
-                    pass
-            try:
+                logger.warning("full_restart edit failed (%s), trying bot", e)
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot is not None:
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            text=self.inline.sanitise_text(msg),
+                            chat_id=int(chat_id),
+                            message_id=int(message_id),
+                            disable_web_page_preview=True,
+                        )
+                        edited = True
+                if not edited:
+                    with contextlib.suppress(Exception):
+                        await self._client.send_message(chat_id, msg)
+
+            async def _delete_later():
                 await asyncio.sleep(60)
-                await self._client.delete_messages(chat_id, message_id)
-            except Exception:
-                pass
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(chat_id, message_id)
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot is not None:
+                    with contextlib.suppress(Exception):
+                        await bot.delete_message(int(chat_id), int(message_id))
+
+            asyncio.ensure_future(_delete_later())
+            self.set("selfupdatemsg", None)
             return
 
         try:
@@ -1504,8 +1535,12 @@ class UpdaterMod(loader.Module):
                 inline_message_id=self._deserialize_inline_message_id(str(ms)),
                 text=self.inline.sanitise_text(msg),
             )
+            edited = True
         except Exception:
-            logger.debug("inline full_restart edit failed", exc_info=True)
+            logger.warning("inline full_restart edit failed", exc_info=True)
+
+        if edited:
+            self.set("selfupdatemsg", None)
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
