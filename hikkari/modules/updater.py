@@ -452,15 +452,38 @@ class UpdaterMod(loader.Module):
             return None
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
-        inline_message_id = getattr(msg_obj, "inline_message_id", None)
-        self.set(
-            "selfupdatemsg",
-            (
-                self._serialize_inline_message_id(inline_message_id)
-                if inline_message_id is not None
-                else f"{utils.get_chat_id(msg_obj)}:{msg_obj.id}"
-            ),
+        """Save ref for post-boot edit. Prefer chat:mid / bot:chat:mid over imid."""
+        mid = getattr(msg_obj, "id", None) or getattr(msg_obj, "message_id", None)
+        chat_id = None
+        with contextlib.suppress(Exception):
+            chat_id = utils.get_chat_id(msg_obj)
+        if chat_id is None:
+            chat_id = getattr(msg_obj, "chat_id", None)
+
+        # Bot PM / callback: always bot:owner:mid when we have message id
+        owner = int(getattr(self, "tg_id", 0) or 0)
+        name = type(msg_obj).__name__
+        is_bot_side = name in ("BotInlineCall", "InlineCall", "BotInlineMessage") or (
+            chat_id is not None and owner and int(chat_id) == owner
         )
+        if mid is not None and is_bot_side and owner:
+            self.set("selfupdatemsg", f"bot:{owner}:{int(mid)}")
+            return
+
+        inline_message_id = getattr(msg_obj, "inline_message_id", None)
+        if inline_message_id is not None:
+            # only store real imid objects/strings, not our bot: refs
+            try:
+                self.set(
+                    "selfupdatemsg",
+                    self._serialize_inline_message_id(inline_message_id),
+                )
+                return
+            except Exception:
+                pass
+
+        if chat_id is not None and mid is not None:
+            self.set("selfupdatemsg", f"{int(chat_id)}:{int(mid)}")
 
     async def restart_common(
         self,
@@ -672,6 +695,9 @@ class UpdaterMod(loader.Module):
                 await self.update_complete()
             except Exception:
                 logger.exception("Failed to complete update!")
+                # drop broken ref so full_restart does not repeat the error
+                with contextlib.suppress(Exception):
+                    self.set("selfupdatemsg", None)
 
         if self.get("do_not_create", False):
             pass
@@ -802,6 +828,67 @@ class UpdaterMod(loader.Module):
                     exc_info=True,
                 )
 
+    async def _edit_saved_status(self, ms, text: str, *, delete_after: int | None = None) -> bool:
+        """Edit post-restart status. Never pass bot: refs as inline_message_id."""
+        if not ms:
+            return False
+        text_s = self.inline.sanitise_text(text) if getattr(self, "inline", None) else text
+
+        # bot:chat:mid or msg:chat:mid or chat:mid
+        legacy = self._parse_legacy_update_message_ref(ms)
+        if legacy:
+            chat_id, message_id = legacy
+            via_bot = isinstance(ms, str) and (
+                ms.startswith("bot:") or int(chat_id) == int(getattr(self, "tg_id", 0) or 0)
+            )
+            bot = getattr(getattr(self, "inline", None), "bot", None)
+            if via_bot and bot is not None:
+                try:
+                    await bot.edit_message_text(
+                        text=text_s,
+                        chat_id=int(chat_id),
+                        message_id=int(message_id),
+                        disable_web_page_preview=True,
+                    )
+                    if delete_after:
+                        await asyncio.sleep(delete_after)
+                        with contextlib.suppress(Exception):
+                            await bot.delete_message(int(chat_id), int(message_id))
+                    return True
+                except Exception as e:
+                    logger.warning("bot edit status failed: %s", e)
+            try:
+                await self._client.edit_message(int(chat_id), int(message_id), text_s)
+                if delete_after:
+                    await asyncio.sleep(delete_after)
+                    with contextlib.suppress(Exception):
+                        await self._client.delete_messages(int(chat_id), [int(message_id)])
+                return True
+            except Exception as e:
+                logger.warning("client edit status failed: %s", e)
+                return False
+
+        # Real inline_message_id only (never bot:/msg:/digits)
+        if isinstance(ms, str) and (
+            ms.startswith("bot:") or ms.startswith("msg:") or (ms.isdigit() and len(ms) < 16)
+        ):
+            logger.warning("dropping invalid status ref: %r", ms)
+            return False
+
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+        if bot is None:
+            return False
+        try:
+            await bot.edit_message_text(
+                text=text_s,
+                inline_message_id=self._deserialize_inline_message_id(str(ms)),
+                disable_web_page_preview=True,
+            )
+            return True
+        except Exception as e:
+            logger.warning("imid status edit failed: %s", e)
+            return False
+
     async def update_complete(self):
         logger.debug("Restart successful; modules are still loading. Edit message")
         start = self.get("restart_ts")
@@ -812,30 +899,9 @@ class UpdaterMod(loader.Module):
 
         msg = self.strings["success"].format(utils.ascii_face(), took)
         ms = self.get("selfupdatemsg")
-
-        if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
-            chat_id, message_id = legacy_message_ref
-            via_bot = isinstance(ms, str) and ms.startswith("bot:")
-            if via_bot or chat_id == int(getattr(self, "tg_id", 0) or 0):
-                # bot-PM status message
-                try:
-                    await self.inline.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=self.inline.sanitise_text(msg),
-                        disable_web_page_preview=True,
-                    )
-                except Exception:
-                    with contextlib.suppress(Exception):
-                        await self._client.edit_message(chat_id, message_id, msg)
-            else:
-                await self._client.edit_message(chat_id, message_id, msg)
+        if not ms:
             return
-
-        await self.inline.bot.edit_message_text(
-            inline_message_id=self._deserialize_inline_message_id(str(ms)),
-            text=self.inline.sanitise_text(msg),
-        )
+        await self._edit_saved_status(ms, msg)
 
     async def full_restart_complete(self, secure_boot: bool = False):
         start = self.get("restart_ts")
@@ -868,36 +934,8 @@ class UpdaterMod(loader.Module):
             return
 
         self.set("selfupdatemsg", None)
+        await self._edit_saved_status(ms, msg, delete_after=60)
 
-        if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
-            chat_id, message_id = legacy_message_ref
-            via_bot = isinstance(ms, str) and ms.startswith("bot:")
-            if via_bot or chat_id == int(getattr(self, "tg_id", 0) or 0):
-                try:
-                    await self.inline.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=self.inline.sanitise_text(msg),
-                        disable_web_page_preview=True,
-                    )
-                except Exception:
-                    with contextlib.suppress(Exception):
-                        await self._client.edit_message(chat_id, message_id, msg)
-                await asyncio.sleep(60)
-                with contextlib.suppress(Exception):
-                    await self.inline.bot.delete_message(chat_id, message_id)
-                with contextlib.suppress(Exception):
-                    await self._client.delete_messages(chat_id, message_id)
-            else:
-                await self._client.edit_message(chat_id, message_id, msg)
-                await asyncio.sleep(60)
-                await self._client.delete_messages(chat_id, message_id)
-            return
-
-        await self.inline.bot.edit_message_text(
-            inline_message_id=self._deserialize_inline_message_id(str(ms)),
-            text=self.inline.sanitise_text(msg),
-        )
 
     @loader.command()
     async def rollback(self, message: Message):
