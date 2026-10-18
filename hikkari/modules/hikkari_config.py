@@ -96,7 +96,7 @@ class HikkariConfigMod(loader.Module):
 
 
     def _cfg_rich_html(self, body: str, *, title: str = "Hikkari Config") -> str:
-        """Wrap config body as Rich HTML (Heroku 2.2 style) + banner figure."""
+        """Wrap config body as Rich HTML + optional banner figure."""
         import html as html_mod
         from .._internal import normalize_rich_html
 
@@ -109,9 +109,8 @@ class HikkariConfigMod(loader.Module):
                 return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
             if url.startswith(("http://", "https://")):
                 if url.lower().endswith((".mp4", ".webm", ".mov", ".gif")):
-                    return None  # video/gif not as <img> in rich
+                    return None
                 return url
-            # bare filename
             if "/" not in url and "." in url:
                 return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{url}"
             return None
@@ -130,32 +129,22 @@ class HikkariConfigMod(loader.Module):
             pass
 
         body = body or ""
-        # Keep localized page text (Выбери параметр / Текущие настройки) intact
+        # Keep localized page text (Выбери параметр / Текущие настройки)
         if body.strip():
             if "<details" in body or "<h2" in body or "<p>" in body:
                 html = banner + body
             else:
-                chunks = [
-                    c.strip()
-                    for c in body.replace("<br>", "
-")
-                    .replace("<br/>", "
-")
-                    .replace("<br />", "
-")
-                    .replace("
-", "
-")
-                    .split("
-
-")
-                    if c.strip()
-                ]
+                cleaned = (
+                    body.replace("<br>", "\n")
+                    .replace("<br/>", "\n")
+                    .replace("<br />", "\n")
+                    .replace("\r\n", "\n")
+                )
+                chunks = [c.strip() for c in cleaned.split("\n\n") if c.strip()]
                 if not chunks:
                     chunks = [body.strip()]
                 paras = "".join(
-                    "<p>" + ch.replace("
-", "<br/>") + "</p>" for ch in chunks
+                    "<p>" + ch.replace("\n", "<br/>") + "</p>" for ch in chunks
                 )
                 html = banner + paras
         else:
