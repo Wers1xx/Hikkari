@@ -171,8 +171,10 @@ class Utils(InlineUnit):
                             btn_kwargs["url"] = button["url"]
 
                         case _ if "input" in button:
+                            if not button.get("_switch_query"):
+                                button["_switch_query"] = utils.rand(10)
                             btn_kwargs["switch_inline_query_current_chat"] = (
-                                str(button.get("_switch_query") or utils.rand(10)) + " "
+                                str(button["_switch_query"]) + " "
                             )
 
                         case _ if "callback" in button:
@@ -639,8 +641,14 @@ class Utils(InlineUnit):
                         inline_message_id=mid,
                         reply_markup=markup,
                     )
-                    if unit_id in self._units and text is not None:
-                        self._units[unit_id]["text"] = text
+                    if unit_id in self._units:
+                        if reply_markup is not None:
+                            # Must keep input handlers / _switch_query in sync
+                            self._units[unit_id]["buttons"] = reply_markup
+                        if text is not None:
+                            self._units[unit_id]["text"] = text
+                        if rich_message is not None:
+                            self._units[unit_id]["rich_message"] = rm
                     return True
             except Exception:
                 logger.debug("rich edit_unit failed, classic path", exc_info=True)

@@ -158,25 +158,14 @@ class HikkariConfigMod(loader.Module):
 
         markup = reply_markup if reply_markup is not None else []
         banner = self._cfg_banner_kwargs()
-        # Remote video URLs often fail TG WebpageCurl / InputDocument cast on
-        # inline results. Prefer photo banners as media; for video use rich form
-        # and keep the URL only as a text link so config still opens.
-        media = {}
-        if banner.get("photo"):
-            media["photo"] = banner["photo"]
-        elif banner.get("gif"):
-            media["gif"] = banner["gif"]
-        elif banner.get("video"):
-            # do not attach video URL as document — breaks form; show link in text
-            vurl = banner["video"]
-            if vurl and vurl not in (text or ""):
-                text = "🎬 <a href=\"" + str(vurl) + "\">banner</a>\n" + (text or "⚙️")
-
+        # Video/gif as media (no local download — URL only). Rich HTML cannot
+        # embed external video, so skip rich when media banner is present.
+        use_media = bool(
+            banner.get("video") or banner.get("gif") or banner.get("photo") or banner.get("audio")
+        )
         rich = kwargs.pop("rich_message", None)
-        if not media:
+        if not use_media:
             rich = rich or self._cfg_rich_html(text, title="⚙️ Hikkari Config")
-        else:
-            rich = None
 
         form_kwargs = dict(
             text=text or "⚙️",
@@ -184,9 +173,9 @@ class HikkariConfigMod(loader.Module):
             reply_markup=markup,
             silent=True,
             force_me=True,
-            **media,
+            **banner,
         )
-        if rich is not None:
+        if rich is not None and not use_media:
             form_kwargs["rich_message"] = rich
 
         try:
@@ -196,7 +185,6 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form failed")
 
-        # last resort: plain article form
         form_kwargs.pop("rich_message", None)
         for k in ("photo", "video", "gif", "file", "audio"):
             form_kwargs.pop(k, None)
