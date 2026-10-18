@@ -537,7 +537,13 @@ class UpdaterMod(loader.Module):
             self._notified = self._pending
             self.set("ignore_permanent", False)
             await self._delete_all_upd_messages()
-            self.set("upd_msg", m.message_id)
+            # Bot API HTTP returns dict; telethon Message has .message_id/.id
+            if isinstance(m, dict):
+                mid = m.get("message_id") or (m.get("result") or {}).get("message_id")
+            else:
+                mid = getattr(m, "message_id", None) or getattr(m, "id", None)
+            if mid is not None:
+                self.set("upd_msg", int(mid))
 
     @loader.loop(interval=60, autostart=True)
     async def poller(self):
@@ -580,10 +586,11 @@ class UpdaterMod(loader.Module):
             self.set("selfupdatemsg", f"bot:{int(self.tg_id)}:{int(mid)}")
         # Pre-seed capture so installing/restart edits hit this card
         try:
+            # Bot PM notification is a real bot message — use bot:chat:mid only
             self._status_seed = {
                 "chat_id": int(self.tg_id),
                 "message_id": int(mid) if mid is not None else None,
-                "inline_message_id": getattr(call, "inline_message_id", None),
+                "inline_message_id": None,
                 "via_bot": True,
             }
         except Exception:
@@ -770,13 +777,36 @@ class UpdaterMod(loader.Module):
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
         """Store chat:mid or inline_message_id for post-boot edit (Heroku-style)."""
+        # Prefer real message id on bot-owned messages over inline_message_id
+        mid = getattr(msg_obj, "message_id", None) or getattr(msg_obj, "id", None)
+        chat_guess = getattr(msg_obj, "chat_id", None)
+        if chat_guess is None:
+            with contextlib.suppress(Exception):
+                chat_guess = utils.get_chat_id(msg_obj)
+        is_botish = type(msg_obj).__name__ in (
+            "BotInlineCall", "InlineCall", "BotInlineMessage", "ChosenInlineCall"
+        ) or getattr(msg_obj, "via_bot", False)
+        if mid is not None and (is_botish or chat_guess == getattr(self, "tg_id", None)):
+            owner = int(getattr(self, "tg_id", 0) or chat_guess or 0)
+            if owner:
+                ref = f"bot:{owner}:{int(mid)}"
+                self.set("selfupdatemsg", ref)
+                with contextlib.suppress(Exception):
+                    self._db.set("Updater", "selfupdatemsg", ref)
+                return
+
         inline_message_id = getattr(msg_obj, "inline_message_id", None)
         if inline_message_id is not None:
-            ref = self._serialize_inline_message_id(inline_message_id)
-            self.set("selfupdatemsg", ref)
-            with contextlib.suppress(Exception):
-                self._db.set("Updater", "selfupdatemsg", ref)
-            return
+            # skip garbage short ids
+            try:
+                raw = self._serialize_inline_message_id(inline_message_id)
+            except Exception:
+                raw = str(inline_message_id)
+            if isinstance(raw, str) and len(raw) > 12 and not str(raw).isdigit():
+                self.set("selfupdatemsg", raw if raw.startswith("{") else f"imid:{raw}")
+                with contextlib.suppress(Exception):
+                    self._db.set("Updater", "selfupdatemsg", self.get("selfupdatemsg"))
+                return
         chat_id = getattr(msg_obj, "chat_id", None)
         if chat_id is None:
             with contextlib.suppress(Exception):
@@ -1335,13 +1365,17 @@ class UpdaterMod(loader.Module):
         """Save restart message ref to DB + all sidecar paths."""
         ref = None
         try:
-            if target.get("inline_message_id"):
-                ref = f"imid:{target['inline_message_id']}"
-            elif target.get("chat_id") and target.get("message_id"):
+            # Prefer concrete chat+message over imid (bot PM / form message)
+            if target.get("chat_id") is not None and target.get("message_id") is not None:
                 if target.get("via_bot"):
                     ref = f"bot:{int(target['chat_id'])}:{int(target['message_id'])}"
                 else:
                     ref = f"{int(target['chat_id'])}:{int(target['message_id'])}"
+            elif target.get("inline_message_id"):
+                imid = str(target["inline_message_id"])
+                # reject garbage short numeric "imid" (real imid is long/base64-ish)
+                if len(imid) > 12 and not imid.isdigit():
+                    ref = f"imid:{imid}"
             if not ref:
                 return
             self.set("selfupdatemsg", ref)
@@ -2283,6 +2317,16 @@ class UpdaterMod(loader.Module):
 
         # inline_message_id (serialized JSON or imid: prefix)
         imid = ms[5:] if isinstance(ms, str) and ms.startswith("imid:") else ms
+        # Garbage numeric "imid" → treat as bot PM message id
+        if isinstance(imid, str) and imid.isdigit() and len(imid) <= 12:
+            owner = int(getattr(self, "tg_id", 0) or 0)
+            if owner:
+                ok = await self._http_bot_edit(owner, int(imid), text)
+                if ok and delete_after:
+                    await self._schedule_delete_status(
+                        chat_id=owner, message_id=int(imid), delay=delete_after, via_bot=True
+                    )
+                return ok
         bot = getattr(getattr(self, "inline", None), "bot", None)
         if bot:
             try:
@@ -2296,6 +2340,14 @@ class UpdaterMod(loader.Module):
                 return True
             except Exception as e:
                 logger.warning("imid status edit failed: %s", e)
+                # last resort: if imid embeds digits, try as bot message id
+                digits = "".join(ch for ch in str(imid) if ch.isdigit())
+                if digits and len(digits) <= 12:
+                    owner = int(getattr(self, "tg_id", 0) or 0)
+                    if owner:
+                        ok = await self._http_bot_edit(owner, int(digits), text)
+                        if ok:
+                            return True
         return False
 
     async def update_complete(self):
