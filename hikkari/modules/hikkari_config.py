@@ -170,8 +170,7 @@ class HikkariConfigMod(loader.Module):
             # do not attach video URL as document — breaks form; show link in text
             vurl = banner["video"]
             if vurl and vurl not in (text or ""):
-                text = f'🎬 <a href="{vurl}">banner</a>
-{text or "⚙️"}'
+                text = "🎬 <a href=\"" + str(vurl) + "\">banner</a>\n" + (text or "⚙️")
 
         rich = kwargs.pop("rich_message", None)
         if not media:
