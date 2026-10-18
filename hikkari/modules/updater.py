@@ -623,12 +623,23 @@ class UpdaterMod(loader.Module):
             if imid is None and unit_msg is not None:
                 imid = getattr(unit_msg, "inline_message_id", None)
 
+        # Keep chat message id for deletion after full load (via forms still live in chat)
+        target = unit_msg if unit_msg is not None else msg_obj
+        with contextlib.suppress(Exception):
+            mid = getattr(target, "id", None) or getattr(target, "message_id", None)
+            chat_id = utils.get_chat_id(target) if mid is not None else None
+            if mid is not None and chat_id is not None:
+                self.set("selfupdate_chat", int(chat_id))
+                self.set("selfupdate_mid", int(mid))
+            else:
+                self.set("selfupdate_chat", None)
+                self.set("selfupdate_mid", None)
+
         if imid is not None:
             with contextlib.suppress(Exception):
                 self.set("selfupdatemsg", self._serialize_inline_message_id(imid))
                 return
 
-        target = unit_msg if unit_msg is not None else msg_obj
         with contextlib.suppress(Exception):
             mid = getattr(target, "id", None) or getattr(target, "message_id", None)
             if mid is not None:
@@ -1527,19 +1538,24 @@ class UpdaterMod(loader.Module):
         except Exception:
             logger.warning("inline full_restart edit failed", exc_info=True)
 
-        if edited:
-            self.set("selfupdatemsg", None)
+        self.set("selfupdatemsg", None)
 
-            async def _clear_inline_later():
-                # Inline messages cannot always be deleted; blank after a minute is ok
-                await asyncio.sleep(60)
+        chat_id = self.get("selfupdate_chat")
+        message_id = self.get("selfupdate_mid")
+        self.set("selfupdate_chat", None)
+        self.set("selfupdate_mid", None)
+
+        async def _delete_status_later():
+            await asyncio.sleep(60)
+            if chat_id is not None and message_id is not None:
                 with contextlib.suppress(Exception):
-                    await self.inline.bot.edit_message_text(
-                        inline_message_id=self._deserialize_inline_message_id(str(ms)),
-                        text="·",
-                    )
+                    await self._client.delete_messages(int(chat_id), int(message_id))
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot is not None:
+                    with contextlib.suppress(Exception):
+                        await bot.delete_message(int(chat_id), int(message_id))
 
-            asyncio.ensure_future(_clear_inline_later())
+        asyncio.ensure_future(_delete_status_later())
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
