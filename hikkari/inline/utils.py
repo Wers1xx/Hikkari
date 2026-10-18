@@ -622,13 +622,21 @@ class Utils(InlineUnit):
         if unit_id and unit_id in self._units and rich_message is not None:
             self._units[unit_id]["rich_message"] = rich_message
 
-        # Prefer native / bot Rich edit when unit is rich or rich_message passed
-        if rich_message is not None or (
-            unit_id
+        # Rich edit only when explicitly passed, or markup-only on existing rich unit.
+        # If `text` is provided without rich_message — do NOT reuse stale rich HTML
+        # (that left config pages stuck on "choose category" with new buttons).
+        rm = None
+        if rich_message is not None:
+            rm = rich_message
+        elif (
+            text is None
+            and unit_id
             and unit_id in self._units
             and self._units[unit_id].get("rich_message") is not None
         ):
-            rm = rich_message if rich_message is not None else self._units[unit_id].get("rich_message")
+            rm = self._units[unit_id].get("rich_message")
+
+        if rm is not None:
             try:
                 mid = inline_message_id
                 if mid is None and unit_id in self._units:
@@ -643,12 +651,14 @@ class Utils(InlineUnit):
                     )
                     if unit_id in self._units:
                         if reply_markup is not None:
-                            # Must keep input handlers / _switch_query in sync
                             self._units[unit_id]["buttons"] = reply_markup
                         if text is not None:
                             self._units[unit_id]["text"] = text
                         if rich_message is not None:
                             self._units[unit_id]["rich_message"] = rm
+                        elif text is not None:
+                            # text-only edit cleared stale rich
+                            self._units[unit_id].pop("rich_message", None)
                     return True
             except Exception:
                 logger.debug("rich edit_unit failed, classic path", exc_info=True)
