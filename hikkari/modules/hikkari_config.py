@@ -150,6 +150,7 @@ class HikkariConfigMod(loader.Module):
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
         """Config UI only via inline form in the SAME chat (no bot-PM / rich divert)."""
         import logging
+        import contextlib
         _log = logging.getLogger(__name__)
 
         for k in ("photo", "video", "gif", "file", "audio"):
@@ -157,16 +158,26 @@ class HikkariConfigMod(loader.Module):
 
         markup = reply_markup if reply_markup is not None else []
         banner = self._cfg_banner_kwargs()
-        # Video/gif banners cannot be embedded in rich HTML inline results —
-        # rich_message would win over media and the banner would never show.
-        use_media = bool(banner.get("video") or banner.get("gif") or banner.get("audio"))
-        rich = None
-        if not use_media:
-            rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
-                text, title="⚙️ Hikkari Config"
-            )
+        # Remote video URLs often fail TG WebpageCurl / InputDocument cast on
+        # inline results. Prefer photo banners as media; for video use rich form
+        # and keep the URL only as a text link so config still opens.
+        media = {}
+        if banner.get("photo"):
+            media["photo"] = banner["photo"]
+        elif banner.get("gif"):
+            media["gif"] = banner["gif"]
+        elif banner.get("video"):
+            # do not attach video URL as document — breaks form; show link in text
+            vurl = banner["video"]
+            if vurl and vurl not in (text or ""):
+                text = f'🎬 <a href="{vurl}">banner</a>
+{text or "⚙️"}'
+
+        rich = kwargs.pop("rich_message", None)
+        if not media:
+            rich = rich or self._cfg_rich_html(text, title="⚙️ Hikkari Config")
         else:
-            kwargs.pop("rich_message", None)
+            rich = None
 
         form_kwargs = dict(
             text=text or "⚙️",
@@ -174,7 +185,7 @@ class HikkariConfigMod(loader.Module):
             reply_markup=markup,
             silent=True,
             force_me=True,
-            **banner,
+            **media,
         )
         if rich is not None:
             form_kwargs["rich_message"] = rich
@@ -186,8 +197,13 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form failed")
 
+        # last resort: plain article form
         form_kwargs.pop("rich_message", None)
-        return await self.inline.form(**form_kwargs)
+        for k in ("photo", "video", "gif", "file", "audio"):
+            form_kwargs.pop(k, None)
+        with contextlib.suppress(Exception):
+            return await self.inline.form(**form_kwargs)
+        return None
 
 
     def _cfg_banner_kwargs(self) -> dict:
@@ -1276,7 +1292,12 @@ class HikkariConfigMod(loader.Module):
                     "text": self.strings["enter_value_btn"],
                     "input": self.strings["enter_value_desc"],
                     "handler": self.inline__set_config,
-                    "args": (mod, config_opt, call.inline_message_id),
+                    "args": (
+                        mod,
+                        config_opt,
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "message_id", None),
+                    ),
                     "kwargs": {"obj_type": obj_type},
                 }
             ],

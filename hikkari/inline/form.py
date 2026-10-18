@@ -936,41 +936,76 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
                 case _ if "gif" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["gif"],
-                                title="Hikkari",
-                                type="gif",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
-                    )
+                    try:
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.document(
+                                    form["gif"],
+                                    title="Hikkari",
+                                    type="gif",
+                                    id=utils.rand(20),
+                                    text=form_text,
+                                    parse_mode="HTML",
+                                    buttons=self.generate_markup(
+                                        form["uid"],
+                                    ),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    except Exception:
+                        logger.warning("gif form media failed, article fallback", exc_info=True)
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    description="Hikkari",
+                                    id=utils.rand(20),
+                                    text=form_text,
+                                    parse_mode="HTML",
+                                    buttons=self.generate_markup(form["uid"]),
+                                )
+                            ],
+                            cache_time=0,
+                        )
                 case _ if "video" in form:
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.document(
-                                form["video"],
-                                title="Hikkari",
-                                description="Hikkari",
-                                type="video",
-                                id=utils.rand(20),
-                                text=form_text,
-                                parse_mode="HTML",
-                                mime_type="video/mp4",
-                                buttons=self.generate_markup(
-                                    form["uid"],
-                                ),
-                            )
-                        ],
-                        cache_time=0,
-                    )
+                    try:
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.document(
+                                    form["video"],
+                                    title="Hikkari",
+                                    description="Hikkari",
+                                    type="video",
+                                    id=utils.rand(20),
+                                    text=form_text,
+                                    parse_mode="HTML",
+                                    mime_type="video/mp4",
+                                    buttons=self.generate_markup(
+                                        form["uid"],
+                                    ),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "video form media failed, falling back to article",
+                            exc_info=True,
+                        )
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    description="Hikkari",
+                                    id=utils.rand(20),
+                                    text=form_text,
+                                    parse_mode="HTML",
+                                    buttons=self.generate_markup(form["uid"]),
+                                )
+                            ],
+                            cache_time=0,
+                        )
                 case _ if "file" in form:
                     await inline_query.answer(
                         [
