@@ -227,6 +227,40 @@ class UpdaterMod(loader.Module):
                 pass
 
     @loader.loop(interval=60, autostart=True)
+
+    async def _notify_update(self, caption: str):
+        """Send update notice to owner; photo optional, text fallback."""
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+        if bot is None:
+            return None
+        photo = "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/main/updated.jpg"
+        m = None
+        with contextlib.suppress(Exception):
+            m = await bot.send_photo(
+                self.tg_id,
+                photo,
+                caption=caption,
+                reply_markup=self._markup(),
+            )
+        if m is None:
+            m = await bot.send_message(
+                self.tg_id,
+                caption,
+                reply_markup=self._markup(),
+                link_preview=False,
+            )
+        return m
+
+    def _extract_message_id(self, m) -> int | None:
+        if m is None:
+            return None
+        if isinstance(m, dict):
+            mid = m.get("message_id") or (m.get("result") or {}).get("message_id")
+            return self._valid_telegram_message_id(mid)
+        return self._valid_telegram_message_id(
+            getattr(m, "message_id", None) or getattr(m, "id", None)
+        )
+
     async def poller(self):
         if NO_GIT:
             return
@@ -274,42 +308,35 @@ class UpdaterMod(loader.Module):
                     manual_update = True
 
             if manual_update:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/main/updated.jpg",
-                    caption=self.strings["update_required"].format(
-                        current[:6],
-                        '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            self._pending[:6],
-                        ),
-                        changelog,
+                caption = self.strings["update_required"].format(
+                    current[:6],
+                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                        current[:12],
+                        self._pending[:12],
+                        self._pending[:6],
                     ),
-                    reply_markup=self._markup(),
+                    changelog,
                 )
-
+                m = await self._notify_update(caption)
                 self._notified = self._pending
                 self.set("ignore_permanent", False)
-
                 await self._delete_all_upd_messages()
-
-                self.set("upd_msg", m.message_id)
+                mid = self._extract_message_id(m)
+                if mid is not None:
+                    self.set("upd_msg", mid)
 
             else:
-                m = await self.inline.bot.send_photo(
-                    self.tg_id,
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/refs/heads/main/updated.jpg",
-                    caption=self.strings["autoupdate_notifier"].format(
-                        self._pending[:6],
-                        changelog,
-                        '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                            current[:12],
-                            self._pending[:12],
-                            "🔎 diff",
-                        ),
+                caption = self.strings["autoupdate_notifier"].format(
+                    self._pending[:6],
+                    changelog,
+                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                        current[:12],
+                        self._pending[:12],
+                        "🔎 diff",
                     ),
                 )
+                with contextlib.suppress(Exception):
+                    await self._notify_update(caption)
                 await self.invoke("update", "-f", peer=self.inline.bot_username)
 
     async def _delete_all_upd_messages(self):
