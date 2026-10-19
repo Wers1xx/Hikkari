@@ -1,4 +1,3 @@
-import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -92,85 +91,34 @@ class HikkariConfigMod(loader.Module):
                 lambda: "Banner for config UI (http URL or empty for built-in)",
                 validator=loader.validators.String(),
             ),
+            loader.ConfigValue(
+                "media_quote",
+                True,
+                lambda: "Use quote/webpage media for config banner",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
+                "invert_media",
+                True,
+                lambda: "Invert media (quote style) for config banner",
+                validator=loader.validators.Boolean(),
+            ),
         )
 
 
-    def _cfg_rich_html(self, body: str, *, title: str = "Hikkari Config") -> str:
-        """Wrap config body as Rich HTML + optional banner figure."""
-        import html as html_mod
-        from .._internal import normalize_rich_html
-
-        def _resolve_banner(url: str) -> str | None:
-            url = (url or "").strip()
-            if not url:
-                return None
-            if url.startswith("local:"):
-                name = url[6:].lstrip("/")
-                return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{name}"
-            if url.startswith(("http://", "https://")):
-                if url.lower().endswith((".mp4", ".webm", ".mov", ".gif")):
-                    return None
-                return url
-            if "/" not in url and "." in url:
-                return f"https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/{url}"
-            return None
-
-        banner = ""
-        try:
-            raw = self.config.get("banner_url")
-            if isinstance(raw, list) and raw:
-                import random as _r
-                raw = _r.choice(raw)
-            url = _resolve_banner(str(raw or ""))
-            if not url:
-                url = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
-            banner = f'<figure><img src="{html_mod.escape(url)}"/></figure>'
-        except Exception:
-            pass
-
-        body = body or ""
-        # Keep localized page text (Выбери параметр / Текущие настройки)
-        if body.strip():
-            if "<details" in body or "<h2" in body or "<p>" in body:
-                html = banner + body
-            else:
-                cleaned = (
-                    body.replace("<br>", "\n")
-                    .replace("<br/>", "\n")
-                    .replace("<br />", "\n")
-                    .replace("\r\n", "\n")
-                )
-                chunks = [c.strip() for c in cleaned.split("\n\n") if c.strip()]
-                if not chunks:
-                    chunks = [body.strip()]
-                paras = "".join(
-                    "<p>" + ch.replace("\n", "<br/>") + "</p>" for ch in chunks
-                )
-                html = banner + paras
-        else:
-            html = banner + f"<h2>{html_mod.escape(title)}</h2>"
-        return normalize_rich_html(html)
-
-
-    def _cfg_use_rich(self) -> bool:
-        # Always try Rich path (Heroku 2.2). Non-premium falls back via form/answer.
-        return True
-
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner — same media resolution as Ping / Info / Help."""
+        """form() with config banner when available (photo / video)."""
         import contextlib
         import logging
 
         _log = logging.getLogger(__name__)
         kw = dict(kwargs)
-        for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
+        for k in ("photo", "video", "gif", "file", "audio"):
             kw.pop(k, None)
-
         kw.update(self._cfg_banner_kwargs())
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
         kw.setdefault("silent", True)
-        kw.setdefault("force_me", True)
 
         try:
             m = await self.inline.form(text, message=message, **kw)
@@ -179,6 +127,7 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form with banner failed")
 
+        # If Telegram rejects remote media, open text-only config
         for k in ("photo", "video", "gif", "file", "audio"):
             kw.pop(k, None)
         with contextlib.suppress(Exception):
@@ -186,69 +135,64 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Config form banner — LOCAL files only.
+        """Banner for config forms: photo or video only.
 
-        Ping/Info use InputMediaWebPage on normal messages (works).
-        Inline forms use SendInlineBotResult: Telegram fetches the URL itself
-        and dies with WebpageCurlFailed on most hosts. Never pass http(s)
-        media into form(); only local paths that the client uploads.
+        - empty → built-in hikkari-config.jpg (local)
+        - local file → photo / video by extension
+        - http(s) image → photo
+        - http(s) video → video
         """
         from pathlib import Path as _P
+        from urllib.parse import urlparse
+
         from ..utils.other import ensure_builtin_asset
 
-        def _default() -> dict:
+        url = str(self.config.get("banner_url") or "").strip()
+        if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():
                 return {"photo": str(p)}
             return {}
 
-        def _from_local(path: str) -> dict:
-            low = path.lower()
-            if low.endswith((".mp4", ".mov", ".webm")):
-                return {"video": path}
-            if low.endswith(".gif"):
-                return {"gif": path}
-            return {"photo": path}
-
-        raw = ""
+        low = url.lower()
+        path = ""
         with contextlib.suppress(Exception):
-            raw = str(
-                self.config.get("banner_url") or self.config.get("banner") or ""
-            ).strip()
-        if not raw:
-            with contextlib.suppress(Exception):
-                raw = str(
-                    self.db.get("HikkariConfig", "banner_url", None) or ""
-                ).strip()
+            path = (urlparse(url).path if url.startswith("http") else url).lower()
 
-        if not raw:
-            return _default()
+        def _is_video() -> bool:
+            return any(
+                low.endswith(e) or path.endswith(e)
+                for e in (".mp4", ".mov", ".webm")
+            )
 
-        # Resolve like Ping, but only accept local file results
-        banner = None
-        with contextlib.suppress(Exception):
-            banner = utils.resolve_banner_media(raw)
+        def _is_photo() -> bool:
+            return any(
+                low.endswith(e) or path.endswith(e)
+                for e in (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+            )
 
-        candidates = []
-        if isinstance(banner, str) and not banner.startswith(
-            ("http://", "https://", "audio_ref:", "audio:")
-        ):
-            candidates.append(banner)
-        if raw and not raw.startswith(("http://", "https://")):
-            candidates.append(raw)
-        if raw.startswith("local:"):
-            with contextlib.suppress(Exception):
-                p = ensure_builtin_asset(raw[6:].lstrip("/"))
-                if p:
-                    candidates.append(str(p))
+        # Local path
+        if not url.startswith("http") and _P(url).is_file():
+            return {"video": url} if _is_video() else {"photo": url}
 
-        for c in candidates:
-            if c and _P(c).is_file():
-                return _from_local(str(_P(c).resolve()))
+        # local: asset name
+        if url.startswith("local:"):
+            p = ensure_builtin_asset(url[6:].lstrip("/"))
+            if p and _P(str(p)).is_file():
+                return {"photo": str(p)}
+            return {}
 
-        # Remote URL or unresolved → built-in local image (form always opens)
-        return _default()
+        if url.startswith(("http://", "https://")):
+            if _is_video():
+                return {"video": url}
+            # images and unknown extensions as photo (master behavior)
+            return {"photo": url}
 
+        # bare filename in assets
+        p = ensure_builtin_asset(url)
+        if p and _P(str(p)).is_file():
+            return {"photo": str(p)}
+        return {}
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
@@ -401,8 +345,7 @@ class HikkariConfigMod(loader.Module):
                 or "will be deleted automatically" in query
                 or query in {"🔄", "✨"}
             ):
-                await self._safe_cfg_edit(
-                    call,
+                await call.edit(
                     self.strings.get(
                         "validation_error",
                         "🚫 <b>Invalid value</b>",
@@ -430,8 +373,7 @@ class HikkariConfigMod(loader.Module):
                 if not qs.startswith(("audio:", "audio_ref:")):
                     self._cleanup_audio_banner_files(mod, str(option), prev_q)
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -474,14 +416,17 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ]
         ]
+
+        # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
         try:
             if imid is not None:
-                await self._safe_cfg_edit(call, text, reply_markup=markup, inline_message_id=imid)
+                await call.edit(text, reply_markup=markup, inline_message_id=imid)
             else:
-                await self._safe_cfg_edit(call, text, reply_markup=markup)
+                await call.edit(text, reply_markup=markup)
         except Exception:
             logger = __import__("logging").getLogger(__name__)
             logger.exception("inline__set_config edit failed (value already saved)")
@@ -496,8 +441,7 @@ class HikkariConfigMod(loader.Module):
         mod_instance = self.lookup(mod)
         mod_instance.config[option] = mod_instance.config.getdef(option)
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 "option_reset" if isinstance(obj_type, bool) else "option_reset_lib"
             ].format(
@@ -517,7 +461,8 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510},
+                        "style": "danger",
+                    },
                 ]
             ],
         )
@@ -533,8 +478,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -559,8 +503,7 @@ class HikkariConfigMod(loader.Module):
             )
         )
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 (
                     "configuring_option"
@@ -645,7 +588,8 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ],
         ]
 
@@ -670,8 +614,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config[option] = self.lookup(mod).config[option] + query
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -681,8 +624,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -702,7 +644,8 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510},
+                        "style": "danger",
+                    },
                 ]
             ],
             inline_message_id=inline_message_id or call.inline_message_id,
@@ -763,8 +706,7 @@ class HikkariConfigMod(loader.Module):
                     " target list"
                 )
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -774,8 +716,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -795,7 +736,8 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510},
+                        "style": "danger",
+                    },
                 ]
             ],
             inline_message_id=inline_message_id or call.inline_message_id,
@@ -866,7 +808,8 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ],
         ]
 
@@ -881,8 +824,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -892,8 +834,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -913,7 +854,8 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510},
+                        "style": "danger",
+                    },
                 ]
             ],
         )
@@ -936,8 +878,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config.reload()
         except loader.validators.ValidationError as e:
-            await self._safe_cfg_edit(
-                call,
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -1021,7 +962,8 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ],
         ]
 
@@ -1094,7 +1036,8 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ],
         ]
 
@@ -1108,49 +1051,24 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config form — push full page text (configuring_mod / settings list)."""
+        """Edit config form; always clip for media caption and never hang on error."""
         try:
             with contextlib.suppress(Exception):
                 await call.answer()
         except Exception:
             pass
-
-        # Never keep a caller/stale rich blob; rebuild from this page's text only
-        kwargs = dict(kwargs)
-        kwargs.pop("rich_message", None)
-
-        text_clip = self._clip_cfg_text(text, 3500)
-
-        # Classic text edit first — shows "Выбери параметр… / Текущие настройки"
+        text = self._clip_cfg_text(text, 950)
         try:
-            return await call.edit(
-                text_clip,
-                reply_markup=reply_markup,
-                **kwargs,
-            )
+            return await call.edit(text, reply_markup=reply_markup, **kwargs)
         except Exception:
-            logger.debug("cfg classic edit failed", exc_info=True)
-
-        rich = None
-        with contextlib.suppress(Exception):
-            rich = self._cfg_rich_html(text or "", title="⚙️ Hikkari Config")
-        if rich:
-            try:
+            logger.debug("cfg edit failed, hard clip", exc_info=True)
+            with contextlib.suppress(Exception):
                 return await call.edit(
-                    text_clip,
+                    self._clip_cfg_text(text, 500),
                     reply_markup=reply_markup,
-                    rich_message=rich,
                     **kwargs,
                 )
-            except Exception:
-                logger.debug("cfg rich edit failed", exc_info=True)
-
-        with contextlib.suppress(Exception):
-            return await call.edit(
-                self._clip_cfg_text(text, 500),
-                reply_markup=reply_markup,
-            )
-        return False
+            return False
 
 
     async def inline__configure_option(
@@ -1263,8 +1181,7 @@ class HikkariConfigMod(loader.Module):
             )
             match validator.internal_id:
                 case "Boolean":
-                    await self._safe_cfg_edit(
-                        call,
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1274,8 +1191,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Series":
-                    await self._safe_cfg_edit(
-                        call,
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1287,8 +1203,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Choice":
-                    await self._safe_cfg_edit(
-                        call,
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1300,8 +1215,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "MultiChoice":
-                    await self._safe_cfg_edit(
-                        call,
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1340,12 +1254,7 @@ class HikkariConfigMod(loader.Module):
                     "text": self.strings["enter_value_btn"],
                     "input": self.strings["enter_value_desc"],
                     "handler": self.inline__set_config,
-                    "args": (
-                        mod,
-                        config_opt,
-                        getattr(call, "inline_message_id", None)
-                        or getattr(call, "message_id", None),
-                    ),
+                    "args": (mod, config_opt, call.inline_message_id),
                     "kwargs": {"obj_type": obj_type},
                 }
             ],
@@ -1369,15 +1278,16 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ],
         ]
         try:
-            await self._safe_cfg_edit(call, text, reply_markup=markup)
+            await call.edit(text, reply_markup=markup)
         except Exception:
             logger.exception("configure_option edit failed")
             with contextlib.suppress(Exception):
-                await self._safe_cfg_edit(call, self._clip_cfg_text(text, 500), reply_markup=markup)
+                await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
             with contextlib.suppress(Exception):
                 await call.answer("⚠️ text truncated", show_alert=False)
 
@@ -1421,7 +1331,8 @@ class HikkariConfigMod(loader.Module):
         close_btn = {
             "text": self.strings["close_btn"],
             "action": "close",
-            "style": "danger", "emoji_id": 5283176512747507510}
+            "style": "danger",
+        }
 
         if category is not None:
             params = list(grouped.get(category, []))
@@ -1456,8 +1367,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await self._safe_cfg_edit(
-                call,
+            return await call.edit(
                 cat_text,
                 reply_markup=list(
                     utils.chunks(
@@ -1512,8 +1422,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await self._safe_cfg_edit(
-                call,
+            return await call.edit(
                 text,
                 reply_markup=list(
                     utils.chunks(
@@ -1607,8 +1516,7 @@ class HikkariConfigMod(loader.Module):
             functools.partial(self.inline__configure_page, mod=mod, obj_type=obj_type),
         )
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             text,
             reply_markup=list(utils.chunks(btns, 2))
             + pagination
@@ -1730,18 +1638,22 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
-        markup = [
+        from .. import main as _main
+        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
+        await utils.answer(
+            call,
+            self.strings["choose_core"],
+            photo=str(_cfg_banner) if _cfg_banner and Path(_cfg_banner).is_file() else None,
+            reply_markup=[
                 [
                     {
                         "text": self.strings["builtin"],
                         "callback": self.inline__global_config,
                         "kwargs": {"obj_type": True},
-                        "emoji_id": 5321304062715517873,
                     },
                     {
                         "text": self.strings["external"],
                         "callback": self.inline__global_config,
-                        "emoji_id": 5319139188744936824,
                     },
                 ],
                 *(
@@ -1764,21 +1676,10 @@ class HikkariConfigMod(loader.Module):
                         "text": self.strings["close_btn"],
                         "action": "close",
                         "style": "danger",
-                        "emoji_id": 5283176512747507510,
                     }
                 ],
-            ]
-        # Rich only (no photo) — banner inside Rich HTML
-        if isinstance(call, InlineCall) or getattr(call, "inline_message_id", None):
-            await self._safe_cfg_edit(
-                call, self.strings["choose_core"], reply_markup=markup
-            )
-        else:
-            await self._cfg_form(
-                self.strings["choose_core"],
-                message=call,
-                reply_markup=markup,
-            )
+            ],
+        )
 
     async def _send_initial_config_form(
         self,
@@ -1795,10 +1696,11 @@ class HikkariConfigMod(loader.Module):
 
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
-        # Do NOT inject photo/gif/video — that forces classic Inline Mode.
-        # Banner goes into Rich HTML as <figure> inside _cfg_rich_html / _cfg_form.
-        for _k in ("photo", "video", "gif", "file", "audio"):
-            form_kwargs.pop(_k, None)
+
+        from .. import main as _main
+        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
+        if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
+            form_kwargs["photo"] = str(_cfg_banner)
         await self._cfg_form(
             draft.text,
             message=message,
@@ -1846,8 +1748,7 @@ class HikkariConfigMod(loader.Module):
                     f"<tg-emoji emoji-id=5253713110111365241>▫️</tg-emoji> <b>{utils.escape_html(mod_name)}</b>"
                 )
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings["configuring_folder"].format(
                 utils.escape_html(folder),
                 "\n".join(text_parts) if text_parts else "No options",
@@ -1863,7 +1764,8 @@ class HikkariConfigMod(loader.Module):
                     {
                         "text": self.strings["close_btn"],
                         "action": "close",
-                        "style": "danger", "emoji_id": 5283176512747507510},
+                        "style": "danger",
+                    },
                 ]
             ],
         )
@@ -1925,12 +1827,12 @@ class HikkariConfigMod(loader.Module):
                 {
                     "text": self.strings["close_btn"],
                     "action": "close",
-                    "style": "danger", "emoji_id": 5283176512747507510},
+                    "style": "danger",
+                },
             ]
         ]
 
-        await self._safe_cfg_edit(
-            call,
+        await call.edit(
             self.strings[
                 "configure" if isinstance(obj_type, bool) else "configure_lib"
             ],
@@ -2199,42 +2101,6 @@ class HikkariConfigMod(loader.Module):
         return str(path.resolve())
 
 
-
-    async def _upload_banner_x0(self, reply) -> str | None:
-        """Download replied media, reject >20MB, upload to x0.at, return URL."""
-        import os
-        import aiohttp
-        size = 0
-        with contextlib.suppress(Exception):
-            doc = getattr(reply, "document", None)
-            if doc is not None:
-                size = int(getattr(doc, "size", 0) or 0)
-            if getattr(reply, "video", None) is not None:
-                size = int(getattr(reply.video, "size", 0) or size)
-            if getattr(reply, "file", None) is not None:
-                size = int(getattr(reply.file, "size", 0) or size)
-        if size and size > 20 * 1024 * 1024:
-            return "__TOO_BIG__"
-        path = await reply.download_media()
-        if not path:
-            return None
-        try:
-            async with aiohttp.ClientSession() as s:
-                with open(path, "rb") as fh:
-                    data = aiohttp.FormData()
-                    data.add_field("file", fh, filename=os.path.basename(path))
-                    async with s.post("https://x0.at", data=data, timeout=aiohttp.ClientTimeout(total=120)) as r:
-                        url = (await r.text()).strip()
-            if url and url.startswith("http"):
-                return url
-        except Exception:
-            return None
-        finally:
-            with contextlib.suppress(Exception):
-                os.unlink(path)
-        return None
-
-
     async def _configcmd_impl(self, message: Message):
         raw = utils.get_args_raw(message).strip()
         args_s = raw.split()
@@ -2257,48 +2123,6 @@ class HikkariConfigMod(loader.Module):
         if reply and len(args_s) >= 2:
             # case-insensitive option match
             opt_arg = args_s[1]
-
-            # Photo / video / document banner → x0.at (max 20MB)
-            _opt_l = str(opt_arg).lower()
-            if _opt_l in self._BANNER_OPTS or _opt_l == "banner_url":
-                has_vis = bool(getattr(reply, "photo", None) or getattr(reply, "video", None) or getattr(reply, "document", None))
-                is_audio = bool(getattr(reply, "audio", None) or getattr(reply, "voice", None))
-                if has_vis and not is_audio:
-                    url = await self._upload_banner_x0(reply)
-                    if url == "__TOO_BIG__":
-                        await utils.answer(
-                            message,
-                            "<emoji document_id=5447644880824181073>⚠️</emoji> Баннер <b>&gt; 20 МБ</b>. "
-                            "Quote/invert и превью не сработают. Дай файл легче.",
-                        )
-                        return
-                    if not url:
-                        await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Не удалось загрузить на x0.at")
-                        return
-                    mod = None
-                    for m in self.allmodules.modules:
-                        n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
-                        if str(n).lower() == str(args_s[0]).lower() or type(m).__name__.lower() == str(args_s[0]).lower():
-                            mod = m
-                            break
-                    if not mod or not getattr(mod, "config", None):
-                        await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль не найден")
-                        return
-                    try:
-                        mod.config[opt_arg] = url
-                    except Exception:
-                        try:
-                            mod.config["banner_url"] = url
-                        except Exception as e:
-                            await utils.answer(message, f"⚠️ {e}")
-                            return
-                    with contextlib.suppress(Exception):
-                        self._db.save()
-                    await utils.answer(
-                        message,
-                        f"<emoji document_id=5256182535917940722>⤵️</emoji> banner → <code>{utils.escape_html(url)}</code>",
-                    )
-                    return
             option = next(
                 (k for k in instance.config.keys() if str(k).lower() == opt_arg.lower()),
                 None,
@@ -2416,118 +2240,15 @@ class HikkariConfigMod(loader.Module):
         await self.inline__choose_category(message)
 
     async def configcmd(self, message: Message):
-        """Настроить модули / configure modules"""
         await self._configcmd_impl(message)
 
     @loader.command(alias="fcfg")
     async def cfgcmd(self, message: Message):
-        """Настроить модули / configure modules"""
         await self._configcmd_impl(message)
-
-
-
-    @loader.command()
-    async def uploadcfg(self, message: Message):
-        """<module> — экспорт конфига в .txt / export module config"""
-        import json
-        from io import BytesIO
-        name = (utils.get_args_raw(message) or "").strip()
-        if not name:
-            await utils.answer(
-                message,
-                f"<emoji document_id=5436113877181941026>❓</emoji> <code>{self.get_prefix()}uploadcfg ModuleName</code>",
-            )
-            return
-        mod = None
-        for m in self.allmodules.modules:
-            n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
-            if str(n).lower() == name.lower() or type(m).__name__.lower() == name.lower():
-                mod = m
-                break
-        if not mod or not getattr(mod, "config", None):
-            await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Модуль не найден или без конфига")
-            return
-        keys = list(getattr(mod.config, "_config", {}) or {})
-        if not keys:
-            try:
-                keys = list(mod.config.keys())
-            except Exception:
-                keys = []
-        options = {}
-        for k in keys:
-            with contextlib.suppress(Exception):
-                options[k] = mod.config[k]
-        data = {
-            "__hikkari_cfg__": 1,
-            "module": (getattr(mod, "strings", {}) or {}).get("name") or type(mod).__name__,
-            "options": options,
-        }
-        raw = json.dumps(data, ensure_ascii=False, indent=2, default=str)
-        bio = BytesIO(raw.encode("utf-8"))
-        bio.name = f"{data['module']}_config.txt"
-        await message.client.send_file(
-            message.peer_id,
-            bio,
-            caption=f"<emoji document_id=5283176512747507510>✨</emoji> cfg · <b>{utils.escape_html(data['module'])}</b>",
-        )
-        with contextlib.suppress(Exception):
-            await message.delete()
-
-    @loader.command()
-    async def loadcfg(self, message: Message):
-        """reply на .txt — импорт конфига модуля / import config from uploadcfg"""
-        import json
-        reply = await message.get_reply_message()
-        if not reply or not reply.document:
-            await utils.answer(
-                message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Reply на .txt от <code>uploadcfg</code>",
-            )
-            return
-        path = await reply.download_media()
-        try:
-            data = json.loads(open(path, encoding="utf-8").read())
-        except Exception:
-            await utils.answer(message, "<emoji document_id=5447644880824181073>⚠️</emoji> Не JSON/конфиг")
-            return
-        if not isinstance(data, dict) or data.get("__hikkari_cfg__") != 1:
-            await utils.answer(
-                message,
-                "<emoji document_id=5447644880824181073>⚠️</emoji> Нет маркера <code>__hikkari_cfg__</code>",
-            )
-            return
-        mod_name = data.get("module")
-        opts = data.get("options") or {}
-        mod = None
-        for m in self.allmodules.modules:
-            n = (getattr(m, "strings", {}) or {}).get("name") or type(m).__name__
-            if str(n).lower() == str(mod_name).lower():
-                mod = m
-                break
-        if not mod or not getattr(mod, "config", None):
-            await utils.answer(
-                message,
-                f"<emoji document_id=5447644880824181073>⚠️</emoji> Модуль <code>{utils.escape_html(str(mod_name))}</code> не загружен — конфиг не применён",
-            )
-            return
-        applied = 0
-        for k, v in opts.items():
-            try:
-                mod.config[k] = v
-                applied += 1
-            except Exception:
-                continue
-        with contextlib.suppress(Exception):
-            self._db.save()
-        await utils.answer(
-            message,
-            f"<emoji document_id=5256182535917940722>⤵️</emoji> Конфиг <b>{utils.escape_html(str(mod_name))}</b> применён ({applied} опций)",
-        )
-
 
     @loader.command()
     async def catcmd(self, message: Message):
-        """<module> <option> — показать значение опции / show config value"""
+        """<module> <option> — show config value (or .txt if too long)"""
         args = utils.get_args_raw(message) or ""
         parts = args.split(None, 1)
         if len(parts) < 2:
