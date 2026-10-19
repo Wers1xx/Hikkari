@@ -195,13 +195,27 @@ class HikkariConfigMod(loader.Module):
         return None
 
 
-    _DEFAULT_BANNER = (
+    _DEFAULT_BANNER_URL = (
         "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
     )
 
     def _cfg_banner_photo_url(self) -> str:
-        """Image URL for config form banner (never video — TG curl fails)."""
+        """Local file or trusted image URL for config form banner.
+
+        Prefer local asset (uploaded by client — no WebpageCurlFailed).
+        Video banner_url is ignored for display (TG cannot fetch many hosts).
+        """
         from urllib.parse import urlparse
+        from pathlib import Path as _P
+
+        # 1) Always have a local fallback
+        local = None
+        with contextlib.suppress(Exception):
+            local = utils.ensure_builtin_asset("hikkari-config.jpg")
+        if local and _P(str(local)).is_file():
+            default = str(local)
+        else:
+            default = self._DEFAULT_BANNER_URL
 
         raw = None
         with contextlib.suppress(Exception):
@@ -210,8 +224,21 @@ class HikkariConfigMod(loader.Module):
             with contextlib.suppress(Exception):
                 raw = (self.db.get("HikkariConfig", "banner_url", None) or "").strip()
 
-        default = self._DEFAULT_BANNER
-        if not raw or not str(raw).startswith("http"):
+        if not raw:
+            return default
+
+        # local: path or existing file
+        if str(raw).startswith("local:"):
+            name = str(raw)[6:].lstrip("/")
+            p = utils.ensure_builtin_asset(name)
+            if p and _P(str(p)).is_file():
+                return str(p)
+            return default
+
+        if _P(str(raw)).is_file():
+            return str(raw)
+
+        if not str(raw).startswith("http"):
             return default
 
         url = str(raw).strip()
@@ -219,7 +246,6 @@ class HikkariConfigMod(loader.Module):
         path = (urlparse(url).path or "").lower()
         host = (urlparse(url).hostname or "").lower()
 
-        # Video/gif cannot be used as form photo
         if any(
             x in low or path.endswith(x)
             for x in (".mp4", ".mov", ".webm", ".gif", "mime=video", "format=gif")
@@ -235,10 +261,9 @@ class HikkariConfigMod(loader.Module):
             or host.endswith("imgur.com")
             or host.endswith("i.imgur.com")
         )
-        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
-            return url if trusted else default
-        # Unknown type — only try if host is trusted
-        return url if trusted else default
+        if trusted:
+            return url
+        return default
 
     def _cfg_banner_kwargs(self) -> dict:
         photo = self._cfg_banner_photo_url()
