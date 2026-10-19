@@ -115,7 +115,8 @@ class HikkariConfigMod(loader.Module):
         kw = dict(kwargs)
         for k in ("photo", "video", "gif", "file", "audio"):
             kw.pop(k, None)
-        kw.update(self._cfg_banner_kwargs())
+        first_banner = self._cfg_banner_kwargs()
+        kw.update(first_banner)
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
         kw.setdefault("silent", True)
@@ -127,9 +128,20 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form with banner failed")
 
-        # If Telegram rejects remote media, open text-only config
+        # Telegram rejected the banner. form() has now marked a dead URL as bad,
+        # so the helper hands back the built-in local banner: try that first
         for k in ("photo", "video", "gif", "file", "audio"):
             kw.pop(k, None)
+        fallback_banner = self._cfg_banner_kwargs()
+        if fallback_banner and fallback_banner != first_banner:
+            with contextlib.suppress(Exception):
+                m = await self.inline.form(
+                    text, message=message, **{**kw, **fallback_banner}
+                )
+                if m:
+                    return m
+
+        # Last resort: text-only config
         with contextlib.suppress(Exception):
             return await self.inline.form(text, message=message, **kw)
         return None
@@ -148,6 +160,9 @@ class HikkariConfigMod(loader.Module):
         from ..utils.other import ensure_builtin_asset
 
         url = str(self.config.get("banner_url") or "").strip()
+        # A URL Telegram already failed to download → use the built-in banner
+        if url and utils.is_bad_media(url):
+            url = ""
         if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():

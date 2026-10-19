@@ -166,7 +166,7 @@ class Database(dict):
             from . import main as _main
             from .utils.other import ensure_builtin_asset as _eba
             _ava = _eba("hikkari-ava.png")
-            _ava_bytes = _ava.read_bytes() if _ava.is_file() else None
+            _ava_bytes = _ava.read_bytes() if _ava and _ava.is_file() else None
             try:
                 content_channel, _ = await utils.asset_channel(
                     client=self._client,

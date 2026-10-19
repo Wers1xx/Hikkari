@@ -26,6 +26,7 @@ import random
 import signal
 import os
 import sys
+import time
 import typing
 import warnings
 
@@ -360,6 +361,26 @@ _ASSET_URLS = {
 }
 
 
+# Asset names whose download failed recently: name -> monotonic time of failure.
+# Prevents blocking the event loop on every call when GitHub is unreachable.
+_ASSET_FAIL_TTL = 600
+_asset_failed: dict = {}
+
+# Media URLs Telegram refused to fetch (WEBPAGE_CURL_FAILED and friends).
+_bad_media_urls: set = set()
+
+
+def mark_bad_media(url: str) -> None:
+    """Remember a media URL that Telegram rejected, so it is not retried."""
+    if url:
+        _bad_media_urls.add(str(url).strip())
+
+
+def is_bad_media(url: str) -> bool:
+    """True if this media URL was rejected by Telegram earlier in this run."""
+    return str(url or "").strip() in _bad_media_urls
+
+
 def ensure_builtin_asset(name: str):
     """Find local asset or download once into BASE_PATH/assets."""
     name = (name or "").strip().lstrip("/")
@@ -370,6 +391,10 @@ def ensure_builtin_asset(name: str):
         p = d / name
         if p.is_file() and p.stat().st_size > 100:
             return p
+
+    failed_at = _asset_failed.get(name)
+    if failed_at is not None and time.monotonic() - failed_at < _ASSET_FAIL_TTL:
+        return None
 
     # Download into primary assets dir
     try:
@@ -387,13 +412,17 @@ def ensure_builtin_asset(name: str):
         import urllib.request
         logger = __import__("logging").getLogger(__name__)
         logger.info("Downloading builtin asset %s …", name)
-        data = urllib.request.urlopen(url, timeout=60).read()
+        data = urllib.request.urlopen(url, timeout=10).read()
         if len(data) < 100:
+            _asset_failed[name] = time.monotonic()
             return None
         dest.write_bytes(data)
         return dest
     except Exception:
-        __import__("logging").getLogger(__name__).exception("asset download %s", name)
+        _asset_failed[name] = time.monotonic()
+        __import__("logging").getLogger(__name__).warning(
+            "asset download %s failed, will retry in %ss", name, _ASSET_FAIL_TTL
+        )
         return None
 
 

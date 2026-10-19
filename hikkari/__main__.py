@@ -107,8 +107,10 @@ def get_file_hash(filename):
         return None
 
 
-def deps():
-    # Full hikkaritl from GitHub (public). If private, use token URL once.
+def deps(force: bool = False):
+    # --force-reinstall re-downloads hikkaritl AND all of its dependencies, which is
+    # very slow. Use it only when the library is missing/broken (force=True);
+    # a plain --upgrade is enough when requirements.txt merely changed.
     subprocess.run(
         [
             sys.executable,
@@ -116,7 +118,9 @@ def deps():
             "pip",
             "install",
             "--upgrade",
-            "--force-reinstall",
+            "-q",
+            "--disable-pip-version-check",
+            *(["--force-reinstall"] if force else []),
             "hikkaritl>=1.1.2",
         ],
         check=False,
@@ -181,7 +185,7 @@ else:
     except Exception:
         print("\U0001f504 Installing dependencies...")
         try:
-            deps()
+            deps(force=True)
         except Exception as e:
             print(f"requirements.txt install failed: {e}")
             print("Trying hikkaritl from GitHub...")
@@ -228,7 +232,7 @@ else:
         print(
             f"{str(e)}\n\U0001f504 Attempting dependencies installation... Just wait ⏱"
         )
-        deps()
+        deps(force=True)
         restart()
 
     if "HEROKU_DO_NOT_RESTART" in os.environ:

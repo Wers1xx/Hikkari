@@ -28,6 +28,7 @@ import os
 import os
 import subprocess
 import sys
+import threading
 import time
 import typing
 
@@ -62,10 +63,13 @@ class UpdaterMod(loader.Module):
     """Updates itself, tracks latest Hikkari releases, and notifies you, if update is required"""
 
     strings = {"name": "Updater"}
-    _GIT_FETCH_INTERVAL = 60
+    # `git fetch` over the network; poller() itself still runs every 60s locally
+    _GIT_FETCH_INTERVAL = 600
     _EMFILE_FETCH_BACKOFF = 900
 
     def __init__(self):
+        # git calls run in worker threads → serialize them (no parallel fetches)
+        self._git_lock = threading.Lock()
         self._notified = None
         self._last_emfile_warning = 0.0
         self._last_git_fetch = 0.0
@@ -187,7 +191,7 @@ class UpdaterMod(loader.Module):
             "Branch drift: git=%s preferred=%s — restoring preferred", cur, pref
         )
         try:
-            self._fetch_branch(pref)
+            await utils.run_sync(self._fetch_branch, pref)
             with git.Repo(self._repo_dir()) as repo:
                 try:
                     repo.git.checkout("-B", pref, f"origin/{pref}")
@@ -266,6 +270,12 @@ class UpdaterMod(loader.Module):
         return res
 
     def _get_update_state(self) -> tuple[str, str, str | typing.Literal[False]]:
+        with self._git_lock:
+            return self._get_update_state_locked()
+
+    def _get_update_state_locked(
+        self,
+    ) -> tuple[str, str, str | typing.Literal[False]]:
         with git.Repo() as repo:
             origin = repo.remote("origin")
             now = time.monotonic()
@@ -328,8 +338,7 @@ class UpdaterMod(loader.Module):
             await self._ensure_preferred_branch()
         async def _boot_check():
             await asyncio.sleep(3)  # let inline bot / net settle
-            with contextlib.suppress(Exception):
-                self._fetch_branch()
+            # poller() does the first fetch itself (in a worker thread)
             with contextlib.suppress(Exception):
                 await self.poller()
         asyncio.ensure_future(_boot_check())
@@ -364,14 +373,20 @@ class UpdaterMod(loader.Module):
     async def poller(self):
         if NO_GIT:
             return
+        # git/GitPython calls block → run them in a worker thread, otherwise the
+        # whole userbot freezes while `git fetch` is running
         try:
-            current, self._pending, changelog = self._get_update_state()
+            current, self._pending, changelog = await utils.run_sync(
+                self._get_update_state
+            )
         except Exception as e:
             # origin/<branch> may be missing on single-branch clones — fetch and retry
             with contextlib.suppress(Exception):
-                self._fetch_branch()
+                await utils.run_sync(self._fetch_branch)
             try:
-                current, self._pending, changelog = self._get_update_state()
+                current, self._pending, changelog = await utils.run_sync(
+                    self._get_update_state
+                )
             except Exception as e2:
                 self._log_git_poll_error(e2)
                 return

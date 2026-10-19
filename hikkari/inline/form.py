@@ -456,6 +456,17 @@ class Form(InlineUnit):
                 or "WebpageCurl" in str(e)
                 or "No query results" in str(e)
             )
+            if "WebpageCurl" in ename or "WebpageCurl" in str(e):
+                # Telegram could not download this URL → never offer it again
+                # in this run (config falls back to the built-in banner)
+                unit = self._units.get(unit_id) or {}
+                for media_key in ("photo", "gif", "video", "file"):
+                    bad_url = unit.get(media_key)
+                    if isinstance(bad_url, str) and bad_url.startswith(
+                        ("http://", "https://")
+                    ):
+                        utils.mark_bad_media(bad_url)
+
             with contextlib.suppress(Exception):
                 del self._units[unit_id]
 
