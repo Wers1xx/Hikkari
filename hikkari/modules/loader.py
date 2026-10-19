@@ -151,8 +151,13 @@ class LoaderMod(loader.Module):
         except Exception:
             logger.exception("MODULES_REPO migrate")
 
-        while not (settings := self.lookup("settings")):
-            await asyncio.sleep(0.5)
+        for _ in range(40):
+            settings = self.lookup("settings")
+            if settings:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            settings = self.lookup("settings")
 
         self._storage = RemoteStorage(self._client)
 
@@ -2493,17 +2498,36 @@ class LoaderMod(loader.Module):
         await self.lookup("Updater").restart_common(call)
 
     async def _update_modules(self):
-        todo = await self._get_modules_to_load()
+        """Finish boot: only load missing external modules.
 
+        register_all() already loads core + disk modules. Re-loading everything
+        on every restart made boot take 1–2+ minutes.
+        """
+        todo = await self._get_modules_to_load()
         self._secure_boot = False
 
         if self._db.get(loader.__name__, "secure_boot", False):
             self._db.set(loader.__name__, "secure_boot", False)
             self._secure_boot = True
         else:
-            for cls_name, origin in list(todo.items()):
-                # Prefer already-saved file (reliable after .lm / HikkariFind)
-                disk = Path(loader.LOADED_MODULES_DIR) / f"{cls_name}_{self._client.tg_id}.py"
+            already = {
+                type(m).__name__ for m in (self.allmodules.modules or [])
+            }
+
+            async def _ensure_one(cls_name: str, origin) -> None:
+                if cls_name in already:
+                    return
+                if any(
+                    type(m).__name__ == cls_name
+                    or getattr(m, "name", None) == cls_name
+                    for m in (self.allmodules.modules or [])
+                ):
+                    return
+
+                disk = (
+                    Path(loader.LOADED_MODULES_DIR)
+                    / f"{cls_name}_{self._client.tg_id}.py"
+                )
                 if disk.is_file() and disk.stat().st_size > 0:
                     try:
                         src = disk.read_text(encoding="utf-8")
@@ -2522,46 +2546,55 @@ class LoaderMod(loader.Module):
                             quiet=True,
                         )
                         if ok:
-                            logger.info("Loaded %s from disk %s", cls_name, disk.name)
-                            continue
-                        logger.warning(
-                            "Disk load failed for %s, re-downloading from %s",
-                            cls_name,
-                            origin,
-                        )
+                            logger.debug("Loaded missing %s from disk", cls_name)
+                            return
                     except Exception:
-                        logger.exception(
-                            "Disk load error for %s — fallback to download",
-                            cls_name,
-                        )
-                # URL / remote origin
-                if isinstance(origin, str) and (
-                    origin.startswith("http://")
-                    or origin.startswith("https://")
-                    or origin.startswith("ftp://")
+                        logger.exception("Disk load error for %s", cls_name)
+
+                if isinstance(origin, str) and origin.startswith(
+                    ("http://", "https://", "ftp://")
                 ):
-                    await self.download_and_install(origin)
+                    try:
+                        await self.download_and_install(origin)
+                    except Exception:
+                        logger.exception("Download failed for %s", cls_name)
                 else:
                     logger.warning(
-                        "Skip reload of %s: origin is not a URL (%s)",
+                        "Skip %s: not loaded and origin is not a URL (%s)",
                         cls_name,
                         origin,
                     )
 
+            missing = [(c, o) for c, o in list(todo.items()) if c not in already]
+            if missing:
+                sem = asyncio.Semaphore(6)
+
+                async def _wrapped(item):
+                    async with sem:
+                        await _ensure_one(*item)
+
+                await asyncio.gather(
+                    *(_wrapped(x) for x in missing),
+                    return_exceptions=True,
+                )
+
             self.update_modules_in_db()
 
-            aliases = {
-                alias: cmd
-                for alias, cmd in self.lookup("settings").get("aliases", {}).items()
-                if self.allmodules.add_alias(alias, *cmd.split(maxsplit=1))
-            }
-
-            self.lookup("settings").set("aliases", aliases)
+            with contextlib.suppress(Exception):
+                aliases = {
+                    alias: cmd
+                    for alias, cmd in self.lookup("settings")
+                    .get("aliases", {})
+                    .items()
+                    if self.allmodules.add_alias(alias, *cmd.split(maxsplit=1))
+                }
+                self.lookup("settings").set("aliases", aliases)
 
         self.fully_loaded = True
 
         with contextlib.suppress(AttributeError):
             await self.lookup("Updater").full_restart_complete(self._secure_boot)
+
 
     def flush_cache(self) -> int:
         """Flush the cache of links to modules"""
