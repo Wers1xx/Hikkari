@@ -64,7 +64,7 @@ class UpdaterMod(loader.Module):
 
     strings = {"name": "Updater"}
     # `git fetch` over the network; poller() itself still runs every 60s locally
-    _GIT_FETCH_INTERVAL = 600
+    _GIT_FETCH_INTERVAL = 120
     _EMFILE_FETCH_BACKOFF = 900
 
     def __init__(self):
@@ -91,6 +91,7 @@ class UpdaterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "disable_notifications",
+                False,
                 doc=lambda: self.strings["_cfg_doc_disable_notifications"],
                 validator=loader.validators.Boolean(),
             ),
@@ -333,16 +334,6 @@ class UpdaterMod(loader.Module):
         except Exception:
             return ""
 
-    async def client_ready(self):
-        with contextlib.suppress(Exception):
-            await self._ensure_preferred_branch()
-        async def _boot_check():
-            await asyncio.sleep(3)  # let inline bot / net settle
-            # poller() does the first fetch itself (in a worker thread)
-            with contextlib.suppress(Exception):
-                await self.poller()
-        asyncio.ensure_future(_boot_check())
-
     @loader.loop(interval=60, autostart=True)
     async def poller_announcement(self):
         async with aiohttp.ClientSession() as session:
@@ -369,8 +360,31 @@ class UpdaterMod(loader.Module):
             except Exception:
                 pass
 
+    async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
+        """Notify owner via inline bot, fallback to user client."""
+        markup = reply_markup
+        bot = getattr(getattr(self, "inline", None), "bot", None)
+        if bot is not None:
+            try:
+                kw = {"disable_web_page_preview": True}
+                if markup is not None:
+                    kw["reply_markup"] = markup
+                return await bot.send_message(self.tg_id, text, **kw)
+            except Exception:
+                logger.debug("bot notify failed", exc_info=True)
+        try:
+            return await self._client.send_message(
+                self.tg_id,
+                text,
+                link_preview=False,
+            )
+        except Exception:
+            logger.warning("owner notify failed", exc_info=True)
+            return None
+
     @loader.loop(interval=60, autostart=True)
     async def poller(self):
+
         if NO_GIT:
             return
         # git/GitPython calls block → run them in a worker thread, otherwise the
@@ -404,24 +418,29 @@ class UpdaterMod(loader.Module):
             return
 
         if self._pending not in {current, self._notified}:
-            m = await self.inline.bot.send_message(
-                self.tg_id,
-                self.strings["update_required"].format(
-                    current[:6],
-                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                        current[:12],
-                        self._pending[:12],
-                        self._pending[:6],
-                    ),
-                    changelog,
+            text = self.strings["update_required"].format(
+                current[:6],
+                '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                    current[:12],
+                    self._pending[:12],
+                    self._pending[:6],
                 ),
-                reply_markup=self._markup(),
-                disable_web_page_preview=True,
+                changelog,
             )
+            markup = None
+            with contextlib.suppress(Exception):
+                markup = self._markup() if callable(getattr(self, "_markup", None)) else None
+            m = await self._send_owner_notice(text, reply_markup=markup)
             self._notified = self._pending
             self.set("ignore_permanent", False)
-            await self._delete_all_upd_messages()
-            self.set("upd_msg", m.message_id)
+            with contextlib.suppress(Exception):
+                await self._delete_all_upd_messages()
+            mid = None
+            with contextlib.suppress(Exception):
+                mid = getattr(m, "message_id", None) or getattr(m, "id", None)
+            if mid is not None:
+                self.set("upd_msg", mid)
+            logger.info("Update notification sent pending=%s", (self._pending or "")[:7])
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
@@ -1436,8 +1455,6 @@ class UpdaterMod(loader.Module):
         )
 
     async def client_ready(self):
-        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
-            return
         try:
             with git.Repo():
                 pass
@@ -1447,20 +1464,27 @@ class UpdaterMod(loader.Module):
         if not self.get("autoupdate_answered"):
             self.set("autoupdate_answered", self.get("autoupdate", False))
 
-        self._markup = lambda: self.inline.generate_markup(
-            [
-                {
-                    "text": self.strings["update"],
-                    "data": "hikkari/update",
-                    "style": "primary",
-                },
-                {
-                    "text": self.strings["ignore"],
-                    "data": "hikkari/ignore_upd",
-                    "style": "danger",
-                },
-            ]
-        )
+        # Markup always available for poller (even if bot is late)
+        def _mk():
+            try:
+                return self.inline.generate_markup(
+                    [
+                        {
+                            "text": self.strings["update"],
+                            "data": "hikkari/update",
+                            "style": "primary",
+                        },
+                        {
+                            "text": self.strings["ignore"],
+                            "data": "hikkari/ignore_upd",
+                            "style": "danger",
+                        },
+                    ]
+                )
+            except Exception:
+                return None
+
+        self._markup = _mk
 
         if self.get("selfupdatemsg") is not None:
             try:
@@ -1468,18 +1492,16 @@ class UpdaterMod(loader.Module):
             except Exception:
                 logger.exception("Failed to complete update!")
 
-        if self.get("do_not_create", False):
-            pass
-        else:
+        if not self.get("do_not_create", False):
             try:
                 await self._add_folder()
             except Exception:
                 logger.exception("Failed to add folder!")
-
             self.set("do_not_create", True)
 
         # Autoupdate disabled by design — no startup prompt
-        self.config["autoupdate"] = False
+        with contextlib.suppress(Exception):
+            self.config["autoupdate"] = False
         self.set("autoupdate_answered", True)
 
         rb = Path.cwd() / ".hikkari_update_rolled_back"
@@ -1488,16 +1510,26 @@ class UpdaterMod(loader.Module):
                 old = rb.read_text(encoding="utf-8").strip()
                 rb.unlink(missing_ok=True)
                 self._clear_pre_update()
-                await self.inline.bot.send_message(
-                    self.tg_id,
-                    self.strings.get(
-                        "update_auto_rollback",
-                        "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
-                    ).format(sha=(old or "?")[:7]),
-                )
+                text = self.strings.get(
+                    "update_auto_rollback",
+                    "⚠️ <b>Update broke startup and was rolled back</b> to <code>{sha}</code>.",
+                ).format(sha=(old or "?")[:7])
+                await self._send_owner_notice(text)
         else:
             with contextlib.suppress(Exception):
                 self._clear_pre_update()
+
+        with contextlib.suppress(Exception):
+            await self._ensure_preferred_branch()
+
+        async def _boot_poll():
+            await asyncio.sleep(8)
+            with contextlib.suppress(Exception):
+                # Force a fresh fetch on first poll after start
+                self._last_git_fetch = 0.0
+                await self.poller()
+
+        asyncio.ensure_future(_boot_poll())
 
     async def _add_folder(self):
         folders = await self._client(GetDialogFiltersRequest())
