@@ -107,127 +107,107 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI with banner like Ping/Info (resolve_banner_media + URL).
-
-        - InlineCall / InlineMessage → edit text+buttons only (no form re-invoke)
-        - Message → utils.answer with InputMediaWebPage / local file (ping-style),
-          buttons via form without remote media attachment (avoids WebpageCurl /
-          QueryIdInvalid on slow video uploads)
-        """
+        """One form message: banner + text + buttons (no double send)."""
         import contextlib
         import logging
         from pathlib import Path as _P
-
-        from hikkaritl.tl.types import InputMediaWebPage
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
 
         _log = logging.getLogger(__name__)
         markup = reply_markup if reply_markup is not None else []
 
-        # Callbacks must never call form() with InlineCall as message=
+        # Callback navigation: edit in place, never open a new form
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             with contextlib.suppress(Exception):
                 await message.edit(text, reply_markup=markup)
                 return message
             return None
 
-        raw = str(self.config.get("banner_url") or "").strip()
-        banner = None
-        with contextlib.suppress(Exception):
-            banner = utils.resolve_banner_media(raw) if raw else None
-        if not banner:
-            with contextlib.suppress(Exception):
-                p = utils.ensure_builtin_asset("hikkari-config.jpg")
-                if p and _P(str(p)).is_file():
-                    banner = str(p)
+        for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
+            kwargs.pop(k, None)
 
-        # Ping-style media object for classic send/edit
-        answer_file = None
-        form_media: dict = {}
-        if isinstance(banner, str) and _P(banner).is_file():
-            low = banner.lower()
-            if low.endswith((".mp4", ".mov", ".webm")):
-                form_media = {"video": banner}
-            elif low.endswith(".gif"):
-                form_media = {"gif": banner}
-            else:
-                form_media = {"photo": banner}
-            answer_file = banner
-        elif isinstance(banner, str) and banner.startswith(("http://", "https://")):
-            # Same as Ping: webpage media from URL (no local download)
-            answer_file = InputMediaWebPage(banner, optional=True)
-        elif banner is not None and type(banner).__name__ == "InputMediaWebPage":
-            answer_file = banner
+        media = self._cfg_banner_kwargs()
+        form_kw = dict(
+            text=text,
+            message=message,
+            reply_markup=markup,
+            silent=True,
+            force_me=True,
+            **media,
+            **kwargs,
+        )
 
-        invert = True
-        with contextlib.suppress(Exception):
-            invert = bool(self.config.get("invert_media", True))
-
-        # 1) Prefer classic answer with URL media (works for x0.at like Ping)
-        if answer_file is not None and not form_media:
-            try:
-                await utils.answer(
-                    message,
-                    text,
-                    file=answer_file,
-                    invert_media=invert,
-                    skip_rich=True,
-                    link_preview=True,
-                )
-            except Exception:
-                _log.debug("cfg answer with webpage media failed", exc_info=True)
-
-        # 2) Interactive buttons: form without remote URL media
         try:
-            m = await self.inline.form(
-                text,
-                message=message,
-                reply_markup=markup,
-                silent=True,
-                force_me=True,
-                **form_media,
-            )
+            m = await self.inline.form(**form_kw)
             if m:
                 return m
         except Exception:
-            _log.exception("cfg form failed")
+            _log.exception("cfg form with banner failed")
 
+        # Text+buttons only if media rejected
+        for k in ("photo", "video", "gif", "file", "audio"):
+            form_kw.pop(k, None)
         with contextlib.suppress(Exception):
-            return await self.inline.form(
-                text,
-                message=message,
-                reply_markup=markup,
-                silent=True,
-                force_me=True,
-            )
+            return await self.inline.form(**form_kw)
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Local media only for form attachments (remote URL → Ping-style path)."""
-        from pathlib import Path as _P
+        """Banner for the config form: local file or remote URL (photo/video).
 
-        raw = str(self.config.get("banner_url") or "").strip()
-        if not raw:
+        Same idea as Ping: use the URL. Form attaches photo=/video= so media
+        and buttons stay on ONE via@ message.
+        """
+        from pathlib import Path as _P
+        from urllib.parse import urlparse
+
+        def _default() -> dict:
             p = utils.ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():
                 return {"photo": str(p)}
             return {}
+
+        def _by_url_or_path(s: str) -> dict:
+            low = s.lower().split("?", 1)[0]
+            path = ""
+            with contextlib.suppress(Exception):
+                path = (urlparse(s).path if s.startswith("http") else s).lower()
+            if any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm")):
+                return {"video": s}
+            if any(low.endswith(e) or path.endswith(e) for e in (".gif",)):
+                return {"gif": s}
+            return {"photo": s}
+
+        raw = str(self.config.get("banner_url") or "").strip()
+        if not raw:
+            return _default()
+
+        # Skip URLs Telegram already refused this run
+        if utils.is_bad_media(raw):
+            return _default()
 
         banner = None
         with contextlib.suppress(Exception):
             banner = utils.resolve_banner_media(raw)
 
         if isinstance(banner, str) and _P(banner).is_file():
-            low = banner.lower()
-            if low.endswith((".mp4", ".mov", ".webm")):
-                return {"video": banner}
-            if low.endswith(".gif"):
-                return {"gif": banner}
-            return {"photo": banner}
+            return _by_url_or_path(str(_P(banner).resolve()))
 
-        # Remote — no form photo/video (handled via InputMediaWebPage in _cfg_form)
-        return {}
+        if isinstance(banner, str) and banner.startswith(("http://", "https://")):
+            return _by_url_or_path(banner)
+
+        # InputMediaWebPage from resolve_banner_media → use URL on the form
+        url = getattr(banner, "url", None) if banner is not None else None
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            return _by_url_or_path(url)
+
+        if raw.startswith(("http://", "https://")):
+            return _by_url_or_path(raw)
+
+        if _P(raw).is_file():
+            return _by_url_or_path(raw)
+
+        return _default()
 
 
     @staticmethod
