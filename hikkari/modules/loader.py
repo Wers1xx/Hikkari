@@ -1375,8 +1375,7 @@ class LoaderMod(loader.Module):
                     lines.append(f"• <code>{utils.escape_html(str(row[0]))}</code>")
                 elif isinstance(row, str) and row.strip():
                     lines.append(f"• <code>{utils.escape_html(row.strip())}</code>")
-            text = "
-".join(lines)
+            text = "\n".join(lines)
             edited = False
             with contextlib.suppress(Exception):
                 await call.edit(text)
