@@ -451,17 +451,20 @@ class Form(InlineUnit):
             return False
         except Exception as e:
             ename = type(e).__name__
-            # Media URL Telegram cannot fetch — drop media flags so next form works
-            if "WebpageCurl" in ename or "WebpageCurl" in str(e):
-                logger.warning(
-                    "form media URL rejected by Telegram (WebpageCurlFailed); "
-                    "retry as text-only is not possible for this query — "
-                    "open config again without external video banner"
-                )
-            logger.exception("Can't send form")
-
+            soft = (
+                "WebpageCurl" in ename
+                or "WebpageCurl" in str(e)
+                or "No query results" in str(e)
+            )
             with contextlib.suppress(Exception):
                 del self._units[unit_id]
+
+            if soft:
+                # Caller (e.g. config) retries text-only; do not spam the chat
+                logger.warning("Can't send form (media rejected): %s", ename)
+                return False
+
+            logger.exception("Can't send form")
 
             if "No query results" in str(e):
                 await answer(
@@ -469,7 +472,6 @@ class Form(InlineUnit):
                         prefix=getattr(self._client, "command_prefix", "."),
                     ),
                 )
-
             else:
                 await answer(
                     self.translator.getkey("inline.invoke_failed_logs").format(

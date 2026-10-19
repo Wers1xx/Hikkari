@@ -186,29 +186,29 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Resolve banner like Ping/Info/Help via resolve_banner_media.
+        """Config form banner — LOCAL files only.
 
-        Returns form kwargs: photo / video / gif. Empty banner_url → built-in image.
+        Ping/Info use InputMediaWebPage on normal messages (works).
+        Inline forms use SendInlineBotResult: Telegram fetches the URL itself
+        and dies with WebpageCurlFailed on most hosts. Never pass http(s)
+        media into form(); only local paths that the client uploads.
         """
         from pathlib import Path as _P
-
         from ..utils.other import ensure_builtin_asset
 
-        def _local_default() -> dict:
+        def _default() -> dict:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():
                 return {"photo": str(p)}
             return {}
 
-        def _kind(path_or_url: str) -> dict:
-            low = path_or_url.lower().split("?", 1)[0]
+        def _from_local(path: str) -> dict:
+            low = path.lower()
             if low.endswith((".mp4", ".mov", ".webm")):
-                return {"video": path_or_url}
+                return {"video": path}
             if low.endswith(".gif"):
-                return {"gif": path_or_url}
-            if low.endswith((".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus")):
-                return {}  # audio banners not for config forms
-            return {"photo": path_or_url}
+                return {"gif": path}
+            return {"photo": path}
 
         raw = ""
         with contextlib.suppress(Exception):
@@ -222,40 +222,32 @@ class HikkariConfigMod(loader.Module):
                 ).strip()
 
         if not raw:
-            return _local_default()
+            return _default()
 
-        # Same resolver as Ping / Info / Help
+        # Resolve like Ping, but only accept local file results
         banner = None
         with contextlib.suppress(Exception):
             banner = utils.resolve_banner_media(raw)
 
-        if banner is None:
-            return _local_default()
+        candidates = []
+        if isinstance(banner, str) and not banner.startswith(
+            ("http://", "https://", "audio_ref:", "audio:")
+        ):
+            candidates.append(banner)
+        if raw and not raw.startswith(("http://", "https://")):
+            candidates.append(raw)
+        if raw.startswith("local:"):
+            with contextlib.suppress(Exception):
+                p = ensure_builtin_asset(raw[6:].lstrip("/"))
+                if p:
+                    candidates.append(str(p))
 
-        # audio_ref / audio: — not embeddable in config inline form
-        if isinstance(banner, str) and banner.startswith(("audio_ref:", "audio:")):
-            return _local_default()
+        for c in candidates:
+            if c and _P(c).is_file():
+                return _from_local(str(_P(c).resolve()))
 
-        # Local file path
-        if isinstance(banner, str) and _P(banner).is_file():
-            return _kind(banner)
-
-        # http(s) URL string
-        if isinstance(banner, str) and banner.startswith(("http://", "https://")):
-            return _kind(banner)
-
-        # InputMediaWebPage from resolve_banner_media
-        url = getattr(banner, "url", None)
-        if isinstance(url, str) and url.startswith(("http://", "https://")):
-            return _kind(url)
-
-        # Fallback: raw config value if it looks usable
-        if raw.startswith(("http://", "https://")):
-            return _kind(raw)
-        if _P(raw).is_file():
-            return _kind(raw)
-
-        return _local_default()
+        # Remote URL or unresolved → built-in local image (form always opens)
+        return _default()
 
 
     @staticmethod
