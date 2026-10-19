@@ -157,65 +157,46 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI in the same chat: photo banner + full text caption."""
+        """form() with config banner when available (old format)."""
         import logging
         import contextlib
         _log = logging.getLogger(__name__)
 
-        for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
-            kwargs.pop(k, None)
+        kw = dict(kwargs)
+        for k in ("photo", "video", "gif", "file", "audio"):
+            kw.pop(k, None)
+        kw.pop("rich_message", None)
 
-        markup = reply_markup if reply_markup is not None else []
-        photo = self._cfg_banner_photo_url()
-        # Caption limit with media is 1024 — keep text visible
-        body = self._clip_cfg_text(text or "⚙️", 1000)
+        banner = self._cfg_banner_kwargs()
+        kw.update(banner)
 
         form_kwargs = dict(
-            text=body,
+            text=text or "⚙️",
             message=message,
-            reply_markup=markup,
+            reply_markup=reply_markup if reply_markup is not None else [],
             silent=True,
             force_me=True,
+            **kw,
         )
-        if photo:
-            form_kwargs["photo"] = photo
 
         try:
             form_msg = await self.inline.form(**form_kwargs)
             if form_msg:
                 return form_msg
         except Exception:
-            _log.exception("cfg form with banner failed")
+            _log.exception("cfg form failed")
 
-        # Fallback without media (still with full text)
-        form_kwargs.pop("photo", None)
-        form_kwargs["text"] = self._clip_cfg_text(text or "⚙️", 3500)
+        # Fallback: text only (no media) so config still opens
+        for k in ("photo", "video", "gif", "file", "audio"):
+            form_kwargs.pop(k, None)
         with contextlib.suppress(Exception):
             return await self.inline.form(**form_kwargs)
         return None
 
-
-    _DEFAULT_BANNER_URL = (
-        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
-    )
-
-    def _cfg_banner_photo_url(self) -> str:
-        """Local file or trusted image URL for config form banner.
-
-        Prefer local asset (uploaded by client — no WebpageCurlFailed).
-        Video banner_url is ignored for display (TG cannot fetch many hosts).
-        """
+    def _cfg_banner_kwargs(self) -> dict:
+        """Old format: only attach media if banner_url is set. No default photo."""
         from urllib.parse import urlparse
         from pathlib import Path as _P
-
-        # 1) Always have a local fallback
-        local = None
-        with contextlib.suppress(Exception):
-            local = utils.ensure_builtin_asset("hikkari-config.jpg")
-        if local and _P(str(local)).is_file():
-            default = str(local)
-        else:
-            default = self._DEFAULT_BANNER_URL
 
         raw = None
         with contextlib.suppress(Exception):
@@ -223,51 +204,36 @@ class HikkariConfigMod(loader.Module):
         if not raw:
             with contextlib.suppress(Exception):
                 raw = (self.db.get("HikkariConfig", "banner_url", None) or "").strip()
-
         if not raw:
-            return default
-
-        # local: path or existing file
-        if str(raw).startswith("local:"):
-            name = str(raw)[6:].lstrip("/")
-            p = utils.ensure_builtin_asset(name)
-            if p and _P(str(p)).is_file():
-                return str(p)
-            return default
-
-        if _P(str(raw)).is_file():
-            return str(raw)
-
-        if not str(raw).startswith("http"):
-            return default
+            return {}
 
         url = str(raw).strip()
         low = url.lower()
-        path = (urlparse(url).path or "").lower()
-        host = (urlparse(url).hostname or "").lower()
+        path = ""
+        with contextlib.suppress(Exception):
+            path = (urlparse(url).path or "").lower()
 
-        if any(
-            x in low or path.endswith(x)
-            for x in (".mp4", ".mov", ".webm", ".gif", "mime=video", "format=gif")
-        ):
-            return default
+        # local file path
+        if not url.startswith("http") and _P(url).is_file():
+            if any(path.endswith(x) or url.lower().endswith(x) for x in (".mp4", ".mov", ".webm")):
+                return {"video": url}
+            if url.lower().endswith(".gif"):
+                return {"gif": url}
+            return {"photo": url}
 
-        trusted = (
-            host.endswith("github.com")
-            or host.endswith("githubusercontent.com")
-            or host.endswith("telegram.org")
-            or host.endswith("telesco.pe")
-            or host.endswith("cdn-telegram.org")
-            or host.endswith("imgur.com")
-            or host.endswith("i.imgur.com")
-        )
-        if trusted:
-            return url
-        return default
+        if not url.startswith("http"):
+            return {}
 
-    def _cfg_banner_kwargs(self) -> dict:
-        photo = self._cfg_banner_photo_url()
-        return {"photo": photo} if photo else {}
+        # http(s): pick type by extension (old behavior used photo for all —
+        # keep photo for images only; video/gif as proper keys; unknown → photo)
+        if any(x in low or path.endswith(x) for x in (".mp4", ".mov", ".webm")):
+            return {"video": url}
+        if any(x in low or path.endswith(x) for x in (".gif",)):
+            return {"gif": url}
+        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            return {"photo": url}
+        # bare URL without clear type — do not force photo (user asked no random photo)
+        return {}
 
 
     @staticmethod
