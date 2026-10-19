@@ -157,55 +157,50 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI only via inline form in the SAME chat (no bot-PM / rich divert)."""
+        """Config UI in the same chat: photo banner + full text caption."""
         import logging
         import contextlib
         _log = logging.getLogger(__name__)
 
-        for k in ("photo", "video", "gif", "file", "audio"):
+        for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
         markup = reply_markup if reply_markup is not None else []
-        banner = self._cfg_banner_kwargs()
-        # Always build rich body so text never disappears.
-        rich = kwargs.pop("rich_message", None) or self._cfg_rich_html(
-            text, title="⚙️ Hikkari Config"
-        )
-        # Prefer text+rich. Optional photo only if TG can fetch it (trusted host).
+        photo = self._cfg_banner_photo_url()
+        # Caption limit with media is 1024 — keep text visible
+        body = self._clip_cfg_text(text or "⚙️", 1000)
+
         form_kwargs = dict(
-            text=text or "⚙️",
+            text=body,
             message=message,
             reply_markup=markup,
             silent=True,
             force_me=True,
-            rich_message=rich,
         )
-        # Do not pass photo together with rich — media caption path drops body text
-        # Photo-only without rich if explicitly photo banner and no need for rich
-        # Keep rich always so config pages keep full text.
+        if photo:
+            form_kwargs["photo"] = photo
 
         try:
             form_msg = await self.inline.form(**form_kwargs)
             if form_msg:
                 return form_msg
         except Exception:
-            _log.exception("cfg form failed")
+            _log.exception("cfg form with banner failed")
 
-        form_kwargs.pop("rich_message", None)
-        for k in ("photo", "video", "gif", "file", "audio"):
-            form_kwargs.pop(k, None)
+        # Fallback without media (still with full text)
+        form_kwargs.pop("photo", None)
+        form_kwargs["text"] = self._clip_cfg_text(text or "⚙️", 3500)
         with contextlib.suppress(Exception):
             return await self.inline.form(**form_kwargs)
         return None
 
 
-    def _cfg_banner_kwargs(self) -> dict:
-        """Banner media for forms.
+    _DEFAULT_BANNER = (
+        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
+    )
 
-        Video URLs almost always fail TG WebpageCurl on SendInlineBotResult —
-        never attach them (value still stored in config). Photos only from
-        hosts Telegram can reliably fetch; otherwise empty → text+rich form.
-        """
+    def _cfg_banner_photo_url(self) -> str:
+        """Image URL for config form banner (never video — TG curl fails)."""
         from urllib.parse import urlparse
 
         raw = None
@@ -214,31 +209,40 @@ class HikkariConfigMod(loader.Module):
         if not raw:
             with contextlib.suppress(Exception):
                 raw = (self.db.get("HikkariConfig", "banner_url", None) or "").strip()
+
+        default = self._DEFAULT_BANNER
         if not raw or not str(raw).startswith("http"):
-            return {}
+            return default
 
         url = str(raw).strip()
         low = url.lower()
         path = (urlparse(url).path or "").lower()
         host = (urlparse(url).hostname or "").lower()
 
-        # Video: never attach to inline form (curl fails → form dies, text lost)
-        if any(x in low or path.endswith(x) for x in (".mp4", ".mov", ".webm", "mime=video")):
-            return {}
-        if any(x in low or path.endswith(x) for x in (".gif", ".mp4.gif", "format=gif")):
-            return {}
+        # Video/gif cannot be used as form photo
+        if any(
+            x in low or path.endswith(x)
+            for x in (".mp4", ".mov", ".webm", ".gif", "mime=video", "format=gif")
+        ):
+            return default
 
-        # Photos: only trusted hosts (TG servers can fetch these)
         trusted = (
             host.endswith("github.com")
             or host.endswith("githubusercontent.com")
             or host.endswith("telegram.org")
             or host.endswith("telesco.pe")
             or host.endswith("cdn-telegram.org")
+            or host.endswith("imgur.com")
+            or host.endswith("i.imgur.com")
         )
-        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")) and trusted:
-            return {"photo": url}
-        return {}
+        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            return url if trusted else default
+        # Unknown type — only try if host is trusted
+        return url if trusted else default
+
+    def _cfg_banner_kwargs(self) -> dict:
+        photo = self._cfg_banner_photo_url()
+        return {"photo": photo} if photo else {}
 
 
     @staticmethod
