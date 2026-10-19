@@ -157,83 +157,92 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner when available (old format)."""
-        import logging
+        """form() with config banner when available (photo / video / gif / file)."""
         import contextlib
+        import logging
+
         _log = logging.getLogger(__name__)
-
         kw = dict(kwargs)
-        for k in ("photo", "video", "gif", "file", "audio"):
+        for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kw.pop(k, None)
-        kw.pop("rich_message", None)
 
-        banner = self._cfg_banner_kwargs()
-        kw.update(banner)
-
-        form_kwargs = dict(
-            text=text or "⚙️",
-            message=message,
-            reply_markup=reply_markup if reply_markup is not None else [],
-            silent=True,
-            force_me=True,
-            **kw,
-        )
+        kw.update(self._cfg_banner_kwargs())
+        if reply_markup is not None:
+            kw["reply_markup"] = reply_markup
+        kw.setdefault("silent", True)
+        kw.setdefault("force_me", True)
 
         try:
-            form_msg = await self.inline.form(**form_kwargs)
-            if form_msg:
-                return form_msg
+            m = await self.inline.form(text, message=message, **kw)
+            if m:
+                return m
         except Exception:
-            _log.exception("cfg form failed")
+            _log.exception("cfg form with banner failed")
 
-        # Fallback: text only (no media) so config still opens
+        # Text-only fallback if media rejected by Telegram
         for k in ("photo", "video", "gif", "file", "audio"):
-            form_kwargs.pop(k, None)
+            kw.pop(k, None)
         with contextlib.suppress(Exception):
-            return await self.inline.form(**form_kwargs)
+            return await self.inline.form(text, message=message, **kw)
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Old format: only attach media if banner_url is set. No default photo."""
-        from urllib.parse import urlparse
-        from pathlib import Path as _P
+        """Banner media for config forms: photo, video, gif, or local file.
 
-        raw = None
+        Same idea as the original: empty banner_url → built-in image.
+        URL / path with media extension picks the right form key so video
+        and gif are not forced into photo=.
+        """
+        from pathlib import Path as _P
+        from urllib.parse import urlparse
+
+        from ..utils.other import ensure_builtin_asset
+
+        url = ""
         with contextlib.suppress(Exception):
-            raw = (self.config.get("banner_url") or self.config.get("banner") or "").strip()
-        if not raw:
+            url = str(self.config.get("banner_url") or self.config.get("banner") or "").strip()
+        if not url:
             with contextlib.suppress(Exception):
-                raw = (self.db.get("HikkariConfig", "banner_url", None) or "").strip()
-        if not raw:
+                url = str(self.db.get("HikkariConfig", "banner_url", None) or "").strip()
+
+        if not url:
+            p = ensure_builtin_asset("hikkari-config.jpg")
+            if p and _P(str(p)).is_file():
+                return {"photo": str(p)}
             return {}
 
-        url = str(raw).strip()
         low = url.lower()
         path = ""
         with contextlib.suppress(Exception):
-            path = (urlparse(url).path or "").lower()
+            path = (urlparse(url).path if url.startswith("http") else url).lower()
 
-        # local file path
+        def _is(*exts: str) -> bool:
+            return any(low.endswith(e) or path.endswith(e) for e in exts)
+
+        # Local filesystem path
         if not url.startswith("http") and _P(url).is_file():
-            if any(path.endswith(x) or url.lower().endswith(x) for x in (".mp4", ".mov", ".webm")):
+            if _is(".mp4", ".mov", ".webm"):
                 return {"video": url}
-            if url.lower().endswith(".gif"):
+            if _is(".gif"):
                 return {"gif": url}
             return {"photo": url}
 
-        if not url.startswith("http"):
+        if not url.startswith(("http://", "https://")):
+            # bare asset name
+            p = ensure_builtin_asset(url)
+            if p and _P(str(p)).is_file():
+                return {"photo": str(p)}
             return {}
 
-        # http(s): pick type by extension (old behavior used photo for all —
-        # keep photo for images only; video/gif as proper keys; unknown → photo)
-        if any(x in low or path.endswith(x) for x in (".mp4", ".mov", ".webm")):
+        if _is(".mp4", ".mov", ".webm"):
             return {"video": url}
-        if any(x in low or path.endswith(x) for x in (".gif",)):
+        if _is(".gif"):
             return {"gif": url}
-        if any(path.endswith(x) for x in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+        if _is(".png", ".jpg", ".jpeg", ".webp", ".bmp"):
             return {"photo": url}
-        # bare URL without clear type — do not force photo (user asked no random photo)
-        return {}
+
+        # No clear extension — try photo (old behaviour for generic links)
+        return {"photo": url}
 
 
     @staticmethod
