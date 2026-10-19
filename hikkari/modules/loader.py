@@ -168,7 +168,7 @@ class LoaderMod(loader.Module):
         asyncio.ensure_future(self._update_modules())
         asyncio.ensure_future(self._async_init())
 
-    @loader.loop(interval=3, wait_before=True, autostart=True)
+    @loader.loop(interval=12, wait_before=True, autostart=True)
     async def _config_autosaver(self):
         for mod in self.allmodules.modules:
             if (

@@ -669,7 +669,16 @@ class UpdaterMod(loader.Module):
         if chat_id is None or message_id is None:
             chat_id, message_id = self._load_status_delete_target()
         if chat_id is None or message_id is None:
+            with contextlib.suppress(Exception):
+                marker = Path.cwd() / ".hikkari_restart_status"
+                if marker.is_file():
+                    parts = marker.read_text(encoding="utf-8").strip().split(":")
+                    if len(parts) == 2:
+                        chat_id, message_id = int(parts[0]), int(parts[1])
+        if chat_id is None or message_id is None:
             self._clear_status_delete_target()
+            with contextlib.suppress(Exception):
+                (Path.cwd() / ".hikkari_restart_status").unlink(missing_ok=True)
             return
 
         try:
@@ -726,11 +735,25 @@ class UpdaterMod(loader.Module):
                                 deleted = True
 
         if not deleted:
-            logger.warning(
-                "status form delete failed chat=%s mid=%s", chat_id, message_id
-            )
+            # Retry once more after a short pause (bot / client race after restart)
+            await asyncio.sleep(2)
+            bot = getattr(getattr(self, "inline", None), "bot", None)
+            if bot is not None:
+                with contextlib.suppress(Exception):
+                    await bot.delete_message(int(chat_id), int(message_id))
+                    deleted = True
+            if not deleted:
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(int(chat_id), [int(message_id)])
+                    deleted = True
+            if not deleted:
+                logger.warning(
+                    "status form delete failed chat=%s mid=%s", chat_id, message_id
+                )
 
         self._clear_status_delete_target()
+        with contextlib.suppress(Exception):
+            (Path.cwd() / ".hikkari_restart_status").unlink(missing_ok=True)
 
 
     async def process_restart_message(self, msg_obj: InlineCall | Message):
@@ -760,15 +783,29 @@ class UpdaterMod(loader.Module):
             if mid is not None and chat_id is not None:
                 self._store_status_delete_target(chat_id, mid)
 
+        # Also try original msg_obj ids (via@bot message in chat)
+        with contextlib.suppress(Exception):
+            mid2 = getattr(msg_obj, "id", None) or getattr(msg_obj, "message_id", None)
+            if mid2 is not None:
+                chat2 = utils.get_chat_id(msg_obj)
+                if chat2 is not None:
+                    self._store_status_delete_target(chat2, mid2)
+
         if imid is not None:
             with contextlib.suppress(Exception):
                 self.set("selfupdatemsg", self._serialize_inline_message_id(imid))
-                return
+        else:
+            with contextlib.suppress(Exception):
+                mid = getattr(target, "id", None) or getattr(target, "message_id", None)
+                if mid is not None:
+                    self.set("selfupdatemsg", f"{utils.get_chat_id(target)}:{mid}")
 
+        # Persist delete target across process restart (db + file)
         with contextlib.suppress(Exception):
-            mid = getattr(target, "id", None) or getattr(target, "message_id", None)
-            if mid is not None:
-                self.set("selfupdatemsg", f"{utils.get_chat_id(target)}:{mid}")
+            chat_id, message_id = self._load_status_delete_target()
+            if chat_id is not None and message_id is not None:
+                marker = Path.cwd() / ".hikkari_restart_status"
+                marker.write_text(f"{chat_id}:{message_id}", encoding="utf-8")
 
     async def restart_common(
         self,
@@ -1647,7 +1684,7 @@ class UpdaterMod(loader.Module):
 
             if edited:
                 asyncio.ensure_future(
-                    self._delete_status_form_later(chat_id, message_id, delay=4)
+                    self._delete_status_form_later(chat_id, message_id, delay=5)
                 )
             self.set("selfupdatemsg", None)
             return
@@ -1680,7 +1717,7 @@ class UpdaterMod(loader.Module):
 
         self.set("selfupdatemsg", None)
         asyncio.ensure_future(
-            self._delete_status_form_later(chat_id, message_id, delay=4)
+            self._delete_status_form_later(chat_id, message_id, delay=5)
         )
 
     def _find_commit_for_version(self, ver: str) -> str | None:
