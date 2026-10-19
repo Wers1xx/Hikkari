@@ -1654,13 +1654,7 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        await utils.answer(
-            call,
-            self.strings["choose_core"],
-            photo=str(_cfg_banner) if _cfg_banner and Path(_cfg_banner).is_file() else None,
-            reply_markup=[
+        markup = [
                 [
                     {
                         "text": self.strings["builtin"],
@@ -1694,7 +1688,23 @@ class HikkariConfigMod(loader.Module):
                         "style": "danger",
                     }
                 ],
-            ],
+            ]
+        # Use configured banner (cached remote video/photo), not hard-coded default
+        banner = self._cfg_banner_kwargs()
+        try:
+            await self._cfg_form(
+                self.strings["choose_core"],
+                call,
+                reply_markup=markup,
+            )
+            return
+        except Exception:
+            pass
+        await utils.answer(
+            call,
+            self.strings["choose_core"],
+            reply_markup=markup,
+            **banner,
         )
 
     async def _send_initial_config_form(
@@ -1713,10 +1723,9 @@ class HikkariConfigMod(loader.Module):
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
-            form_kwargs["photo"] = str(_cfg_banner)
+        # Banner is resolved inside _cfg_form via _cfg_banner_kwargs (user URL / cache)
+        for k in ("photo", "video", "gif", "file", "audio"):
+            form_kwargs.pop(k, None)
         await self._cfg_form(
             draft.text,
             message=message,
