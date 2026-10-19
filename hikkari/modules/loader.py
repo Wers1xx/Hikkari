@@ -528,7 +528,50 @@ class LoaderMod(loader.Module):
 
 
 
+    async def _announce_module_loaded(
+        self,
+        message,
+        text: str,
+        reply_markup=None,
+    ) -> None:
+        """Show load result without MessageIdInvalidError on stale/inline msgs."""
+        from ..inline.types import BotInlineCall, InlineCall, InlineMessage
+
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            with contextlib.suppress(Exception):
+                await message.edit(text, reply_markup=reply_markup or [])
+                return
+            with contextlib.suppress(Exception):
+                await message.delete()
+            with contextlib.suppress(Exception):
+                bot = getattr(self.inline, "bot", None)
+                if bot is not None:
+                    await bot.send_message(self.tg_id, text)
+                else:
+                    await self._client.send_message(self.tg_id, text)
+            return
+
+        try:
+            await utils.answer(
+                message,
+                text,
+                reply_markup=reply_markup,
+                skip_rich=True,
+            )
+            return
+        except Exception:
+            pass
+        # Stale message id after form/replace — send fresh
+        chat = None
+        with contextlib.suppress(Exception):
+            chat = utils.get_chat_id(message)
+        if chat is None:
+            chat = self.tg_id
+        with contextlib.suppress(Exception):
+            await self._client.send_message(chat, text)
+
     async def _rich_batch_loaded(
+
         self,
         message: Message,
         results: list[dict],
@@ -1301,35 +1344,55 @@ class LoaderMod(loader.Module):
         save_fs: bool,
         blob_link: bool,
     ):
-        await call.edit(self.strings["safety_installing"])
-        # Announce in the SAME chat where install started (not bot PM)
-        original = None
-        try:
-            uid = getattr(call, "unit_id", None)
-            if not uid and isinstance(getattr(call, "form", None), dict):
-                uid = call.form.get("id") or call.form.get("uid")
-            unit = (getattr(self.inline, "_units", None) or {}).get(uid or "")
-            if isinstance(unit, dict):
-                original = unit.get("message")
-        except Exception:
-            original = None
-        target = original if original is not None else call
+        with contextlib.suppress(Exception):
+            await call.edit(self.strings["safety_installing"])
+
+        # Load quietly — never edit a stale unit Message (MessageIdInvalidError)
         ok = await self.load_module(
             doc,
-            target,
+            call,
             name=name,
             origin=origin or "<string>",
             save_fs=save_fs,
             blob_link=blob_link,
             _safety_confirmed=True,
+            quiet=True,
+        )
+        info = getattr(self, "_last_loaded", None) or {}
+        modname = (
+            (info.get("name") if isinstance(info, dict) else None)
+            or name
+            or "module"
         )
         if ok:
-            # drop hanging "installing…" form; success already in chat via target
+            rows = (info.get("rows") if isinstance(info, dict) else None) or []
+            lines = [
+                f"<emoji document_id=5262880537416054812>✅</emoji> <b>{utils.escape_html(str(modname))}</b>",
+                "<i>Модуль установлен</i>",
+            ]
+            for row in rows[:12]:
+                if isinstance(row, (list, tuple)) and row:
+                    lines.append(f"• <code>{utils.escape_html(str(row[0]))}</code>")
+                elif isinstance(row, str) and row.strip():
+                    lines.append(f"• <code>{utils.escape_html(row.strip())}</code>")
+            text = "
+".join(lines)
+            edited = False
             with contextlib.suppress(Exception):
-                await call.delete()
+                await call.edit(text)
+                edited = True
+            if not edited:
+                with contextlib.suppress(Exception):
+                    await call.delete()
+                with contextlib.suppress(Exception):
+                    bot = getattr(self.inline, "bot", None)
+                    if bot is not None:
+                        await bot.send_message(self.tg_id, text)
+                    else:
+                        await self._client.send_message(self.tg_id, text)
         else:
             with contextlib.suppress(Exception):
-                await call.edit(self.strings["load_failed"])
+                await call.edit(self.strings.get("load_failed", "❌ Install failed"))
 
 
 
@@ -2078,11 +2141,10 @@ class LoaderMod(loader.Module):
             ):
                 return True
             # Classic only if rich fully failed
-            await utils.answer(
+            await self._announce_module_loaded(
                 message,
                 loaded_msg(),
                 reply_markup=subscribe_markup,
-                skip_rich=True,
             )
             return True
 
@@ -2169,7 +2231,7 @@ class LoaderMod(loader.Module):
                 skip_rich=True,
             )
         except MediaCaptionTooLongError:
-            await message.reply(loaded_msg(False))
+            await self._announce_module_loaded(message, loaded_msg(False))
 
         return True
 
