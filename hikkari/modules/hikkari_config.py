@@ -107,7 +107,7 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """One form message: banner + text + buttons (no double send)."""
+        """One form: banner + text + buttons. Remote video is cached once to disk."""
         import contextlib
         import logging
         from pathlib import Path as _P
@@ -117,7 +117,6 @@ class HikkariConfigMod(loader.Module):
         _log = logging.getLogger(__name__)
         markup = reply_markup if reply_markup is not None else []
 
-        # Callback navigation: edit in place, never open a new form
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             with contextlib.suppress(Exception):
                 await message.edit(text, reply_markup=markup)
@@ -126,6 +125,12 @@ class HikkariConfigMod(loader.Module):
 
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
+
+        # Pre-cache remote banner so form gets a local path (TG cannot curl x0.at etc.)
+        raw = str(self.config.get("banner_url") or "").strip()
+        if raw.startswith(("http://", "https://")):
+            with contextlib.suppress(Exception):
+                await utils.run_sync(utils.cache_remote_media, raw)
 
         media = self._cfg_banner_kwargs()
         form_kw = dict(
@@ -145,7 +150,6 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form with banner failed")
 
-        # Text+buttons only if media rejected
         for k in ("photo", "video", "gif", "file", "audio"):
             form_kw.pop(k, None)
         with contextlib.suppress(Exception):
@@ -153,11 +157,7 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner for the config form: local file or remote URL (photo/video).
-
-        Same idea as Ping: use the URL. Form attaches photo=/video= so media
-        and buttons stay on ONE via@ message.
-        """
+        """Local path preferred; remote URL cached for form video/photo."""
         from pathlib import Path as _P
         from urllib.parse import urlparse
 
@@ -167,7 +167,7 @@ class HikkariConfigMod(loader.Module):
                 return {"photo": str(p)}
             return {}
 
-        def _by_url_or_path(s: str) -> dict:
+        def _by_path(s: str) -> dict:
             low = s.lower().split("?", 1)[0]
             path = ""
             with contextlib.suppress(Exception):
@@ -182,30 +182,39 @@ class HikkariConfigMod(loader.Module):
         if not raw:
             return _default()
 
-        # Skip URLs Telegram already refused this run
-        if utils.is_bad_media(raw):
-            return _default()
+        # Local file
+        if not raw.startswith("http") and _P(raw).is_file():
+            return _by_path(raw)
 
         banner = None
         with contextlib.suppress(Exception):
             banner = utils.resolve_banner_media(raw)
 
         if isinstance(banner, str) and _P(banner).is_file():
-            return _by_url_or_path(str(_P(banner).resolve()))
+            return _by_path(str(_P(banner).resolve()))
 
-        if isinstance(banner, str) and banner.startswith(("http://", "https://")):
-            return _by_url_or_path(banner)
-
-        # InputMediaWebPage from resolve_banner_media → use URL on the form
-        url = getattr(banner, "url", None) if banner is not None else None
-        if isinstance(url, str) and url.startswith(("http://", "https://")):
-            return _by_url_or_path(url)
-
-        if raw.startswith(("http://", "https://")):
-            return _by_url_or_path(raw)
-
-        if _P(raw).is_file():
-            return _by_url_or_path(raw)
+        # Remote URL → must be on disk for inline form (client uploads file)
+        remote = raw if raw.startswith("http") else None
+        if not remote and banner is not None:
+            remote = getattr(banner, "url", None)
+            if isinstance(banner, str) and banner.startswith("http"):
+                remote = banner
+        if isinstance(remote, str) and remote.startswith("http"):
+            if utils.is_bad_media(remote):
+                # still try cache (our download, not TG curl)
+                pass
+            cached = None
+            with contextlib.suppress(Exception):
+                cached = utils.cache_remote_media(remote)
+            if cached and _P(str(cached)).is_file():
+                return _by_path(str(cached))
+            # Images: last try direct URL (sometimes works)
+            low = remote.lower().split("?", 1)[0]
+            path = (urlparse(remote).path or "").lower()
+            if not any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm", ".gif")):
+                if not utils.is_bad_media(remote):
+                    return {"photo": remote}
+            return _default()
 
         return _default()
 
