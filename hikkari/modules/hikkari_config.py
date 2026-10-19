@@ -157,7 +157,7 @@ class HikkariConfigMod(loader.Module):
         return True
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner when available (photo / video / gif / file)."""
+        """form() with config banner — same media resolution as Ping / Info / Help."""
         import contextlib
         import logging
 
@@ -179,7 +179,6 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.exception("cfg form with banner failed")
 
-        # Text-only fallback if media rejected by Telegram
         for k in ("photo", "video", "gif", "file", "audio"):
             kw.pop(k, None)
         with contextlib.suppress(Exception):
@@ -187,13 +186,12 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner for config forms.
+        """Resolve banner like Ping/Info/Help via resolve_banner_media.
 
-        Only LOCAL files are attached (remote http URLs cause WebpageCurlFailed /
-        No query results on SendInlineBotResult). banner_url in config is still
-        stored as-is; for display we use local asset or a local path.
+        Returns form kwargs: photo / video / gif. Empty banner_url → built-in image.
         """
         from pathlib import Path as _P
+
         from ..utils.other import ensure_builtin_asset
 
         def _local_default() -> dict:
@@ -202,39 +200,61 @@ class HikkariConfigMod(loader.Module):
                 return {"photo": str(p)}
             return {}
 
-        def _from_path(path: str) -> dict:
-            low = path.lower()
+        def _kind(path_or_url: str) -> dict:
+            low = path_or_url.lower().split("?", 1)[0]
             if low.endswith((".mp4", ".mov", ".webm")):
-                return {"video": path}
+                return {"video": path_or_url}
             if low.endswith(".gif"):
-                return {"gif": path}
-            return {"photo": path}
+                return {"gif": path_or_url}
+            if low.endswith((".mp3", ".ogg", ".m4a", ".flac", ".wav", ".opus")):
+                return {}  # audio banners not for config forms
+            return {"photo": path_or_url}
 
-        url = ""
+        raw = ""
         with contextlib.suppress(Exception):
-            url = str(
+            raw = str(
                 self.config.get("banner_url") or self.config.get("banner") or ""
             ).strip()
-        if not url:
+        if not raw:
             with contextlib.suppress(Exception):
-                url = str(self.db.get("HikkariConfig", "banner_url", None) or "").strip()
+                raw = str(
+                    self.db.get("HikkariConfig", "banner_url", None) or ""
+                ).strip()
 
-        if not url:
+        if not raw:
             return _local_default()
 
-        # local filesystem
-        if not url.startswith("http") and _P(url).is_file():
-            return _from_path(url)
+        # Same resolver as Ping / Info / Help
+        banner = None
+        with contextlib.suppress(Exception):
+            banner = utils.resolve_banner_media(raw)
 
-        if url.startswith("local:"):
-            name = url[6:].lstrip("/")
-            p = ensure_builtin_asset(name)
-            if p and _P(str(p)).is_file():
-                return _from_path(str(p))
+        if banner is None:
             return _local_default()
 
-        # Remote http(s) — do NOT attach (TG curl fails on most hosts).
-        # Keep default local photo so config still has a banner.
+        # audio_ref / audio: — not embeddable in config inline form
+        if isinstance(banner, str) and banner.startswith(("audio_ref:", "audio:")):
+            return _local_default()
+
+        # Local file path
+        if isinstance(banner, str) and _P(banner).is_file():
+            return _kind(banner)
+
+        # http(s) URL string
+        if isinstance(banner, str) and banner.startswith(("http://", "https://")):
+            return _kind(banner)
+
+        # InputMediaWebPage from resolve_banner_media
+        url = getattr(banner, "url", None)
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            return _kind(url)
+
+        # Fallback: raw config value if it looks usable
+        if raw.startswith(("http://", "https://")):
+            return _kind(raw)
+        if _P(raw).is_file():
+            return _kind(raw)
+
         return _local_default()
 
 
