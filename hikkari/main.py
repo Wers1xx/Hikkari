@@ -1302,12 +1302,23 @@ class Hikkari:
                 )
 
         channel_task = asyncio.ensure_future(_ensure_channel())
+        # Restart status ASAP (before other modules' client_ready work)
+        async def _early_restart_status():
+            try:
+                upd = modules.lookup("Updater")
+                if upd is not None and upd.get("selfupdatemsg") is not None:
+                    with contextlib.suppress(Exception):
+                        await upd.update_complete()
+            except Exception:
+                logging.debug("early restart status skipped", exc_info=True)
+
+        await _early_restart_status()
         await modules.send_ready()
         # Let channel finish without holding the badge/start path longer than needed
         with contextlib.suppress(Exception):
             await asyncio.wait_for(
             channel_task,
-            timeout=8 if os.environ.get("HIKKARI_FAST_START") else 20,
+            timeout=5,
         )
 
         if first:

@@ -187,62 +187,55 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner media for config forms: photo, video, gif, or local file.
+        """Banner for config forms.
 
-        Same idea as the original: empty banner_url → built-in image.
-        URL / path with media extension picks the right form key so video
-        and gif are not forced into photo=.
+        Only LOCAL files are attached (remote http URLs cause WebpageCurlFailed /
+        No query results on SendInlineBotResult). banner_url in config is still
+        stored as-is; for display we use local asset or a local path.
         """
         from pathlib import Path as _P
-        from urllib.parse import urlparse
-
         from ..utils.other import ensure_builtin_asset
 
-        url = ""
-        with contextlib.suppress(Exception):
-            url = str(self.config.get("banner_url") or self.config.get("banner") or "").strip()
-        if not url:
-            with contextlib.suppress(Exception):
-                url = str(self.db.get("HikkariConfig", "banner_url", None) or "").strip()
-
-        if not url:
+        def _local_default() -> dict:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():
                 return {"photo": str(p)}
             return {}
 
-        low = url.lower()
-        path = ""
+        def _from_path(path: str) -> dict:
+            low = path.lower()
+            if low.endswith((".mp4", ".mov", ".webm")):
+                return {"video": path}
+            if low.endswith(".gif"):
+                return {"gif": path}
+            return {"photo": path}
+
+        url = ""
         with contextlib.suppress(Exception):
-            path = (urlparse(url).path if url.startswith("http") else url).lower()
+            url = str(
+                self.config.get("banner_url") or self.config.get("banner") or ""
+            ).strip()
+        if not url:
+            with contextlib.suppress(Exception):
+                url = str(self.db.get("HikkariConfig", "banner_url", None) or "").strip()
 
-        def _is(*exts: str) -> bool:
-            return any(low.endswith(e) or path.endswith(e) for e in exts)
+        if not url:
+            return _local_default()
 
-        # Local filesystem path
+        # local filesystem
         if not url.startswith("http") and _P(url).is_file():
-            if _is(".mp4", ".mov", ".webm"):
-                return {"video": url}
-            if _is(".gif"):
-                return {"gif": url}
-            return {"photo": url}
+            return _from_path(url)
 
-        if not url.startswith(("http://", "https://")):
-            # bare asset name
-            p = ensure_builtin_asset(url)
+        if url.startswith("local:"):
+            name = url[6:].lstrip("/")
+            p = ensure_builtin_asset(name)
             if p and _P(str(p)).is_file():
-                return {"photo": str(p)}
-            return {}
+                return _from_path(str(p))
+            return _local_default()
 
-        if _is(".mp4", ".mov", ".webm"):
-            return {"video": url}
-        if _is(".gif"):
-            return {"gif": url}
-        if _is(".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-            return {"photo": url}
-
-        # No clear extension — try photo (old behaviour for generic links)
-        return {"photo": url}
+        # Remote http(s) — do NOT attach (TG curl fails on most hosts).
+        # Keep default local photo so config still has a banner.
+        return _local_default()
 
 
     @staticmethod

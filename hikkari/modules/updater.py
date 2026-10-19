@@ -1632,7 +1632,7 @@ class UpdaterMod(loader.Module):
 
             if edited:
                 asyncio.ensure_future(
-                    self._delete_status_form_later(chat_id, message_id, delay=8)
+                    self._delete_status_form_later(chat_id, message_id, delay=4)
                 )
             self.set("selfupdatemsg", None)
             return
@@ -1665,7 +1665,7 @@ class UpdaterMod(loader.Module):
 
         self.set("selfupdatemsg", None)
         asyncio.ensure_future(
-            self._delete_status_form_later(chat_id, message_id, delay=8)
+            self._delete_status_form_later(chat_id, message_id, delay=4)
         )
 
     def _find_commit_for_version(self, ver: str) -> str | None:
