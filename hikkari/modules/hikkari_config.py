@@ -147,67 +147,68 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Banner for config forms: photo or video only.
+        """Banner for config forms: photo or video.
 
-        - empty → built-in hikkari-config.jpg (local)
-        - local file → photo / video by extension
-        - http(s) image → photo
-        - http(s) video → video
+        Remote URLs (e.g. x0.at mp4) are cached once to disk, then attached as
+        a local file — Telegram cannot curl many hosts for inline forms.
         """
         from pathlib import Path as _P
         from urllib.parse import urlparse
 
-        from ..utils.other import ensure_builtin_asset
+        from ..utils.other import ensure_builtin_asset, cache_remote_media
 
-        url = str(self.config.get("banner_url") or "").strip()
-        # A URL Telegram already failed to download → use the built-in banner
-        if url and utils.is_bad_media(url):
-            url = ""
-        if not url:
+        def _default() -> dict:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(str(p)).is_file():
                 return {"photo": str(p)}
             return {}
 
-        low = url.lower()
-        path = ""
-        with contextlib.suppress(Exception):
-            path = (urlparse(url).path if url.startswith("http") else url).lower()
+        def _from_path(path: str) -> dict:
+            low = path.lower()
+            if low.endswith((".mp4", ".mov", ".webm")):
+                return {"video": path}
+            if low.endswith(".gif"):
+                return {"gif": path}
+            return {"photo": path}
 
-        def _is_video() -> bool:
-            return any(
-                low.endswith(e) or path.endswith(e)
-                for e in (".mp4", ".mov", ".webm")
-            )
+        url = str(self.config.get("banner_url") or "").strip()
+        if not url:
+            return _default()
 
-        def _is_photo() -> bool:
-            return any(
-                low.endswith(e) or path.endswith(e)
-                for e in (".png", ".jpg", ".jpeg", ".webp", ".bmp")
-            )
-
-        # Local path
+        # Local file
         if not url.startswith("http") and _P(url).is_file():
-            return {"video": url} if _is_video() else {"photo": url}
+            return _from_path(url)
 
-        # local: asset name
         if url.startswith("local:"):
             p = ensure_builtin_asset(url[6:].lstrip("/"))
             if p and _P(str(p)).is_file():
-                return {"photo": str(p)}
-            return {}
+                return _from_path(str(p))
+            return _default()
 
         if url.startswith(("http://", "https://")):
-            if _is_video():
-                return {"video": url}
-            # images and unknown extensions as photo (master behavior)
+            # Prefer local cache (works for x0.at and other hosts TG cannot curl)
+            cached = None
+            with contextlib.suppress(Exception):
+                cached = cache_remote_media(url)
+            if cached and _P(str(cached)).is_file():
+                return _from_path(str(cached))
+
+            # TG already rejected this URL and we could not cache → default
+            if utils.is_bad_media(url):
+                return _default()
+
+            # Last try: pass URL (may work for github raw images)
+            path = (urlparse(url).path or "").lower()
+            low = url.lower()
+            if any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm")):
+                return _default()  # remote video without cache → default
             return {"photo": url}
 
-        # bare filename in assets
         p = ensure_builtin_asset(url)
         if p and _P(str(p)).is_file():
-            return {"photo": str(p)}
-        return {}
+            return _from_path(str(p))
+        return _default()
+
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:

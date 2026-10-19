@@ -381,6 +381,83 @@ def is_bad_media(url: str) -> bool:
     return str(url or "").strip() in _bad_media_urls
 
 
+def cache_remote_media(url: str, max_bytes: int = 25 * 1024 * 1024):
+    """Download remote banner once to disk; return local Path for form upload.
+
+    Telegram cannot curl many hosts (x0.at, etc.) for inline results.
+    Local path is uploaded by the client and works for photo/video forms.
+    """
+    import hashlib
+    import logging
+    from urllib.parse import urlparse
+
+    url = str(url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return None
+
+    path = (urlparse(url).path or "").lower()
+    low = url.lower().split("?", 1)[0]
+    if any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm")):
+        ext = ".mp4" if not path.endswith((".mov", ".webm")) else Path(path).suffix or ".mp4"
+        if path.endswith(".webm"):
+            ext = ".webm"
+        elif path.endswith(".mov"):
+            ext = ".mov"
+        else:
+            ext = ".mp4"
+    elif any(low.endswith(e) or path.endswith(e) for e in (".gif",)):
+        ext = ".gif"
+    elif any(low.endswith(e) or path.endswith(e) for e in (".png", ".webp", ".bmp")):
+        ext = Path(path).suffix or ".png"
+    else:
+        ext = ".jpg"
+
+    key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+    try:
+        from .. import main as _main
+        base = Path(getattr(_main, "BASE_PATH", Path.cwd()))
+    except Exception:
+        base = Path.cwd()
+    dest_dir = base / "assets" / "banner_cache"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{key}{ext}"
+
+    if dest.is_file() and dest.stat().st_size > 500:
+        return dest
+
+    # fail cache (don't hammer dead hosts)
+    fail_key = f"banner:{key}"
+    failed_at = _asset_failed.get(fail_key)
+    if failed_at is not None and time.monotonic() - failed_at < _ASSET_FAIL_TTL:
+        return None
+
+    log = logging.getLogger(__name__)
+    try:
+        import urllib.request
+        log.info("Caching banner media %s …", url[:80])
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "HikkariUserbot/1.12"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = resp.read(max_bytes + 1)
+        if len(data) < 500 or len(data) > max_bytes:
+            _asset_failed[fail_key] = time.monotonic()
+            log.warning("banner cache size invalid for %s (%s bytes)", url[:60], len(data))
+            return None
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        tmp.write_bytes(data)
+        tmp.replace(dest)
+        # URL works for us — clear TG bad mark if present
+        _bad_media_urls.discard(url)
+        return dest
+    except Exception:
+        _asset_failed[fail_key] = time.monotonic()
+        log.warning("banner cache failed for %s", url[:80], exc_info=True)
+        return None
+
+
+
 def ensure_builtin_asset(name: str):
     """Find local asset or download once into BASE_PATH/assets."""
     name = (name or "").strip().lstrip("/")
