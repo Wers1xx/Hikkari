@@ -480,6 +480,9 @@ class LoaderMod(loader.Module):
 
             html = "\n".join(parts)
             html = strip_external_media_for_inline(html)
+            # Prefer meta banner as thumbnail (inline cannot embed external figure)
+            if meta_banner and str(meta_banner).startswith(("http://", "https://")):
+                pass  # thumbnail_url set on inline.rich below
 
             title = f"✓ {name}"[:64]
             description = (desc[:80] if desc else "Module loaded")
@@ -494,7 +497,7 @@ class LoaderMod(loader.Module):
                         description=description,
                         silent=True,
                         reply_markup=None,
-                        thumbnail_url=None,
+                        thumbnail_url=meta_banner if meta_banner else None,
                     )
                     if m:
                         return True
@@ -510,7 +513,7 @@ class LoaderMod(loader.Module):
                         description=description,
                         silent=True,
                         reply_markup=None,
-                        thumbnail_url=None,
+                        thumbnail_url=meta_banner if meta_banner else None,
                     )
                     if m:
                         return True
@@ -2264,22 +2267,38 @@ class LoaderMod(loader.Module):
         except Exception:
             logger.debug("rich announce failed", exc_info=True)
 
+        # Prefer a FRESH HTML message (editing a .py document caption often
+        # shows raw <a> tags and looks like "file + text under it").
+        text = loaded_msg()
+        sent = False
         try:
-            await utils.answer(
-                message,
-                loaded_msg(),
-                reply_markup=subscribe_markup,
-                skip_rich=True,
-            )
+            chat = utils.get_chat_id(message)
+            kw = {"link_preview": False, "parse_mode": "HTML"}
+            if subscribe_markup:
+                # reply_markup for client messages needs different shape — use answer
+                await utils.answer(
+                    message,
+                    text,
+                    reply_markup=subscribe_markup,
+                    skip_rich=True,
+                )
+                sent = True
+            else:
+                m = await self._client.send_message(chat, text, **kw)
+                sent = bool(m)
+                if sent and isinstance(message, Message) and getattr(message, "out", False):
+                    with contextlib.suppress(Exception):
+                        await message.delete()
         except MediaCaptionTooLongError:
             with contextlib.suppress(Exception):
                 await self._announce_module_loaded(message, loaded_msg(False))
+            sent = True
         except Exception:
-            # Message already deleted / invalid id — module is still loaded
             logger.debug(
                 "post-install announce failed (module still loaded)",
                 exc_info=True,
             )
+        if not sent:
             with contextlib.suppress(Exception):
                 await self._announce_module_loaded(message, loaded_msg(False))
 

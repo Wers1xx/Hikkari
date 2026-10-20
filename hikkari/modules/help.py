@@ -386,14 +386,25 @@ class Help(loader.Module):
         banner_kwargs = {}
         if self.config["show_preview_in_help"]:
             try:
-                source = getattr(module, "__source__", None)
-                if source:
-                    banner_url = self._get_banner_url(source)
-                    if banner_url:
-                        banner_kwargs = {
-                            "file": InputMediaWebPage(banner_url, optional=True),
-                            "invert_media": True,
-                        }
+                source = getattr(module, "__source__", None) or ""
+                if not source or "# meta banner" not in source.lower():
+                    with contextlib.suppress(Exception):
+                        from pathlib import Path as _P
+                        for attr in ("__file__", "_file"):
+                            fp = getattr(module, attr, None)
+                            if fp and _P(str(fp)).is_file():
+                                source = _P(str(fp)).read_text(
+                                    encoding="utf-8", errors="ignore"
+                                )
+                                break
+                banner_url = self._get_banner_url(source) if source else None
+                if not banner_url:
+                    banner_url = str(self.config.get("banner_url") or "").strip() or None
+                if banner_url and str(banner_url).startswith(("http://", "https://")):
+                    banner_kwargs = {
+                        "file": InputMediaWebPage(banner_url, optional=True),
+                        "invert_media": True,
+                    }
             except Exception:
                 pass
 
@@ -473,9 +484,23 @@ class Help(loader.Module):
                 # Meta banner of THIS module first, then Help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    meta_b = self._get_banner_url(
-                        getattr(module, "__source__", None) or ""
-                    )
+                    src = getattr(module, "__source__", None) or ""
+                    if not src or "# meta banner" not in src.lower():
+                        # Fallback: read persisted / origin file
+                        for attr in ("__file__", "_file"):
+                            fp = getattr(module, attr, None)
+                            if fp and Path(str(fp)).is_file():
+                                src = Path(str(fp)).read_text(
+                                    encoding="utf-8", errors="ignore"
+                                )
+                                break
+                        if not src:
+                            origin = str(getattr(module, "__origin__", "") or "")
+                            if origin.endswith(".py") and Path(origin).is_file():
+                                src = Path(origin).read_text(
+                                    encoding="utf-8", errors="ignore"
+                                )
+                    meta_b = self._get_banner_url(src)
                 burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 html = "\n".join(parts)
                 html = inject_banner_html(html, burl, force=True)
