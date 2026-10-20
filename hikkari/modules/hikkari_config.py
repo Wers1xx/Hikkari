@@ -107,10 +107,16 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """One form: banner + text + buttons. Remote video is cached once to disk."""
+        """One form: banner + text + buttons.
+
+        Remote hosts (x0.at, etc.) cannot be curled by Telegram for inline results.
+        Video/photo is cached once to disk, then uploaded via MTProto as local file.
+        """
+        import asyncio
         import contextlib
         import logging
         from pathlib import Path as _P
+        from urllib.parse import urlparse
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
 
@@ -126,14 +132,30 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        # Banner cache warmed in background only (never block cfg open)
         raw = str(self.config.get("banner_url") or "").strip()
+        # Ensure remote media is on disk before form (TG Bot API cannot fetch many CDNs)
         if raw.startswith(("http://", "https://")):
+            low = raw.lower().split("?", 1)[0]
+            path = ""
             with contextlib.suppress(Exception):
-                import asyncio as _aio
-                _aio.get_event_loop().run_in_executor(
-                    None, utils.cache_remote_media, raw
-                )
+                path = (urlparse(raw).path or "").lower()
+            is_vid = any(
+                low.endswith(e) or path.endswith(e)
+                for e in (".mp4", ".mov", ".webm", ".gif")
+            )
+            # Video must be local for reliable inline; wait once (cached next opens)
+            if is_vid:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(
+                        utils.run_sync(utils.cache_remote_media, raw),
+                        timeout=25,
+                    )
+            else:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(
+                        utils.run_sync(utils.cache_remote_media, raw),
+                        timeout=12,
+                    )
 
         media = self._cfg_banner_kwargs()
         form_kw = dict(
@@ -203,36 +225,22 @@ class HikkariConfigMod(loader.Module):
             if isinstance(banner, str) and banner.startswith("http"):
                 remote = banner
         if isinstance(remote, str) and remote.startswith("http"):
-            # Fast path: only use already-cached file (no download on open)
             cached = None
             with contextlib.suppress(Exception):
-                import hashlib
-                from urllib.parse import urlparse as _up
-
-                key = hashlib.sha256(remote.encode()).hexdigest()[:20]
-                from .. import main as _main
-
-                base = _P(getattr(_main, "BASE_PATH", _P.cwd())) / "assets" / "banner_cache"
-                for ext in (".mp4", ".jpg", ".png", ".gif", ".webm", ".mov", ".webp"):
-                    cand = base / f"{key}{ext}"
-                    if cand.is_file() and cand.stat().st_size > 500:
-                        cached = cand
-                        break
-            if cached and _P(str(cached)).is_file():
-                return _by_path(str(cached))
-            # Warm cache in background for next open (never block UI)
-            with contextlib.suppress(Exception):
-                import asyncio as _aio
-
-                _aio.get_event_loop().run_in_executor(
-                    None, utils.cache_remote_media, remote
-                )
-            # Images: last try direct URL (sometimes works)
+                cached = utils.cache_remote_media(remote)
+            if cached is not None:
+                p = _P(str(cached))
+                if p.is_file() and p.stat().st_size > 500:
+                    return _by_path(str(p.resolve()))
+            # Direct URL only for still images (TG may curl them)
             low = remote.lower().split("?", 1)[0]
             path = (urlparse(remote).path or "").lower()
-            if not any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm", ".gif")):
-                if not utils.is_bad_media(remote):
-                    return {"photo": remote}
+            is_vid = any(
+                low.endswith(e) or path.endswith(e)
+                for e in (".mp4", ".mov", ".webm", ".gif")
+            )
+            if not is_vid and not utils.is_bad_media(remote):
+                return {"photo": remote}
             return _default()
 
         return _default()

@@ -1012,67 +1012,20 @@ class Form(InlineUnit):
                 case _ if "video" in form:
                     video_url = form["video"]
                     answered = False
-                    # Prefer Bot API video result (URL only, no local download)
-                    try:
-                        token = getattr(self, "_token", None) or getattr(
-                            self, "token", None
-                        )
-                        qid = (
-                            getattr(inline_query, "query_id", None)
-                            or getattr(
-                                getattr(inline_query, "query", None), "query_id", None
-                            )
-                            or getattr(inline_query, "id", None)
-                        )
-                        if token and qid:
-                            import aiohttp
+                    from pathlib import Path as _Path
 
-                            self.generate_markup(form["uid"])
-                            keyboard = self.buttons_to_bot_api_keyboard(form["uid"])
-                            thumb = (
-                                form.get("thumbnail_url")
-                                or "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
-                            )
-                            result = {
-                                "type": "video",
-                                "id": utils.rand(16),
-                                "video_url": video_url,
-                                "mime_type": "video/mp4",
-                                "thumbnail_url": thumb,
-                                "title": "Hikkari",
-                                "caption": (form_text or "✨")[:1024],
-                                "parse_mode": "HTML",
-                            }
-                            if keyboard:
-                                result["reply_markup"] = {
-                                    "inline_keyboard": keyboard
-                                }
-                            async with aiohttp.ClientSession() as session:
-                                async with session.post(
-                                    f"https://api.telegram.org/bot{token}/answerInlineQuery",
-                                    json={
-                                        "inline_query_id": str(qid),
-                                        "results": [result],
-                                        "cache_time": 0,
-                                        "is_personal": True,
-                                    },
-                                    timeout=aiohttp.ClientTimeout(total=15),
-                                ) as resp:
-                                    data = await resp.json(content_type=None)
-                                    answered = bool(data.get("ok"))
-                                    if not answered:
-                                        logger.warning(
-                                            "BotAPI video answer failed: %s", data
-                                        )
-                    except Exception:
-                        logger.debug("BotAPI video form failed", exc_info=True)
-
-                    if not answered:
+                    is_local = bool(
+                        video_url
+                        and not str(video_url).startswith(("http://", "https://"))
+                        and _Path(str(video_url)).is_file()
+                    )
+                    # Local file: MTProto upload only (Bot API needs public URL)
+                    if is_local:
                         try:
                             await inline_query.answer(
                                 [
                                     await inline_query.builder.document(
-                                        video_url,
+                                        str(video_url),
                                         title="Hikkari",
                                         description="Hikkari",
                                         type="video",
@@ -1088,9 +1041,98 @@ class Form(InlineUnit):
                             answered = True
                         except Exception:
                             logger.warning(
-                                "MTProto video form failed, article fallback",
+                                "MTProto local video form failed",
                                 exc_info=True,
                             )
+                    # Remote HTTP URL: Bot API first, then MTProto
+                    if not answered and not is_local:
+                        try:
+                            token = getattr(self, "_token", None) or getattr(
+                                self, "token", None
+                            )
+                            qid = (
+                                getattr(inline_query, "query_id", None)
+                                or getattr(
+                                    getattr(inline_query, "query", None),
+                                    "query_id",
+                                    None,
+                                )
+                                or getattr(inline_query, "id", None)
+                            )
+                            if token and qid and str(video_url).startswith("http"):
+                                import aiohttp
+
+                                self.generate_markup(form["uid"])
+                                keyboard = self.buttons_to_bot_api_keyboard(
+                                    form["uid"]
+                                )
+                                thumb = (
+                                    form.get("thumbnail_url")
+                                    or "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
+                                )
+                                result = {
+                                    "type": "video",
+                                    "id": utils.rand(16),
+                                    "video_url": video_url,
+                                    "mime_type": "video/mp4",
+                                    "thumbnail_url": thumb,
+                                    "title": "Hikkari",
+                                    "caption": (form_text or "✨")[:1024],
+                                    "parse_mode": "HTML",
+                                }
+                                if keyboard:
+                                    result["reply_markup"] = {
+                                        "inline_keyboard": keyboard
+                                    }
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.post(
+                                        f"https://api.telegram.org/bot{token}/answerInlineQuery",
+                                        json={
+                                            "inline_query_id": str(qid),
+                                            "results": [result],
+                                            "cache_time": 0,
+                                            "is_personal": True,
+                                        },
+                                        timeout=aiohttp.ClientTimeout(total=15),
+                                    ) as resp:
+                                        data = await resp.json(content_type=None)
+                                        answered = bool(data.get("ok"))
+                                        if not answered:
+                                            logger.warning(
+                                                "BotAPI video answer failed: %s",
+                                                data,
+                                            )
+                        except Exception:
+                            logger.debug(
+                                "BotAPI video form failed", exc_info=True
+                            )
+
+                        if not answered:
+                            try:
+                                await inline_query.answer(
+                                    [
+                                        await inline_query.builder.document(
+                                            video_url,
+                                            title="Hikkari",
+                                            description="Hikkari",
+                                            type="video",
+                                            id=utils.rand(20),
+                                            text=form_text,
+                                            parse_mode="HTML",
+                                            mime_type="video/mp4",
+                                            buttons=self.generate_markup(
+                                                form["uid"]
+                                            ),
+                                        )
+                                    ],
+                                    cache_time=0,
+                                )
+                                answered = True
+                            except Exception:
+                                logger.warning(
+                                    "MTProto video form failed, article fallback",
+                                    exc_info=True,
+                                )
 
                     if not answered:
                         await inline_query.answer(
@@ -1102,11 +1144,12 @@ class Form(InlineUnit):
                                     text=form_text,
                                     parse_mode="HTML",
                                     buttons=self.generate_markup(form["uid"]),
-                                    link_preview=True,
                                 )
                             ],
                             cache_time=0,
                         )
+                    return
+
                 case _ if "file" in form:
                     await inline_query.answer(
                         [
