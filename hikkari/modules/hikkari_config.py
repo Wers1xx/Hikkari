@@ -108,33 +108,18 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI. Rich+Premium without banner → tg-buttons; with banner → classic media form."""
+        """Config form: classic inline + optional banner media (photo/video).
+
+        Always classic keyboard so every step (category → modules → option) keeps
+        working buttons. Banner uses the same media form path as before.
+        """
         import contextlib
         import logging
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
-        from ..utils.rich import can_use_rich
 
         _log = logging.getLogger(__name__)
         markup = reply_markup if reply_markup is not None else []
-        use_rich = False
-        with contextlib.suppress(Exception):
-            use_rich = bool(can_use_rich(self._client, self._db))
-
-        def _as_rich_html(src: str) -> str:
-            s = str(src or "").strip()
-            if not s:
-                return "<p>⚙️ Config</p>"
-            low = s.lower()
-            if any(
-                tag in low
-                for tag in ("<h1", "<h2", "<p>", "<table", "<details", "<b>")
-            ):
-                return s
-            return f"<p>{s}</p>"
-
-        media = self._cfg_banner_kwargs()
-        has_banner = bool(media)
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             return await self._safe_cfg_edit(message, text, reply_markup=markup)
@@ -151,8 +136,8 @@ class HikkariConfigMod(loader.Module):
             **kwargs,
         )
 
-        # Banner present → classic form with media (Telegram shows photo/video reliably)
-        if has_banner:
+        media = self._cfg_banner_kwargs()
+        if media:
             form_kw.update(media)
             try:
                 m = await self.inline.form(**form_kw)
@@ -162,17 +147,6 @@ class HikkariConfigMod(loader.Module):
                 _log.debug("cfg form with banner failed", exc_info=True)
             for k in ("photo", "video", "gif", "file", "audio"):
                 form_kw.pop(k, None)
-
-        # No banner (or media failed) → Rich body + tg-buttons when enabled
-        if use_rich:
-            form_kw["rich_message"] = _as_rich_html(text)
-            try:
-                m = await self.inline.form(**form_kw)
-                if m:
-                    return m
-            except Exception:
-                _log.debug("cfg rich form failed", exc_info=True)
-            form_kw.pop("rich_message", None)
 
         with contextlib.suppress(Exception):
             return await self.inline.form(**form_kw)
@@ -1086,88 +1060,18 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config form. Rich+Premium → tg-buttons in body, no classic keyboard."""
+        """Edit config form with classic InlineKeyboard (always reliable + banner-safe).
+
+        Bot API note (editMessageText for inline): cannot upload new media by URL.
+        Media forms must keep classic caption + reply_markup; stripping markup leaves
+        a dead message. Pure Rich+tg-button is for non-media one-shots (see RichProbe).
+        """
         import contextlib
-        import re as _re
 
         with contextlib.suppress(Exception):
             await call.answer()
 
         text = self._clip_cfg_text(text, 950)
-        use_rich = False
-        with contextlib.suppress(Exception):
-            from ..utils.rich import can_use_rich
-            use_rich = bool(can_use_rich(self._client, self._db))
-
-        if use_rich and reply_markup is not None:
-            try:
-                from ..utils.rich_api import markup_to_tg_rows
-                from .. import utils as _u
-
-                im = self.inline
-                unit_id = getattr(call, "unit_id", None)
-                mk = im._validate_markup(reply_markup) or reply_markup
-
-                # Register callbacks on unit (or ad-hoc) so presses route
-                if unit_id and getattr(im, "_units", None) and unit_id in im._units:
-                    im._units[unit_id]["buttons"] = mk
-                    with contextlib.suppress(Exception):
-                        im.generate_markup(unit_id)
-                    mk = im._units[unit_id].get("buttons") or mk
-                else:
-                    # ad-hoc: assign data + custom_map without unit
-                    for row in mk or []:
-                        for btn in row:
-                            if not isinstance(btn, dict):
-                                continue
-                            if btn.get("action") == "close" and "callback" not in btn:
-                                btn["callback"] = im._close_unit_handler
-                                btn["disable_security"] = True
-                            if "callback" in btn and "_callback_data" not in btn:
-                                btn["_callback_data"] = _u.rand(30)
-                                args = btn.get("args", ())
-                                if isinstance(args, dict):
-                                    args = ()
-                                im._custom_map[btn["_callback_data"]] = {
-                                    "handler": btn["callback"],
-                                    "always_allow": btn.get("always_allow", []) or [],
-                                    "args": args if args is not None else (),
-                                    "kwargs": btn.get("kwargs", {}) or {},
-                                    "force_me": btn.get("force_me", False),
-                                    "disable_security": btn.get(
-                                        "disable_security", False
-                                    ),
-                                    "message": True,
-                                }
-                            if "input" in btn and "_switch_query" not in btn:
-                                btn["_switch_query"] = _u.rand(10)
-
-                low = str(text).lower()
-                if any(
-                    x in low
-                    for x in ("<h1", "<h2", "<p>", "<table", "<b>", "<i>")
-                ):
-                    html = str(text)
-                else:
-                    html = f"<p>{text}</p>"
-                html = _re.sub(
-                    r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
-                    "",
-                    html,
-                    flags=_re.I | _re.S,
-                )
-                btn_html = markup_to_tg_rows(mk, unit_id or "")
-                if btn_html:
-                    html = html.rstrip() + "\n" + btn_html
-
-                return await call.edit(
-                    text="⚙️",
-                    rich_message=html,
-                    reply_markup=[],  # no classic InlineKeyboard under Rich
-                )
-            except Exception:
-                logger.debug("cfg rich edit failed, classic fallback", exc_info=True)
-
         try:
             return await call.edit(text, reply_markup=reply_markup, **kwargs)
         except Exception:
@@ -1179,6 +1083,7 @@ class HikkariConfigMod(loader.Module):
                     **kwargs,
                 )
             return False
+
 
 
     async def inline__configure_option(
