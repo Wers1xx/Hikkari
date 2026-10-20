@@ -282,13 +282,21 @@ class LoaderMod(loader.Module):
         s = (dev or "").strip()
         if not s:
             return ""
-        # @username
-        m = _re.fullmatch(r"@([A-Za-z0-9_]{4,})", s)
+        # Already a proper HTML link - return as-is
+        if s.lower().startswith("<a ") and "</a>" in s.lower():
+            return s
+        # Strip accidental escaped tags then re-link
+        s = html_mod.unescape(s)
+        s = _re.sub(r"<[^>]+>", "", s).strip()
+        # @username (Telegram allows 5+ typically; allow 4+)
+        m = _re.fullmatch(r"@([A-Za-z0-9_]{4,32})", s)
         if m:
             u = m.group(1)
             return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
         # https://t.me/username or t.me/username
-        m = _re.fullmatch(r"(?:https?://)?t\.me/([A-Za-z0-9_]{4,})/?", s, flags=_re.I)
+        m = _re.fullmatch(
+            r"(?:https?://)?t\.me/([A-Za-z0-9_]{4,32})/?", s, flags=_re.I
+        )
         if m:
             u = m.group(1)
             return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
@@ -296,9 +304,8 @@ class LoaderMod(loader.Module):
         def repl(mm):
             u = mm.group(1)
             return f'<a href="https://t.me/{u}">@{html_mod.escape(u)}</a>'
-        linked = _re.sub(r"@([A-Za-z0-9_]{4,})", repl, s)
+        linked = _re.sub(r"@([A-Za-z0-9_]{4,32})", repl, s)
         if linked != s:
-            # escape non-tag parts roughly: already only added tags
             return linked
         return html_mod.escape(s[:80])
 
@@ -1598,11 +1605,8 @@ class LoaderMod(loader.Module):
                 return False
 
         developer = re.search(r"# ?meta developer: ?(.+)", doc)
-        developer = developer.group(1) if developer else False
-        developer_raw = (str(developer).strip() if developer else "")
-        # Clickable @username in classic HTML loaded message
-        if developer_raw:
-            developer = self._linkify_developer(developer_raw)
+        developer = developer.group(1).strip() if developer else ""
+        developer_raw = developer  # always plain @user / url / text
 
         if not did_requires:
             requirements = []
@@ -2129,8 +2133,11 @@ class LoaderMod(loader.Module):
                         },
                     ]
 
-            developer_raw = developer  # plain @user / url for Rich
-            developer = self.strings["developer"].format(utils.escape_html(developer))
+            # Classic HTML: clickable link, do NOT escape <a> tags
+            developer_raw = developer  # plain for Rich / subscribe
+            developer = self.strings["developer"].format(
+                self._linkify_developer(developer)
+            )
         else:
             developer_raw = ""
             developer = ""
