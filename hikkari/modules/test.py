@@ -354,7 +354,6 @@ class TestMod(loader.Module):
     @loader.command()
     async def ping(self, message: Message):
         """- Find out your userbot ping"""
-        start = time.perf_counter_ns()
         from ..utils.rich import can_use_rich
         from ..utils.other import is_audio_banner
         _audio_banner = is_audio_banner(self.config.get("banner_url"))
@@ -363,11 +362,12 @@ class TestMod(loader.Module):
             and can_use_rich(self._client, self._db)
             and getattr(self.inline, "init_complete", False)
         )
-        # Classic: emoji RTT. Rich/audio: skip intermediate (fast path).
-        if not _rich and not _audio_banner:
-            message = await utils.answer(
-                message, self.config["ping_emoji"], skip_rich=True
-            )
+        # Always measure real Telegram RTT (edit → network → ack), not local CPU
+        start = time.perf_counter_ns()
+        message = await utils.answer(
+            message, self.config["ping_emoji"], skip_rich=True
+        )
+        ping_ms = round((time.perf_counter_ns() - start) / 10**6, 3)
         # URL/path only — no download here (cache is elsewhere)
         banner = utils.resolve_banner_media(self.config["banner_url"])
         # Local large video path must stay as path (send_file), not WebPage
@@ -392,7 +392,7 @@ class TestMod(loader.Module):
         build = utils.get_commit_url()
         _version = ".".join(map(str, list(ver_mod.__version__)))
         data = {
-            "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
+            "ping": ping_ms,
             "uptime": utils.formatted_uptime(),
             "ping_hint": (
                 (self.config["hint"]) if random.choice([0, 0, 1]) == 1 else ""
