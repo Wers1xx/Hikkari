@@ -20,6 +20,7 @@ class HikkariBlacklistMod(loader.Module):
     strings = {"name": "HikkariBlacklist"}
 
     async def client_ready(self):
+        # Main already checked at amain; rely on in-process cache (no double network)
         await self._check_and_kill()
         self._task = asyncio.ensure_future(self._loop())
 
@@ -31,7 +32,7 @@ class HikkariBlacklistMod(loader.Module):
     async def _loop(self):
         while True:
             try:
-                await asyncio.sleep(120)
+                await asyncio.sleep(300)
                 await self._check_and_kill()
             except asyncio.CancelledError:
                 return

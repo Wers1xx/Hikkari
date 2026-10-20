@@ -64,7 +64,7 @@ class UpdaterMod(loader.Module):
 
     strings = {"name": "Updater"}
     # `git fetch` over the network; poller() itself still runs every 60s locally
-    _GIT_FETCH_INTERVAL = 120
+    _GIT_FETCH_INTERVAL = 300
     _EMFILE_FETCH_BACKOFF = 900
 
     def __init__(self):
@@ -1523,10 +1523,9 @@ class UpdaterMod(loader.Module):
             await self._ensure_preferred_branch()
 
         async def _boot_poll():
-            await asyncio.sleep(8)
+            # Let UI/restart status settle; fetch is non-blocking (thread)
+            await asyncio.sleep(12)
             with contextlib.suppress(Exception):
-                # Force a fresh fetch on first poll after start
-                self._last_git_fetch = 0.0
                 await self.poller()
 
         asyncio.ensure_future(_boot_poll())

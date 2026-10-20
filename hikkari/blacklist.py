@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import asyncio
 import logging
 import time
 from typing import Iterable
@@ -83,33 +84,66 @@ def _verify_sig(body: bytes, header: str | None) -> bool:
         return False
 
 
-async def fetch_blacklist_ids(timeout: float = 12.0) -> set[int] | None:
-    """Fetch union of IDs from all mirrors. None = all mirrors failed."""
+_BL_CACHE: set | None = None
+_BL_CACHE_AT: float = 0.0
+_BL_CACHE_TTL = 300.0  # 5 min — avoid network on every restart / loop tick
+
+
+async def fetch_blacklist_ids(timeout: float = 5.0) -> set[int] | None:
+    """Fetch union of IDs from mirrors (parallel). Cached briefly in-process."""
+    global _BL_CACHE, _BL_CACHE_AT
+    now = time.time()
+    if _BL_CACHE is not None and (now - _BL_CACHE_AT) < _BL_CACHE_TTL:
+        return _BL_CACHE
+
     urls = list(_extra_mirrors()) + list(_blacklist_urls())
+    if not urls:
+        return _BL_CACHE
+
+    timeout_cfg = aiohttp.ClientTimeout(total=timeout)
+
+    async def _one(session, url: str) -> set[int]:
+        try:
+            async with session.get(
+                url,
+                headers={
+                    "User-Agent": "HikkariUserbot/2.0",
+                    "Cache-Control": "no-cache",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    return set()
+                raw = await resp.read()
+                sig = resp.headers.get("X-Hikkari-Sig") or resp.headers.get(
+                    "X-Hikkari-Signature"
+                )
+                if sig and not _verify_sig(raw, sig):
+                    logger.warning(
+                        "blacklist mirror signature mismatch: %s", url[:48]
+                    )
+                    return set()
+                return parse_blacklist_text(raw.decode("utf-8", errors="ignore"))
+        except Exception as e:
+            logger.debug("blacklist fetch failed: %s", e)
+            return set()
+
     ids: set[int] = set()
     any_ok = False
-    timeout_cfg = aiohttp.ClientTimeout(total=timeout)
-    async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
-        for url in urls:
-            try:
-                async with session.get(
-                    url,
-                    headers={"User-Agent": "HikkariUserbot/1.0", "Cache-Control": "no-cache"},
-                ) as resp:
-                    if resp.status != 200:
-                        continue
-                    raw = await resp.read()
-                    sig = resp.headers.get("X-Hikkari-Sig") or resp.headers.get("X-Hikkari-Signature")
-                    if sig and not _verify_sig(raw, sig):
-                        logger.warning("blacklist mirror signature mismatch: %s", url[:48])
-                        continue
-                    text = raw.decode("utf-8", errors="ignore")
-                    chunk = parse_blacklist_text(text)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            parts = await asyncio.gather(*[_one(session, u) for u in urls])
+            for chunk in parts:
+                if chunk:
                     ids |= chunk
                     any_ok = True
-            except Exception as e:
-                logger.debug("blacklist fetch failed: %s", e)
-    return ids if any_ok else None
+    except Exception as e:
+        logger.debug("blacklist session failed: %s", e)
+
+    if any_ok:
+        _BL_CACHE = ids
+        _BL_CACHE_AT = now
+        return ids
+    return _BL_CACHE  # stale better than None on flaky net if we had one
 
 
 def is_locally_blocked(db) -> bool:

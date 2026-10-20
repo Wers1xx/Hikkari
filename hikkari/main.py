@@ -1310,11 +1310,9 @@ class Hikkari:
 
         await _early_restart_status()
         await modules.send_ready()
-        # Let channel finish without holding the badge/start path longer than needed
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(
-            channel_task,
-            timeout=5,
+        # Channel is background-only — never block ready/restart path
+        channel_task.add_done_callback(
+            lambda t: t.exception() if not t.cancelled() and t.exception() else None
         )
 
         if first:

@@ -877,53 +877,57 @@ class Modules:
         with contextlib.suppress(AttributeError):
             _hikkari_client_id_logging_tag = copy.copy(self.client.tg_id)  # noqa: F841
 
-        loaded = []
+        if not modules:
+            return []
 
-        for mod in modules:
-            try:
-                mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
-                module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
-                user_friendly_origin = (
-                    "<core {}>" if origin == "<core>" else "<file {}>"
-                ).format(module_name)
+        # Parallel load (Heroku-style speed): bound concurrency, lock registration
+        sem = asyncio.Semaphore(8)
+        lock = asyncio.Lock()
+        loaded: list = []
+        failed: list = []
 
-                logger.debug("Loading %s from filesystem", module_name)
-
-                _src = Path(mod).read_text(encoding="utf-8")
-                if origin == "<file>":
-                    # telethon/herokutl → hikkaritl (same role as Heroku telethon→herokutl)
-                    for _a, _b in (
-                        ("telethon", "hikkaritl"),
-                        ("herokutl", "hikkaritl"),
-                        ("hikkatl", "hikkaritl"),
-                    ):
-                        _src = _src.replace(f"from {_a}", f"from {_b}").replace(
-                            f"import {_a}", f"import {_b}"
-                        )
-                spec = importlib.machinery.ModuleSpec(
-                    module_name,
-                    StringLoader(_src, user_friendly_origin),
-                    origin=user_friendly_origin,
-                )
-
-                loaded += [await self.register_module(spec, module_name, origin)]
-
-                logger.debug("Successfully loaded %s from filesystem", module_name)
-                if origin == "<file>":
-                    if len(loaded) % 3 == 0:
-                        await asyncio.sleep(0)
-                    if len(loaded) % 15 == 0:
-                        with contextlib.suppress(Exception):
-                            _release_memory()
-            except Exception as e:
-                logger.exception("Failed to load module %s due to %s:", mod, e)
+        async def _one(mod):
+            async with sem:
                 try:
-                    self._failed_module_names.append(
-                        f"{os.path.basename(str(mod))} ({type(e).__name__})"
-                    )
-                except Exception:
-                    pass
+                    mod_shortname = os.path.basename(mod).rsplit(".py", maxsplit=1)[0]
+                    module_name = f"{__package__}.{MODULES_NAME}.{mod_shortname}"
+                    user_friendly_origin = (
+                        "<core {}>" if origin == "<core>" else "<file {}>"
+                    ).format(module_name)
 
+                    logger.debug("Loading %s from filesystem", module_name)
+
+                    _src = await asyncio.to_thread(
+                        Path(mod).read_text, encoding="utf-8"
+                    )
+                    if origin == "<file>":
+                        for _a, _b in (
+                            ("telethon", "hikkaritl"),
+                            ("herokutl", "hikkaritl"),
+                            ("hikkatl", "hikkaritl"),
+                        ):
+                            _src = _src.replace(f"from {_a}", f"from {_b}").replace(
+                                f"import {_a}", f"import {_b}"
+                            )
+                    spec = importlib.machinery.ModuleSpec(
+                        module_name,
+                        StringLoader(_src, user_friendly_origin),
+                        origin=user_friendly_origin,
+                    )
+                    async with lock:
+                        inst = await self.register_module(spec, module_name, origin)
+                        loaded.append(inst)
+                    logger.debug("Successfully loaded %s from filesystem", module_name)
+                except Exception as e:
+                    logger.exception("Failed to load module %s due to %s:", mod, e)
+                    failed.append(f"{os.path.basename(str(mod))} ({type(e).__name__})")
+
+        await asyncio.gather(*[_one(m) for m in modules])
+        if failed:
+            self._failed_module_names.extend(failed)
+        if origin == "<file>" and loaded:
+            with contextlib.suppress(Exception):
+                _release_memory()
         return loaded
 
     async def register_module(
