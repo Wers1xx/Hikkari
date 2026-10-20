@@ -94,7 +94,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "local_floodwait",
-                30,
+                10,
                 lambda: self.strings["_cfg_local_floodwait"],
                 validator=loader.validators.Integer(minimum=10, maximum=3600),
             ),
@@ -244,13 +244,12 @@ class APIRatelimiterMod(loader.Module):
                         self._ratelimiter.clear()
                         self._lock = False
 
-            # While locked, wait a bit so callers don't pile up more requests
+            # While locked, wait briefly — never stall the whole event loop for full FW
             waited = 0.0
-            while self._lock and waited < float(self.config.get('local_floodwait', 30) or 30) + 5:
-                await asyncio.sleep(0.2)
-                waited += 0.2
-            if self._lock:
-                self._lock = False
+            max_wait = min(float(self.config.get("local_floodwait", 10) or 10), 3.0)
+            while self._lock and waited < max_wait:
+                await asyncio.sleep(0.05)
+                waited += 0.05
 
             return await old_call(sender, request, ordered, flood_sleep_threshold)
 

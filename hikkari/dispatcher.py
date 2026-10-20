@@ -627,6 +627,70 @@ class CommandDispatcher:
     async def watcher_exc(self, *_):
         logger.exception("Error running watcher", extra={"stack": inspect.stack()})
 
+    async def _is_command_message(
+        self,
+        event: events.NewMessage | events.MessageDeleted,
+    ) -> bool:
+        """Fast prefix+dispatch check for watcher tags (no security / network)."""
+        # Cache per event object for this message fan-out
+        cache = getattr(self, "_cmd_probe_cache", None)
+        if cache is None:
+            self._cmd_probe_cache = cache = {}
+        key = id(event)
+        if key in cache:
+            return cache[key]
+
+        msg = getattr(event, "message", None)
+        text = getattr(msg, "message", None) if msg is not None else None
+        if not text:
+            cache[key] = False
+            return False
+
+        main_prefix = self._db.get(main.__name__, "command_prefix", ".") or "."
+        try:
+            prefixes = set(self._modules.get_prefixes() or set())
+        except Exception:
+            prefixes = set()
+        prefixes.add(main_prefix)
+        candidates = sorted((p for p in prefixes if p), key=len, reverse=True)
+
+        matched = None
+        for p in candidates:
+            if text.startswith(p):
+                matched = p
+                break
+            else:
+                tp = str.translate(p, _LAYOUT_TRANSLATION)
+                if tp and tp != p and text.startswith(tp):
+                    matched = p
+                    break
+        if not matched:
+            cache[key] = False
+            # prune
+            if len(cache) > 64:
+                self._cmd_probe_cache = {}
+            return False
+
+        rest = text[len(matched) :].strip()
+        if not rest:
+            cache[key] = False
+            return False
+        cmd = rest.split(maxsplit=1)[0].split("@", maxsplit=1)[0]
+        try:
+            _, func = self._modules.dispatch(cmd)
+            # also try layout-translated cmd
+            if not func:
+                tcmd = str.translate(cmd, _LAYOUT_TRANSLATION)
+                if tcmd != cmd:
+                    _, func = self._modules.dispatch(tcmd)
+            ok = bool(func)
+        except Exception:
+            ok = False
+        cache[key] = ok
+        if len(cache) > 64:
+            self._cmd_probe_cache = {key: ok}
+        return ok
+
     async def _handle_tags(
         self,
         event: events.NewMessage | events.MessageDeleted,
@@ -715,25 +779,22 @@ class CommandDispatcher:
             ),
         }
 
-        return (
-            "no_commands"
-            if getattr(func, "no_commands", False)
-            and await self._handle_command(event, watcher=True)
-            else (
-                "only_commands"
-                if getattr(func, "only_commands", False)
-                and not await self._handle_command(event, watcher=True)
-                else next(
-                    (
-                        tag
-                        for tag in ALL_TAGS
-                        if getattr(func, tag, False)
-                        and tag in reverse_mapping
-                        and not reverse_mapping[tag]()
-                    ),
-                    None,
-                )
-            )
+        # Cheap command probe — never re-run full _handle_command per watcher
+        if getattr(func, "no_commands", False) and await self._is_command_message(event):
+            return "no_commands"
+        if getattr(func, "only_commands", False) and not await self._is_command_message(
+            event
+        ):
+            return "only_commands"
+        return next(
+            (
+                tag
+                for tag in ALL_TAGS
+                if getattr(func, tag, False)
+                and tag in reverse_mapping
+                and not reverse_mapping[tag]()
+            ),
+            None,
         )
 
     async def handle_incoming(
@@ -752,9 +813,12 @@ class CommandDispatcher:
         ):
             logger.debug("Message is blocklisted")
 
+        bl = self._db.get(main.__name__, "disabled_watchers", {}) or {}
         for func in self._modules.watchers:
-            bl = self._db.get(main.__name__, "disabled_watchers", {})
-            modname = str(func.__self__.__class__.strings["name"])
+            try:
+                modname = str(func.__self__.__class__.strings["name"])
+            except Exception:
+                modname = func.__self__.__class__.__name__
 
             if (
                 modname in bl

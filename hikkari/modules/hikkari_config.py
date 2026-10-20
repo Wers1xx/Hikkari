@@ -126,12 +126,14 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        # Pre-cache remote banner only if not already cached (fast path)
+        # Banner cache warmed in background only (never block cfg open)
         raw = str(self.config.get("banner_url") or "").strip()
         if raw.startswith(("http://", "https://")):
             with contextlib.suppress(Exception):
-                # cache_remote_media is no-op/fast when file exists
-                await utils.run_sync(utils.cache_remote_media, raw)
+                import asyncio as _aio
+                _aio.get_event_loop().run_in_executor(
+                    None, utils.cache_remote_media, raw
+                )
 
         media = self._cfg_banner_kwargs()
         form_kw = dict(
@@ -201,14 +203,30 @@ class HikkariConfigMod(loader.Module):
             if isinstance(banner, str) and banner.startswith("http"):
                 remote = banner
         if isinstance(remote, str) and remote.startswith("http"):
-            if utils.is_bad_media(remote):
-                # still try cache (our download, not TG curl)
-                pass
+            # Fast path: only use already-cached file (no download on open)
             cached = None
             with contextlib.suppress(Exception):
-                cached = utils.cache_remote_media(remote)
+                import hashlib
+                from urllib.parse import urlparse as _up
+
+                key = hashlib.sha256(remote.encode()).hexdigest()[:20]
+                from .. import main as _main
+
+                base = _P(getattr(_main, "BASE_PATH", _P.cwd())) / "assets" / "banner_cache"
+                for ext in (".mp4", ".jpg", ".png", ".gif", ".webm", ".mov", ".webp"):
+                    cand = base / f"{key}{ext}"
+                    if cand.is_file() and cand.stat().st_size > 500:
+                        cached = cand
+                        break
             if cached and _P(str(cached)).is_file():
                 return _by_path(str(cached))
+            # Warm cache in background for next open (never block UI)
+            with contextlib.suppress(Exception):
+                import asyncio as _aio
+
+                _aio.get_event_loop().run_in_executor(
+                    None, utils.cache_remote_media, remote
+                )
             # Images: last try direct URL (sometimes works)
             low = remote.lower().split("?", 1)[0]
             path = (urlparse(remote).path or "").lower()
