@@ -381,17 +381,23 @@ def is_bad_media(url: str) -> bool:
     return str(url or "").strip() in _bad_media_urls
 
 
-def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
+def cache_remote_media(url: str, max_bytes: int = 0):
     """Download remote banner once to disk; return local Path for form upload.
 
-    Fast path: reuse disk cache. Download is streamed with hard wall-clock limit
-    so a slow host cannot hang the process for tens of seconds.
+    No practical size limits (only a safety ceiling against runaway downloads).
+    Cached files are returned instantly on subsequent calls / after restart.
     """
     import hashlib
     import logging
-    import socket
     import subprocess
     from urllib.parse import urlparse
+
+    # Safety ceiling only (Telegram practical media ~2GB; we use 200MB to avoid filling disk)
+    SAFETY_MAX = 200 * 1024 * 1024
+    if not max_bytes or max_bytes < 0:
+        max_bytes = SAFETY_MAX
+    else:
+        max_bytes = min(max_bytes, SAFETY_MAX)
 
     url = str(url or "").strip()
     if not url.startswith(("http://", "https://")):
@@ -406,17 +412,12 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
             ext = ".mov"
         else:
             ext = ".mp4"
-        # Keep video banners small so first Telegram upload stays fast
-        max_bytes = min(max_bytes, 8 * 1024 * 1024)
     elif any(low.endswith(e) or path.endswith(e) for e in (".gif",)):
         ext = ".gif"
-        max_bytes = min(max_bytes, 6 * 1024 * 1024)
     elif any(low.endswith(e) or path.endswith(e) for e in (".png", ".webp", ".bmp")):
         ext = Path(path).suffix or ".png"
-        max_bytes = min(max_bytes, 4 * 1024 * 1024)
     else:
         ext = ".jpg"
-        max_bytes = min(max_bytes, 4 * 1024 * 1024)
 
     key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
     try:
@@ -428,6 +429,7 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{key}{ext}"
 
+    # Instant path — already on disk
     if dest.is_file() and dest.stat().st_size > 500:
         return dest
 
@@ -438,26 +440,24 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
 
     log = logging.getLogger(__name__)
     t0 = time.monotonic()
-    wall = 8.0  # hard deadline for whole download
     tmp = dest.with_suffix(dest.suffix + ".part")
 
     def _ok_size(n: int) -> bool:
-        return 500 <= n <= max_bytes
+        return n > 500 and n <= max_bytes
 
-    # 1) curl — usually faster than urllib on slow hosts
+    # 1) curl full speed (no artificial max-time / max-filesize throttling)
     try:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
+        with contextlib.suppress(Exception):
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
         r = subprocess.run(
             [
                 "curl",
                 "-fsSL",
                 "--connect-timeout",
-                "3",
+                "5",
                 "--max-time",
-                str(int(wall)),
-                "--max-filesize",
-                str(max_bytes),
+                "120",
                 "-A",
                 "HikkariUserbot/2.0",
                 "-o",
@@ -465,7 +465,7 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
                 url,
             ],
             capture_output=True,
-            timeout=wall + 1,
+            timeout=130,
             check=False,
         )
         if r.returncode == 0 and tmp.is_file() and _ok_size(tmp.stat().st_size):
@@ -483,7 +483,7 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
         with contextlib.suppress(Exception):
             tmp.unlink(missing_ok=True)
 
-    # 2) urllib streamed with connect/read timeouts
+    # 2) urllib stream — no per-chunk wall, only overall safety size
     try:
         import urllib.request
 
@@ -492,41 +492,22 @@ def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
             url,
             headers={"User-Agent": "HikkariUserbot/2.0"},
         )
-        # (connect timeout, read timeout)
-        with urllib.request.urlopen(req, timeout=(3, 4)) as resp:
-            # Skip obviously oversized by Content-Length
-            cl = resp.headers.get("Content-Length")
-            if cl:
-                with contextlib.suppress(Exception):
-                    if int(cl) > max_bytes:
-                        _asset_failed[fail_key] = time.monotonic()
-                        log.warning(
-                            "banner too large (%s > %s), skip %s",
-                            cl,
-                            max_bytes,
-                            url[:60],
-                        )
-                        return None
+        with urllib.request.urlopen(req, timeout=60) as resp:
             written = 0
             with open(tmp, "wb") as out:
                 while True:
-                    if time.monotonic() - t0 > wall:
-                        raise TimeoutError("banner download wall clock exceeded")
-                    chunk = resp.read(64 * 1024)
+                    chunk = resp.read(256 * 1024)
                     if not chunk:
                         break
                     written += len(chunk)
                     if written > max_bytes:
-                        raise ValueError("banner exceeds max_bytes")
+                        raise ValueError("banner exceeds safety max")
                     out.write(chunk)
         if not tmp.is_file() or not _ok_size(tmp.stat().st_size):
             _asset_failed[fail_key] = time.monotonic()
             with contextlib.suppress(Exception):
                 tmp.unlink(missing_ok=True)
-            log.warning(
-                "banner cache size invalid for %s",
-                url[:60],
-            )
+            log.warning("banner cache size invalid for %s", url[:60])
             return None
         tmp.replace(dest)
         _bad_media_urls.discard(url)
