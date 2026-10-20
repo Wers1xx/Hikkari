@@ -789,32 +789,10 @@ class Form(InlineUnit):
                 # Soft length guard — oversized HTML breaks answerInlineQuery
                 if len(html) > 28000:
                     html = html[:27900] + "\n<p>…</p>"
-                rm = None
-                buttons = form.get("buttons") or []
-                if buttons:
-                    try:
-                        rm = {"inline_keyboard": []}
-                        for row in buttons:
-                            r = []
-                            for btn in row:
-                                if not isinstance(btn, dict):
-                                    continue
-                                if btn.get("url"):
-                                    r.append({"text": btn.get("text", "•"), "url": btn["url"]})
-                                elif btn.get("data") or btn.get("callback"):
-                                    r.append({
-                                        "text": btn.get("text", "•"),
-                                        "callback_data": str(btn.get("data") or "noop")[:64],
-                                    })
-                            if r:
-                                rm["inline_keyboard"].append(r)
-                        if not rm["inline_keyboard"]:
-                            rm = None
-                    except Exception:
-                        rm = None
+                # Buttons are already embedded as <tg-button-row> in html.
+                # Do NOT attach classic InlineKeyboard under the message.
                 ok = False
                 if token and qid is not None:
-                    # answer_inline_rich already retries without external media once
                     ok = await answer_inline_rich(
                         str(token),
                         qid,
@@ -822,8 +800,8 @@ class Form(InlineUnit):
                         title=form.get("title") or "Hikkari",
                         description=form.get("description") or "Rich",
                         result_id=(form.get("uid") or utils.rand(16))[:64],
-                        reply_markup=rm,
-                        thumbnail_url=None,  # external thumb → EXTERNAL_MEDIA
+                        reply_markup=None,
+                        thumbnail_url=None,
                     )
                 else:
                     logger.warning(
@@ -899,12 +877,10 @@ class Form(InlineUnit):
                             rich_value = normalize_rich_html(str(rich_value))
                         except Exception:
                             rich_value = str(rich_value)
-                    # Inline rich cannot embed external <figure>/<img>/<video> URLs
                     try:
                         from ..utils.rich_api import strip_external_media_for_inline
                         rich_value = strip_external_media_for_inline(str(rich_value))
                     except Exception:
-                        # manual strip
                         import re as _re
                         rich_value = _re.sub(
                             r"<figure\b[^>]*>.*?</figure>",
@@ -912,15 +888,32 @@ class Form(InlineUnit):
                             str(rich_value),
                             flags=_re.I | _re.S,
                         )
-                        rich_value = _re.sub(r"<img\b[^>]*/?>", "", rich_value, flags=_re.I)
+                        rich_value = _re.sub(
+                            r"<img\b[^>]*/?>", "", rich_value, flags=_re.I
+                        )
+                    try:
+                        from ..utils.rich_api import markup_to_tg_rows
+                        _mk = self._validate_markup(form.get("buttons") or []) or []
+                        form["buttons"] = _mk
+                        _btn_html = markup_to_tg_rows(_mk, form.get("uid") or "")
+                        if _btn_html and "<tg-button" not in str(rich_value).lower():
+                            rich_value = str(rich_value).rstrip() + "\n" + _btn_html
+                    except Exception:
+                        logger.debug(
+                            "embed tg-buttons into rich form failed", exc_info=True
+                        )
                     btns = self.generate_markup(form["uid"])
                     try:
                         await inline_query.answer(
                             [
                                 await inline_query.rich_article(
                                     title="Hikkari",
-                                    html=rich_value if isinstance(rich_value, str) else str(rich_value),
-                                    buttons=btns,
+                                    html=(
+                                        rich_value
+                                        if isinstance(rich_value, str)
+                                        else str(rich_value)
+                                    ),
+                                    buttons=None,
                                     id=utils.rand(20),
                                 )
                             ],
@@ -928,7 +921,6 @@ class Form(InlineUnit):
                         )
                     except Exception:
                         logger.exception("rich_article failed, classic article fallback")
-                        # Still show HTML + working buttons (inline mode)
                         await inline_query.answer(
                             [
                                 await inline_query.builder.article(

@@ -372,13 +372,12 @@ class Utils(InlineUnit):
 
 
     async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Close form/list: answer, strip buttons, delete. Works across devices."""
+        """Close form/list/rich: answer + DELETE message (not leave ✖️)."""
         with contextlib.suppress(Exception):
             await call.answer()
 
         unit_id = getattr(call, "unit_id", None)
         if not unit_id and isinstance(getattr(self, "_units", None), dict):
-            # match by inline_message_id
             imid = getattr(call, "inline_message_id", None)
             if imid:
                 for uid, unit in self._units.items():
@@ -388,7 +387,11 @@ class Utils(InlineUnit):
             if not unit_id and len(self._units) == 1:
                 unit_id = next(iter(self._units))
 
-        unit = self._units.get(unit_id) if unit_id and getattr(self, "_units", None) else None
+        unit = (
+            self._units.get(unit_id)
+            if unit_id and getattr(self, "_units", None)
+            else None
+        )
         chat = None
         msg_id = None
         inline_msg_id = getattr(call, "inline_message_id", None)
@@ -401,36 +404,58 @@ class Utils(InlineUnit):
         if msg_id is None:
             msg_id = getattr(call, "message_id", None)
 
-        # A) Clear content / buttons
-        with contextlib.suppress(Exception):
-            if hasattr(call, "edit"):
-                await call.edit("✖️", reply_markup=None)
-        with contextlib.suppress(Exception):
-            if inline_msg_id and getattr(self, "_bot_client", None):
-                await self._bot_client.edit_message(
-                    inline_msg_id, "✖️", buttons=None, link_preview=False
-                )
+        deleted = False
 
-        # B) Delete via every available path (phone + desktop)
+        # 1) InlineCall.delete / unit delete
         with contextlib.suppress(Exception):
             if hasattr(call, "delete"):
-                await call.delete()
+                if await call.delete():
+                    deleted = True
         with contextlib.suppress(Exception):
-            if chat is not None and msg_id is not None and getattr(self, "bot", None):
-                await self.bot.delete_message(chat, msg_id)
-        with contextlib.suppress(Exception):
-            if chat is not None and msg_id is not None and getattr(self, "_client", None):
-                await self._client.delete_messages(chat, [msg_id])
-        with contextlib.suppress(Exception):
+            if unit_id and not deleted:
+                ok = await self._delete_unit_message(
+                    call, unit_id=unit_id, chat_id=chat, message_id=msg_id
+                )
+                if ok:
+                    deleted = True
+
+        # 2) User client (via@ messages belong to the user)
+        if not deleted and chat is not None and msg_id is not None:
+            with contextlib.suppress(Exception):
+                await self._client.delete_messages(int(chat), [int(msg_id)])
+                deleted = True
+
+        # 3) Bot API delete (works if bot can delete in chat)
+        if not deleted and chat is not None and msg_id is not None:
             token = getattr(self, "_token", None)
-            if token and chat is not None and msg_id is not None:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    await session.post(
-                        f"https://api.telegram.org/bot{token}/deleteMessage",
-                        json={"chat_id": int(chat), "message_id": int(msg_id)},
-                        timeout=aiohttp.ClientTimeout(total=10),
+            if token:
+                with contextlib.suppress(Exception):
+                    import aiohttp
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{token}/deleteMessage",
+                            json={
+                                "chat_id": int(chat),
+                                "message_id": int(msg_id),
+                            },
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            data = await resp.json(content_type=None)
+                            if data.get("ok"):
+                                deleted = True
+
+        # 4) Fallback: strip to empty (only if delete impossible)
+        if not deleted:
+            with contextlib.suppress(Exception):
+                if hasattr(call, "edit"):
+                    await call.edit("✖️", reply_markup=None)
+            with contextlib.suppress(Exception):
+                if inline_msg_id and getattr(self, "_bot_client", None):
+                    await self._bot_client.edit_message(
+                        inline_msg_id, "✖️", buttons=None, link_preview=False
                     )
+
         with contextlib.suppress(Exception):
             if unit_id and unit_id in self._units:
                 on_unload = self._units[unit_id].get("on_unload")

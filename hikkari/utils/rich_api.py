@@ -236,11 +236,11 @@ def nav_button_row(
 
 def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
     """
-    Convert Hikkari reply_markup (list of rows of dicts) to official <tg-button-row> HTML.
+    Convert Hikkari reply_markup to official <tg-button-row> HTML.
+    Supports url / web_app / callback / input (switch_inline) / action close.
     """
     if not markup:
         return ""
-    import html as html_mod
     rows_out = []
     for row in markup:
         if not isinstance(row, (list, tuple)):
@@ -250,22 +250,59 @@ def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
             if not isinstance(btn, dict):
                 continue
             text = str(btn.get("text") or "•")[:64]
+            style = btn.get("style")
+            if not style and btn.get("action") == "close":
+                style = "danger"
+            if not style:
+                style = "primary"
+
             if btn.get("url"):
-                btns.append(tg_button(text, type="url", url=str(btn["url"]), style=btn.get("style")))
+                btns.append(
+                    tg_button(text, type="url", url=str(btn["url"]), style=style)
+                )
             elif btn.get("web_app"):
-                btns.append(tg_button(text, type="web_app", url=str(btn["web_app"]), style=btn.get("style") or "primary"))
+                btns.append(
+                    tg_button(
+                        text,
+                        type="web_app",
+                        url=str(btn["web_app"]),
+                        style=style or "primary",
+                    )
+                )
+            elif btn.get("input") or (
+                btn.get("handler")
+                and not btn.get("callback")
+                and not btn.get("data")
+                and not btn.get("url")
+            ):
+                q = str(btn.get("_switch_query") or btn.get("data") or "cfg ")[:60]
+                if not q.endswith(" "):
+                    q = q + " "
+                btns.append(
+                    tg_button(
+                        text,
+                        type="switch_inline_query_current_chat",
+                        query=q,
+                        style=style,
+                    )
+                )
             else:
-                # callback — prefer pre-assigned _callback_data from form system
                 data = btn.get("_callback_data") or btn.get("data") or "noop"
-                if unit_id and not str(data).startswith(("hk|", "rh|")):
-                    # keep form's short data; events still match unit buttons
+                if unit_id and not str(data).startswith(
+                    ("hk|", "rh|", "cfg|", "rp|")
+                ):
                     data = str(data)[:64]
-                style = btn.get("style") or "primary"
-                btns.append(tg_button(text, type="callback_data", data=str(data)[:64], style=style))
+                btns.append(
+                    tg_button(
+                        text,
+                        type="callback_data",
+                        data=str(data)[:64],
+                        style=style,
+                    )
+                )
         if btns:
             rows_out.append(tg_button_row(btns, align="center"))
     return "\n".join(rows_out)
-
 
 
 

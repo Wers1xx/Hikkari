@@ -108,16 +108,50 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Open config form instantly - banner via URL like ping/info (no download)."""
+        """Config UI: classic form always; Rich+Premium → rich_message + tg-buttons."""
         import contextlib
         import logging
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
+        from ..utils.rich import can_use_rich
 
         _log = logging.getLogger(__name__)
         markup = reply_markup if reply_markup is not None else []
+        use_rich = False
+        with contextlib.suppress(Exception):
+            use_rich = bool(can_use_rich(self._client, self._db))
+
+        def _as_rich_html(src: str) -> str:
+            s = str(src or "").strip()
+            if not s:
+                return "<p>⚙️ Config</p>"
+            low = s.lower()
+            if any(tag in low for tag in ("<h1", "<h2", "<p>", "<table", "<details")):
+                return s
+            # classic config HTML → light rich wrapper
+            return f"<p>{s}</p>"
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            if use_rich:
+                try:
+                    from ..utils.rich_api import markup_to_tg_rows
+
+                    html = _as_rich_html(text)
+                    # validate so input buttons get _switch_query
+                    with contextlib.suppress(Exception):
+                        mk = self.inline._validate_markup(markup) or markup
+                        markup = mk
+                    btn_html = markup_to_tg_rows(markup)
+                    if btn_html and "<tg-button" not in html.lower():
+                        html = html.rstrip() + "\n" + btn_html
+                    await message.edit(
+                        text="⚙️",
+                        rich_message=html,
+                        reply_markup=markup,
+                    )
+                    return message
+                except Exception:
+                    _log.debug("cfg rich edit failed", exc_info=True)
             with contextlib.suppress(Exception):
                 await message.edit(text, reply_markup=markup)
                 return message
@@ -126,17 +160,34 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        media = self._cfg_banner_kwargs()
         form_kw = dict(
             text=text,
             message=message,
             reply_markup=markup,
             silent=True,
             force_me=True,
-            **media,
             **kwargs,
         )
 
+        if use_rich:
+            # Pure Rich path: tg-buttons inside body, no media (avoids curl failures)
+            form_kw["rich_message"] = _as_rich_html(text)
+            form_kw.pop("photo", None)
+            form_kw.pop("video", None)
+            form_kw.pop("gif", None)
+            form_kw.pop("file", None)
+            form_kw.pop("audio", None)
+            try:
+                m = await self.inline.form(**form_kw)
+                if m:
+                    return m
+            except Exception:
+                _log.debug("cfg rich form failed", exc_info=True)
+            form_kw.pop("rich_message", None)
+
+        # Classic form (+ optional banner when not rich)
+        media = self._cfg_banner_kwargs()
+        form_kw.update(media)
         try:
             m = await self.inline.form(**form_kw)
             if m:
