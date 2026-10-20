@@ -397,28 +397,33 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Announce module load as native Rich (via @bot).
+        """Announce module load as via@ Rich (same as Help/Info when possible).
 
-        Keep HTML minimal and media-free: external banners/audio break
-        answerInlineQuery with EXTERNAL_MEDIA_NOT_SUPPORTED and force classic.
+        Always tries inline.rich when the bot is ready — do not depend only on
+        Premium gate (via@ works in Saved Messages / chats with bot).
+        Target chat by id so we never edit the .py document message.
         """
         try:
-            from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
                 html_table,
                 strip_external_media_for_inline,
                 try_send_rich,
+                to_rich_compatible,
             )
             import html as html_mod
-
-            if not can_use_rich(self._client, self._db):
-                return False
 
             if not getattr(self.inline, "init_complete", False) or not getattr(
                 self.inline, "bot_username", None
             ):
                 with contextlib.suppress(Exception):
-                    await self.inline.register_manager(ignore_token_checks=True)
+                    if hasattr(self.inline, "ensure_inline_ready"):
+                        await self.inline.ensure_inline_ready()
+                    else:
+                        await self.inline.register_manager(ignore_token_checks=True)
+
+            if not getattr(self.inline, "bot_username", None):
+                logger.debug("loader rich: no inline bot")
+                return False
 
             name = self._plain_cmd_doc(modname, str(modname))[:64]
             desc = self._plain_cmd_doc(mod_doc, "")[:300]
@@ -456,81 +461,92 @@ class LoaderMod(loader.Module):
                     )
                 )
 
-            # Proven-safe Rich HTML only (tables work; no figure/banner/details/ul)
-            parts = [f"<h2>{html_mod.escape(name)}</h2>"]
+            ver = f" (v{version})" if version else ""
+            parts = [f"<h2>{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"]
             if desc:
                 parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
             if clean_rows:
+                # details-friendly table
                 parts.append(html_table(clean_rows, header=("Command", "Description")))
-            if version:
-                parts.append(
-                    f"<p>Version: <code>{html_mod.escape(str(version)[:32])}</code></p>"
-                )
             if dev_plain:
-                parts.append(
-                    f"<p>Developer: <b>{self._linkify_developer(dev_plain[:80])}</b></p>"
-                )
+                # clickable developer(s)
+                linked = self._linkify_developer(dev_plain[:120])
+                parts.append(f"<p>\u2764\ufe0f Developer: {linked}</p>")
             if origin_url:
                 parts.append(
-                    f'<p>Source: <a href="{html_mod.escape(origin_url)}">'
-                    f"{html_mod.escape(origin_disp)}</a></p>"
+                    f'<p>\U0001f310 <a href="{html_mod.escape(origin_url)}">'
+                    f"{html_mod.escape(origin_disp or origin_url)}</a></p>"
                 )
             elif origin_disp:
                 parts.append(f"<p>Source: {html_mod.escape(origin_disp)}</p>")
 
             html = "\n".join(parts)
+            with contextlib.suppress(Exception):
+                html = to_rich_compatible(html)
             html = strip_external_media_for_inline(html)
-            # Prefer meta banner as thumbnail (inline cannot embed external figure)
-            if meta_banner and str(meta_banner).startswith(("http://", "https://")):
-                pass  # thumbnail_url set on inline.rich below
 
-            title = f"✓ {name}"[:64]
+            title = f"\u2713 {name}"[:64]
             description = (desc[:80] if desc else "Module loaded")
+            thumb = (
+                meta_banner
+                if meta_banner and str(meta_banner).startswith(("http://", "https://"))
+                else None
+            )
 
-            # 1) via @inline bot — required for private chats
-            if getattr(self.inline, "bot_username", None):
+            # Always target chat id — never the document message itself
+            try:
+                chat = utils.get_chat_id(message)
+            except Exception:
+                chat = None
+            target = chat if chat is not None else message
+
+            m = None
+            try:
+                m = await self.inline.rich(
+                    target,
+                    html,
+                    title=title,
+                    description=description,
+                    silent=True,
+                    reply_markup=None,
+                    thumbnail_url=thumb,
+                )
+            except Exception:
+                logger.debug("loader rich via failed", exc_info=True)
+            if not m:
+                await asyncio.sleep(0.4)
                 try:
                     m = await self.inline.rich(
-                        message,
+                        target,
                         html,
                         title=title,
                         description=description,
                         silent=True,
                         reply_markup=None,
-                        thumbnail_url=meta_banner if meta_banner else None,
+                        thumbnail_url=thumb,
                     )
-                    if m:
-                        return True
-                except Exception:
-                    logger.debug("loader rich via failed", exc_info=True)
-                # short second try after tiny delay (query race)
-                await asyncio.sleep(0.35)
-                try:
-                    m = await self.inline.rich(
-                        message,
-                        html,
-                        title=title,
-                        description=description,
-                        silent=True,
-                        reply_markup=None,
-                        thumbnail_url=meta_banner if meta_banner else None,
-                    )
-                    if m:
-                        return True
                 except Exception:
                     logger.debug("loader rich via retry failed", exc_info=True)
 
-            # 2) Bot API sendRichMessage (only if bot can write to chat)
-            try:
-                chat = utils.get_chat_id(message)
-                ok = await try_send_rich(self._client, chat, html)
-                if ok:
-                    if isinstance(message, Message) and getattr(message, "out", False):
-                        with contextlib.suppress(Exception):
-                            await message.delete()
-                    return True
-            except Exception:
-                logger.debug("loader try_send_rich failed", exc_info=True)
+            if m:
+                if isinstance(message, Message) and getattr(message, "out", False):
+                    with contextlib.suppress(Exception):
+                        await message.delete()
+                return True
+
+            # Bot API sendRichMessage fallback
+            if chat is not None:
+                try:
+                    ok = await try_send_rich(self._client, chat, html)
+                    if ok:
+                        if isinstance(message, Message) and getattr(
+                            message, "out", False
+                        ):
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                        return True
+                except Exception:
+                    logger.debug("loader try_send_rich failed", exc_info=True)
             return False
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
