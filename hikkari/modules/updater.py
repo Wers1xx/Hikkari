@@ -71,6 +71,7 @@ class UpdaterMod(loader.Module):
         # git calls run in worker threads → serialize them (no parallel fetches)
         self._git_lock = threading.Lock()
         self._notified = None
+        self._notify_busy = False
         self._last_emfile_warning = 0.0
         self._last_git_fetch = 0.0
         self._git_fetch_backoff_until = 0.0
@@ -414,33 +415,58 @@ class UpdaterMod(loader.Module):
             self.get("ignore_permanent", False)
             and self.get("ignore_permanent") == self._pending
         ):
-            await asyncio.sleep(60)
             return
 
-        if self._pending not in {current, self._notified}:
+        # Restore notified SHA from DB (survives restart — no spam to Saved Messages)
+        if not self._notified:
+            with contextlib.suppress(Exception):
+                self._notified = self.get("last_notified") or None
+
+        pending = self._pending
+        if not pending or pending in {current, self._notified}:
+            return
+        if self.get("last_notified") == pending:
+            self._notified = pending
+            return
+        if self._notify_busy:
+            return
+
+        self._notify_busy = True
+        try:
+            # Drop previous update notice before sending a new one
+            with contextlib.suppress(Exception):
+                await self._delete_all_upd_messages()
+
             text = self.strings["update_required"].format(
                 current[:6],
                 '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
                     current[:12],
-                    self._pending[:12],
-                    self._pending[:6],
+                    pending[:12],
+                    pending[:6],
                 ),
                 changelog,
             )
             markup = None
             with contextlib.suppress(Exception):
-                markup = self._markup() if callable(getattr(self, "_markup", None)) else None
+                markup = (
+                    self._markup()
+                    if callable(getattr(self, "_markup", None))
+                    else None
+                )
             m = await self._send_owner_notice(text, reply_markup=markup)
-            self._notified = self._pending
+            self._notified = pending
+            self.set("last_notified", pending)
             self.set("ignore_permanent", False)
-            with contextlib.suppress(Exception):
-                await self._delete_all_upd_messages()
             mid = None
             with contextlib.suppress(Exception):
                 mid = getattr(m, "message_id", None) or getattr(m, "id", None)
             if mid is not None:
                 self.set("upd_msg", mid)
-            logger.info("Update notification sent pending=%s", (self._pending or "")[:7])
+            logger.info(
+                "Update notification sent pending=%s", (pending or "")[:7]
+            )
+        finally:
+            self._notify_busy = False
 
     async def _delete_all_upd_messages(self):
         for client in self.allclients:
@@ -460,7 +486,10 @@ class UpdaterMod(loader.Module):
             return
 
         if call.data == "hikkari/ignore_upd":
-            self.set("ignore_permanent", self.get_latest())
+            latest = self.get_latest()
+            self.set("ignore_permanent", latest)
+            self.set("last_notified", latest)
+            self._notified = latest
             await self.inline.bot(call.answer(self.strings["latest_disabled"]))
             return
 
@@ -1522,9 +1551,12 @@ class UpdaterMod(loader.Module):
         with contextlib.suppress(Exception):
             await self._ensure_preferred_branch()
 
+        with contextlib.suppress(Exception):
+            self._notified = self.get("last_notified") or None
+
         async def _boot_poll():
             # Let UI/restart status settle; fetch is non-blocking (thread)
-            await asyncio.sleep(12)
+            await asyncio.sleep(20)
             with contextlib.suppress(Exception):
                 await self.poller()
 
