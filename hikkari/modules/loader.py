@@ -950,17 +950,51 @@ class LoaderMod(loader.Module):
                 url,
                 blob_link=blob_link,
                 save_fs=True,
-                _raise_install_errors=True,
+                _raise_install_errors=False,
             )
 
+            # load_module returns False only on real failure; UI errors after
+            # successful register still count as installed (disk already written).
             if not installed:
-                raise ModuleInstallError(f"Module {module_name} was not installed")
+                # Soft recovery: module may be live despite False (announce failed)
+                live = False
+                with contextlib.suppress(Exception):
+                    for mod in getattr(self.allmodules, "modules", []) or []:
+                        origin = getattr(mod, "__origin__", None) or ""
+                        if origin and (
+                            origin == url
+                            or str(origin).rstrip("/") == str(url).rstrip("/")
+                        ):
+                            live = True
+                            break
+                        cls = getattr(mod, "__class__", None)
+                        if cls and module_name.lower() in (
+                            cls.__name__.lower(),
+                            str(getattr(mod, "name", "")).lower(),
+                        ):
+                            live = True
+                            break
+                if not live:
+                    raise ModuleInstallError(
+                        f"Module {module_name} was not installed"
+                    )
+                logger.info(
+                    "Module %s registered but load_module returned falsy "
+                    "(likely UI); treating as success",
+                    module_name,
+                )
 
             # Keep URL in DB for _update_modules re-download
             with contextlib.suppress(Exception):
                 self.update_modules_in_db()
 
             return MODULE_LOADING_SUCCESS
+        except ModuleInstallError:
+            logger.exception(
+                "Failed to install external module %s",
+                module_name,
+            )
+            return MODULE_LOADING_FAILED
         except Exception as e:
             logger.exception(
                 "Failed to install external module %s: %s",
@@ -2140,11 +2174,12 @@ class LoaderMod(loader.Module):
             ):
                 return True
             # Classic only if rich fully failed
-            await self._announce_module_loaded(
-                message,
-                loaded_msg(),
-                reply_markup=subscribe_markup,
-            )
+            with contextlib.suppress(Exception):
+                await self._announce_module_loaded(
+                    message,
+                    loaded_msg(),
+                    reply_markup=subscribe_markup,
+                )
             return True
 
         for _name, fun in sorted(
@@ -2230,7 +2265,16 @@ class LoaderMod(loader.Module):
                 skip_rich=True,
             )
         except MediaCaptionTooLongError:
-            await self._announce_module_loaded(message, loaded_msg(False))
+            with contextlib.suppress(Exception):
+                await self._announce_module_loaded(message, loaded_msg(False))
+        except Exception:
+            # Message already deleted / invalid id — module is still loaded
+            logger.debug(
+                "post-install announce failed (module still loaded)",
+                exc_info=True,
+            )
+            with contextlib.suppress(Exception):
+                await self._announce_module_loaded(message, loaded_msg(False))
 
         return True
 
