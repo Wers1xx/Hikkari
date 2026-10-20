@@ -90,7 +90,6 @@ class HikkariConfigMod(loader.Module):
                 "",
                 lambda: "Banner for config UI (http URL or empty for built-in)",
                 validator=loader.validators.String(),
-                on_change=lambda: self._warm_banner_cache(),
             ),
             loader.ConfigValue(
                 "media_quote",
@@ -107,27 +106,9 @@ class HikkariConfigMod(loader.Module):
         )
 
 
-    def _warm_banner_cache(self) -> None:
-        """Background disk cache for banner_url (never blocks UI)."""
-        import contextlib
-
-        raw = str(self.config.get("banner_url") or "").strip()
-        if not raw.startswith(("http://", "https://")):
-            return
-        with contextlib.suppress(Exception):
-            import asyncio
-
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.run_in_executor(None, utils.cache_remote_media, raw)
-
-    async def client_ready(self, client, db):
-        # Pre-cache banner so .cfg opens with media instantly
-        with contextlib.suppress(Exception):
-            self._warm_banner_cache()
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Open config form immediately. Media only if already on disk / builtin."""
+        """Open config form instantly - banner via URL like ping/info (no download)."""
         import contextlib
         import logging
 
@@ -145,10 +126,6 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        # Never await download here — form must open instantly
-        with contextlib.suppress(Exception):
-            self._warm_banner_cache()
-
         media = self._cfg_banner_kwargs()
         form_kw = dict(
             text=text,
@@ -165,7 +142,7 @@ class HikkariConfigMod(loader.Module):
             if m:
                 return m
         except Exception:
-            _log.exception("cfg form with banner failed")
+            _log.debug("cfg form with banner failed", exc_info=True)
 
         for k in ("photo", "video", "gif", "file", "audio"):
             form_kw.pop(k, None)
@@ -174,7 +151,8 @@ class HikkariConfigMod(loader.Module):
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
-        """Local path preferred; remote URL cached for form video/photo."""
+        """Pass banner URL straight to Telegram like ping/info (no local download)."""
+        import contextlib
         from pathlib import Path as _P
         from urllib.parse import urlparse
 
@@ -184,12 +162,15 @@ class HikkariConfigMod(loader.Module):
                 return {"photo": str(p)}
             return {}
 
-        def _by_path(s: str) -> dict:
+        def _by_ref(s: str) -> dict:
             low = s.lower().split("?", 1)[0]
             path = ""
             with contextlib.suppress(Exception):
-                path = (urlparse(s).path if s.startswith("http") else s).lower()
-            if any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm")):
+                path = (urlparse(s).path if "://" in s else s).lower()
+            if any(
+                low.endswith(e) or path.endswith(e)
+                for e in (".mp4", ".mov", ".webm")
+            ):
                 return {"video": s}
             if any(low.endswith(e) or path.endswith(e) for e in (".gif",)):
                 return {"gif": s}
@@ -199,67 +180,14 @@ class HikkariConfigMod(loader.Module):
         if not raw:
             return _default()
 
-        # Local file
-        if not raw.startswith("http") and _P(raw).is_file():
-            return _by_path(raw)
-
-        banner = None
-        with contextlib.suppress(Exception):
-            banner = utils.resolve_banner_media(raw)
-
-        if isinstance(banner, str) and _P(banner).is_file():
-            return _by_path(str(_P(banner).resolve()))
-
-        # Remote URL → must be on disk for inline form (client uploads file)
-        remote = raw if raw.startswith("http") else None
-        if not remote and banner is not None:
-            remote = getattr(banner, "url", None)
-            if isinstance(banner, str) and banner.startswith("http"):
-                remote = banner
-        if isinstance(remote, str) and remote.startswith("http"):
-            # Instant path: only already-cached files (no download)
-            cached = None
-            with contextlib.suppress(Exception):
-                import hashlib
-
-                key = hashlib.sha256(remote.encode("utf-8")).hexdigest()[:20]
-                from .. import main as _main
-
-                base = (
-                    _P(getattr(_main, "BASE_PATH", _P.cwd()))
-                    / "assets"
-                    / "banner_cache"
-                )
-                for ext in (
-                    ".mp4",
-                    ".webm",
-                    ".mov",
-                    ".gif",
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".webp",
-                ):
-                    cand = base / f"{key}{ext}"
-                    if cand.is_file() and cand.stat().st_size > 500:
-                        cached = cand
-                        break
-            if cached is not None:
-                return _by_path(str(cached.resolve()))
-            # Still images: optional direct URL (no wait)
-            low = remote.lower().split("?", 1)[0]
-            path = (urlparse(remote).path or "").lower()
-            is_vid = any(
-                low.endswith(e) or path.endswith(e)
-                for e in (".mp4", ".mov", ".webm", ".gif")
-            )
-            if not is_vid and not utils.is_bad_media(remote):
-                return {"photo": remote}
-            # Video not cached yet → builtin photo now; cache fills in background
+        if not raw.startswith(("http://", "https://")):
+            if _P(raw).is_file():
+                return _by_ref(raw)
             return _default()
 
-        return _default()
-
+        if utils.is_bad_media(raw):
+            return _default()
+        return _by_ref(raw)
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
