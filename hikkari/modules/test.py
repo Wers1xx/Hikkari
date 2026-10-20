@@ -363,13 +363,12 @@ class TestMod(loader.Module):
             and can_use_rich(self._client, self._db)
             and getattr(self.inline, "init_complete", False)
         )
-        # Rich mode: no intermediate emoji (via @bot)
-        # Audio banner: no intermediate emoji either (instant send with caption)
-        # Classic image: timing emoji then edit
+        # Classic: emoji RTT. Rich/audio: skip intermediate (fast path).
         if not _rich and not _audio_banner:
             message = await utils.answer(
                 message, self.config["ping_emoji"], skip_rich=True
             )
+        # URL/path only — no download here (cache is elsewhere)
         banner = utils.resolve_banner_media(self.config["banner_url"])
         # Local large video path must stay as path (send_file), not WebPage
         try:

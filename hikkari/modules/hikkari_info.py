@@ -167,7 +167,7 @@ class HikkariInfoMod(loader.Module):
             "user": getpass.getuser(),
             "os": self._get_os_name() or self.strings["non_detectable"],
             "kernel": lib_platform.release(),
-            "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) core(-s); {psutil.cpu_percent()}% total",
+            "cpu": f"{psutil.cpu_count(logical=False)} ({psutil.cpu_count()}) core(-s); {psutil.cpu_percent(interval=0)}% total",
             "ping": round((time.perf_counter_ns() - start) / 10**6, 3),
             "htl_ver": hikkaritl.__version__,
             "git_status": utils.get_git_status(),

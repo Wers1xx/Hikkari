@@ -49,34 +49,48 @@ def get_git_info() -> tuple[str, str]:
     )
 
 
+_hash_cache: str | Literal[False] | None = None
+_url_cache: str | None = None
+
+
 def get_git_hash() -> str | Literal[False]:
-    """
-    Get current Hikkari git hash
-    :return: Git commit hash
-    """
+    """Get current Hikkari git hash (cached for process lifetime)."""
+    global _hash_cache
+    if _hash_cache is not None:
+        return _hash_cache
     if _is_no_git():
+        _hash_cache = False
         return False
     try:
         with git.Repo() as repo:
-            return repo.head.commit.hexsha
+            _hash_cache = repo.head.commit.hexsha
+            return _hash_cache
     except Exception:
+        _hash_cache = False
         return False
 
 
 def get_commit_url() -> str:
-    """
-    Get current Hikkari git commit url
-    :return: Git commit url
-    """
+    """Get current Hikkari git commit url (cached)."""
+    global _url_cache
+    if _url_cache is not None:
+        return _url_cache
     if _is_no_git():
-        return "Unknown"
+        _url_cache = "Unknown"
+        return _url_cache
     try:
         hash_ = get_git_hash()
         if not hash_:
-            return "Unknown"
-        return f'<a href="https://github.com/Wers1xx/Hikkari/commit/{hash_}">#{hash_[:7]}</a>'
+            _url_cache = "Unknown"
+            return _url_cache
+        _url_cache = (
+            f'<a href="https://github.com/Wers1xx/Hikkari/commit/{hash_}">'
+            f"#{hash_[:7]}</a>"
+        )
+        return _url_cache
     except Exception:
-        return "Unknown"
+        _url_cache = "Unknown"
+        return _url_cache
 
 
 def get_git_status() -> str:

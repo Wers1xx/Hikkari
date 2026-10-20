@@ -155,38 +155,54 @@ def formatted_uptime() -> str:
     return time_formatted
 
 
+_stat_cache: dict = {"ram": None, "cpu": None, "at": 0.0}
+_STAT_TTL = 2.0  # seconds — avoid blocking every .ping / .info
+
+
 def get_ram_usage() -> float:
-    """Returns current process tree memory usage in MB"""
+    """Returns current process memory usage in MB (cached ~2s, non-blocking)."""
+    import time as _t
+
+    now = _t.monotonic()
+    if (
+        _stat_cache["ram"] is not None
+        and (now - _stat_cache["at"]) < _STAT_TTL
+    ):
+        return _stat_cache["ram"]
     try:
         import psutil
 
-        current_process = psutil.Process(os.getpid())
-        mem = current_process.memory_info()[0] / 2.0**20
-        for child in current_process.children(recursive=True):
-            mem += child.memory_info()[0] / 2.0**20
-        return round(mem, 1)
+        # Self only — children walk is expensive and rarely needed for UI
+        mem = psutil.Process(os.getpid()).memory_info()[0] / 2.0**20
+        val = round(mem, 1)
+        _stat_cache["ram"] = val
+        _stat_cache["at"] = now
+        return val
     except Exception:
-        return 0
+        return float(_stat_cache["ram"] or 0)
 
 
 def get_cpu_usage():
-    """
-    Get CPU usage percentage using system-wide metrics
-    Falls back to psutil.cpu_percent() to avoid /proc/stat permission issues
-    """
-    import psutil
+    """Non-blocking CPU % (interval=0). Never sleep — was 100ms+ per call."""
+    import time as _t
 
+    now = _t.monotonic()
+    if (
+        _stat_cache["cpu"] is not None
+        and (now - _stat_cache["at"]) < _STAT_TTL
+    ):
+        return _stat_cache["cpu"]
     try:
-        cpu_percent = psutil.cpu_percent(interval=0.1)
-        return f"{cpu_percent:.2f}"
-    except PermissionError:
-        try:
-            cpu_percent = psutil.cpu_percent(interval=0)
-            return f"{cpu_percent:.2f}" if cpu_percent != 0 else "0.00"
-        except Exception:
-            return "0.00"
+        import psutil
+
+        # interval=0: instant; first call may be 0.0 — fine for UI
+        cpu_percent = psutil.cpu_percent(interval=0)
+        val = f"{cpu_percent:.2f}"
+        _stat_cache["cpu"] = val
+        _stat_cache["at"] = now
+        return val
     except Exception:
-        return "0.00"
+        return str(_stat_cache["cpu"] or "0.00")
 
 
 init_ts = time.perf_counter()

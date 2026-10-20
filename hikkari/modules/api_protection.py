@@ -106,7 +106,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "soft_throttle_ms",
-                60,
+                0,
                 lambda: "Soft delay (ms) between bulk-read requests when approaching limit",
                 validator=loader.validators.Integer(minimum=0, maximum=2000),
             ),
@@ -211,7 +211,7 @@ class APIRatelimiterMod(loader.Module):
 
                     # Soft throttle when mostly bulk-reads and approaching limit
                     if is_read and score > threshold * 0.45:
-                        delay_ms = int(self.config.get("soft_throttle_ms", 80) or 0)
+                        delay_ms = int(self.config.get("soft_throttle_ms", 0) or 0)
                         if delay_ms > 0:
                             await asyncio.sleep(delay_ms / 1000)
 

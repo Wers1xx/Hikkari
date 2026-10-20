@@ -126,10 +126,11 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        # Pre-cache remote banner so form gets a local path (TG cannot curl x0.at etc.)
+        # Pre-cache remote banner only if not already cached (fast path)
         raw = str(self.config.get("banner_url") or "").strip()
         if raw.startswith(("http://", "https://")):
             with contextlib.suppress(Exception):
+                # cache_remote_media is no-op/fast when file exists
                 await utils.run_sync(utils.cache_remote_media, raw)
 
         media = self._cfg_banner_kwargs()
