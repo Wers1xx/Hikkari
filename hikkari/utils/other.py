@@ -381,14 +381,16 @@ def is_bad_media(url: str) -> bool:
     return str(url or "").strip() in _bad_media_urls
 
 
-def cache_remote_media(url: str, max_bytes: int = 25 * 1024 * 1024):
+def cache_remote_media(url: str, max_bytes: int = 8 * 1024 * 1024):
     """Download remote banner once to disk; return local Path for form upload.
 
-    Telegram cannot curl many hosts (x0.at, etc.) for inline results.
-    Local path is uploaded by the client and works for photo/video forms.
+    Fast path: reuse disk cache. Download is streamed with hard wall-clock limit
+    so a slow host cannot hang the process for tens of seconds.
     """
     import hashlib
     import logging
+    import socket
+    import subprocess
     from urllib.parse import urlparse
 
     url = str(url or "").strip()
@@ -398,19 +400,23 @@ def cache_remote_media(url: str, max_bytes: int = 25 * 1024 * 1024):
     path = (urlparse(url).path or "").lower()
     low = url.lower().split("?", 1)[0]
     if any(low.endswith(e) or path.endswith(e) for e in (".mp4", ".mov", ".webm")):
-        ext = ".mp4" if not path.endswith((".mov", ".webm")) else Path(path).suffix or ".mp4"
         if path.endswith(".webm"):
             ext = ".webm"
         elif path.endswith(".mov"):
             ext = ".mov"
         else:
             ext = ".mp4"
+        # Keep video banners small so first Telegram upload stays fast
+        max_bytes = min(max_bytes, 8 * 1024 * 1024)
     elif any(low.endswith(e) or path.endswith(e) for e in (".gif",)):
         ext = ".gif"
+        max_bytes = min(max_bytes, 6 * 1024 * 1024)
     elif any(low.endswith(e) or path.endswith(e) for e in (".png", ".webp", ".bmp")):
         ext = Path(path).suffix or ".png"
+        max_bytes = min(max_bytes, 4 * 1024 * 1024)
     else:
         ext = ".jpg"
+        max_bytes = min(max_bytes, 4 * 1024 * 1024)
 
     key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
     try:
@@ -425,35 +431,121 @@ def cache_remote_media(url: str, max_bytes: int = 25 * 1024 * 1024):
     if dest.is_file() and dest.stat().st_size > 500:
         return dest
 
-    # fail cache (don't hammer dead hosts)
     fail_key = f"banner:{key}"
     failed_at = _asset_failed.get(fail_key)
     if failed_at is not None and time.monotonic() - failed_at < _ASSET_FAIL_TTL:
         return None
 
     log = logging.getLogger(__name__)
+    t0 = time.monotonic()
+    wall = 8.0  # hard deadline for whole download
+    tmp = dest.with_suffix(dest.suffix + ".part")
+
+    def _ok_size(n: int) -> bool:
+        return 500 <= n <= max_bytes
+
+    # 1) curl — usually faster than urllib on slow hosts
+    try:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        r = subprocess.run(
+            [
+                "curl",
+                "-fsSL",
+                "--connect-timeout",
+                "3",
+                "--max-time",
+                str(int(wall)),
+                "--max-filesize",
+                str(max_bytes),
+                "-A",
+                "HikkariUserbot/2.0",
+                "-o",
+                str(tmp),
+                url,
+            ],
+            capture_output=True,
+            timeout=wall + 1,
+            check=False,
+        )
+        if r.returncode == 0 and tmp.is_file() and _ok_size(tmp.stat().st_size):
+            tmp.replace(dest)
+            _bad_media_urls.discard(url)
+            log.info(
+                "banner cached via curl in %.1fs (%s bytes)",
+                time.monotonic() - t0,
+                dest.stat().st_size,
+            )
+            return dest
+        with contextlib.suppress(Exception):
+            tmp.unlink(missing_ok=True)
+    except Exception:
+        with contextlib.suppress(Exception):
+            tmp.unlink(missing_ok=True)
+
+    # 2) urllib streamed with connect/read timeouts
     try:
         import urllib.request
+
         log.info("Caching banner media %s …", url[:80])
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "HikkariUserbot/1.12"},
+            headers={"User-Agent": "HikkariUserbot/2.0"},
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = resp.read(max_bytes + 1)
-        if len(data) < 500 or len(data) > max_bytes:
+        # (connect timeout, read timeout)
+        with urllib.request.urlopen(req, timeout=(3, 4)) as resp:
+            # Skip obviously oversized by Content-Length
+            cl = resp.headers.get("Content-Length")
+            if cl:
+                with contextlib.suppress(Exception):
+                    if int(cl) > max_bytes:
+                        _asset_failed[fail_key] = time.monotonic()
+                        log.warning(
+                            "banner too large (%s > %s), skip %s",
+                            cl,
+                            max_bytes,
+                            url[:60],
+                        )
+                        return None
+            written = 0
+            with open(tmp, "wb") as out:
+                while True:
+                    if time.monotonic() - t0 > wall:
+                        raise TimeoutError("banner download wall clock exceeded")
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError("banner exceeds max_bytes")
+                    out.write(chunk)
+        if not tmp.is_file() or not _ok_size(tmp.stat().st_size):
             _asset_failed[fail_key] = time.monotonic()
-            log.warning("banner cache size invalid for %s (%s bytes)", url[:60], len(data))
+            with contextlib.suppress(Exception):
+                tmp.unlink(missing_ok=True)
+            log.warning(
+                "banner cache size invalid for %s",
+                url[:60],
+            )
             return None
-        tmp = dest.with_suffix(dest.suffix + ".part")
-        tmp.write_bytes(data)
         tmp.replace(dest)
-        # URL works for us — clear TG bad mark if present
         _bad_media_urls.discard(url)
+        log.info(
+            "banner cached via urllib in %.1fs (%s bytes)",
+            time.monotonic() - t0,
+            dest.stat().st_size,
+        )
         return dest
     except Exception:
         _asset_failed[fail_key] = time.monotonic()
-        log.warning("banner cache failed for %s", url[:80], exc_info=True)
+        with contextlib.suppress(Exception):
+            tmp.unlink(missing_ok=True)
+        log.warning(
+            "banner cache failed for %s (%.1fs)",
+            url[:80],
+            time.monotonic() - t0,
+            exc_info=True,
+        )
         return None
 
 
