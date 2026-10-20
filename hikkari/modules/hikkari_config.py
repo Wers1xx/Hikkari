@@ -90,6 +90,7 @@ class HikkariConfigMod(loader.Module):
                 "",
                 lambda: "Banner for config UI (http URL or empty for built-in)",
                 validator=loader.validators.String(),
+                on_change=lambda: self._warm_banner_cache(),
             ),
             loader.ConfigValue(
                 "media_quote",
@@ -106,17 +107,29 @@ class HikkariConfigMod(loader.Module):
         )
 
 
-    async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """One form: banner + text + buttons.
+    def _warm_banner_cache(self) -> None:
+        """Background disk cache for banner_url (never blocks UI)."""
+        import contextlib
 
-        Remote hosts (x0.at, etc.) cannot be curled by Telegram for inline results.
-        Video/photo is cached once to disk, then uploaded via MTProto as local file.
-        """
-        import asyncio
+        raw = str(self.config.get("banner_url") or "").strip()
+        if not raw.startswith(("http://", "https://")):
+            return
+        with contextlib.suppress(Exception):
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.run_in_executor(None, utils.cache_remote_media, raw)
+
+    async def client_ready(self, client, db):
+        # Pre-cache banner so .cfg opens with media instantly
+        with contextlib.suppress(Exception):
+            self._warm_banner_cache()
+
+    async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
+        """Open config form immediately. Media only if already on disk / builtin."""
         import contextlib
         import logging
-        from pathlib import Path as _P
-        from urllib.parse import urlparse
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
 
@@ -132,30 +145,9 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        raw = str(self.config.get("banner_url") or "").strip()
-        # Ensure remote media is on disk before form (TG Bot API cannot fetch many CDNs)
-        if raw.startswith(("http://", "https://")):
-            low = raw.lower().split("?", 1)[0]
-            path = ""
-            with contextlib.suppress(Exception):
-                path = (urlparse(raw).path or "").lower()
-            is_vid = any(
-                low.endswith(e) or path.endswith(e)
-                for e in (".mp4", ".mov", ".webm", ".gif")
-            )
-            # Video must be local for reliable inline; wait once (cached next opens)
-            if is_vid:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(
-                        utils.run_sync(utils.cache_remote_media, raw),
-                        timeout=25,
-                    )
-            else:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(
-                        utils.run_sync(utils.cache_remote_media, raw),
-                        timeout=12,
-                    )
+        # Never await download here — form must open instantly
+        with contextlib.suppress(Exception):
+            self._warm_banner_cache()
 
         media = self._cfg_banner_kwargs()
         form_kw = dict(
@@ -225,14 +217,36 @@ class HikkariConfigMod(loader.Module):
             if isinstance(banner, str) and banner.startswith("http"):
                 remote = banner
         if isinstance(remote, str) and remote.startswith("http"):
+            # Instant path: only already-cached files (no download)
             cached = None
             with contextlib.suppress(Exception):
-                cached = utils.cache_remote_media(remote)
+                import hashlib
+
+                key = hashlib.sha256(remote.encode("utf-8")).hexdigest()[:20]
+                from .. import main as _main
+
+                base = (
+                    _P(getattr(_main, "BASE_PATH", _P.cwd()))
+                    / "assets"
+                    / "banner_cache"
+                )
+                for ext in (
+                    ".mp4",
+                    ".webm",
+                    ".mov",
+                    ".gif",
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".webp",
+                ):
+                    cand = base / f"{key}{ext}"
+                    if cand.is_file() and cand.stat().st_size > 500:
+                        cached = cand
+                        break
             if cached is not None:
-                p = _P(str(cached))
-                if p.is_file() and p.stat().st_size > 500:
-                    return _by_path(str(p.resolve()))
-            # Direct URL only for still images (TG may curl them)
+                return _by_path(str(cached.resolve()))
+            # Still images: optional direct URL (no wait)
             low = remote.lower().split("?", 1)[0]
             path = (urlparse(remote).path or "").lower()
             is_vid = any(
@@ -241,6 +255,7 @@ class HikkariConfigMod(loader.Module):
             )
             if not is_vid and not utils.is_bad_media(remote):
                 return {"photo": remote}
+            # Video not cached yet → builtin photo now; cache fills in background
             return _default()
 
         return _default()
