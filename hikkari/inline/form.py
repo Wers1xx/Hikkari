@@ -789,8 +789,35 @@ class Form(InlineUnit):
                 # Soft length guard — oversized HTML breaks answerInlineQuery
                 if len(html) > 28000:
                     html = html[:27900] + "\n<p>…</p>"
-                # Buttons are already embedded as <tg-button-row> in html.
-                # Do NOT attach classic InlineKeyboard under the message.
+
+                # CRITICAL: assign _callback_data + register handlers BEFORE embedding
+                uid = form.get("uid") or inline_query.query
+                with contextlib.suppress(Exception):
+                    self.generate_markup(uid)
+                try:
+                    from ..utils.rich_api import markup_to_tg_rows
+                    import re as _re
+                    html = _re.sub(
+                        r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
+                        "",
+                        html,
+                        flags=_re.I | _re.S,
+                    )
+                    _mk = form.get("buttons") or []
+                    _btn_html = markup_to_tg_rows(_mk, uid or "")
+                    if _btn_html:
+                        html = str(html).rstrip() + "\n" + _btn_html
+                    form["rich_html"] = html
+                except Exception:
+                    logger.debug("rich re-embed buttons failed", exc_info=True)
+
+                thumb = None
+                for _k in ("thumbnail_url", "photo", "video", "gif"):
+                    _v = form.get(_k)
+                    if isinstance(_v, str) and _v.startswith(("http://", "https://")):
+                        thumb = _v
+                        break
+
                 ok = False
                 if token and qid is not None:
                     ok = await answer_inline_rich(
@@ -801,7 +828,7 @@ class Form(InlineUnit):
                         description=form.get("description") or "Rich",
                         result_id=(form.get("uid") or utils.rand(16))[:64],
                         reply_markup=None,
-                        thumbnail_url=None,
+                        thumbnail_url=thumb,
                     )
                 else:
                     logger.warning(
@@ -891,28 +918,68 @@ class Form(InlineUnit):
                         rich_value = _re.sub(
                             r"<img\b[^>]*/?>", "", rich_value, flags=_re.I
                         )
+
+                    # 1) Finalize callbacks on unit buttons (must be before embed)
+                    uid = form.get("uid")
+                    btns = None
+                    with contextlib.suppress(Exception):
+                        btns = self.generate_markup(uid)
+
+                    # 2) Embed tg-buttons with the SAME _callback_data as handlers
                     try:
                         from ..utils.rich_api import markup_to_tg_rows
-                        _mk = self._validate_markup(form.get("buttons") or []) or []
-                        form["buttons"] = _mk
-                        _btn_html = markup_to_tg_rows(_mk, form.get("uid") or "")
-                        if _btn_html and "<tg-button" not in str(rich_value).lower():
+                        import re as _re
+                        rich_value = _re.sub(
+                            r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
+                            "",
+                            str(rich_value),
+                            flags=_re.I | _re.S,
+                        )
+                        _mk = form.get("buttons") or []
+                        _btn_html = markup_to_tg_rows(_mk, uid or "")
+                        if _btn_html:
                             rich_value = str(rich_value).rstrip() + "\n" + _btn_html
                     except Exception:
                         logger.debug(
                             "embed tg-buttons into rich form failed", exc_info=True
                         )
-                    btns = self.generate_markup(form["uid"])
+
+                    thumb = None
+                    for _k in ("thumbnail_url", "photo", "video", "gif"):
+                        _v = form.get(_k)
+                        if isinstance(_v, str) and _v.startswith(
+                            ("http://", "https://")
+                        ):
+                            thumb = _v
+                            break
+
                     try:
+                        # Prefer Bot API answerInlineQuery with pure rich + no classic kb
+                        from ..utils.rich_api import answer_inline_rich, _find_bot_token
+                        token = _find_bot_token(self._client) or getattr(
+                            self, "_token", None
+                        )
+                        qid = getattr(inline_query, "query_id", None) or getattr(
+                            inline_query, "id", None
+                        )
+                        if token and qid is not None:
+                            ok = await answer_inline_rich(
+                                str(token),
+                                qid,
+                                str(rich_value),
+                                title="Hikkari",
+                                description="Config",
+                                result_id=(uid or utils.rand(16))[:64],
+                                reply_markup=None,
+                                thumbnail_url=thumb,
+                            )
+                            if ok:
+                                return
                         await inline_query.answer(
                             [
                                 await inline_query.rich_article(
                                     title="Hikkari",
-                                    html=(
-                                        rich_value
-                                        if isinstance(rich_value, str)
-                                        else str(rich_value)
-                                    ),
+                                    html=str(rich_value),
                                     buttons=None,
                                     id=utils.rand(20),
                                 )
@@ -920,7 +987,12 @@ class Form(InlineUnit):
                             cache_time=0,
                         )
                     except Exception:
-                        logger.exception("rich_article failed, classic article fallback")
+                        logger.exception(
+                            "rich_article failed, classic article fallback"
+                        )
+                        if btns is None:
+                            with contextlib.suppress(Exception):
+                                btns = self.generate_markup(form["uid"])
                         await inline_query.answer(
                             [
                                 await inline_query.builder.article(
