@@ -107,19 +107,179 @@ class HikkariConfigMod(loader.Module):
 
 
 
-    async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config form: classic inline + optional banner media (photo/video).
 
-        Always classic keyboard so every step (category → modules → option) keeps
-        working buttons. Banner uses the same media form path as before.
+    def _cfg_banner_http(self) -> str | None:
+        """Public http(s) banner URL for Rich <figure> (same as ping/info/help)."""
+        try:
+            from ..utils.rich_api import pick_banner_url
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.config.get("banner_url")
+            u = pick_banner_url(raw)
+            if u:
+                return u
+            # default builtin
+            return pick_banner_url("hikkari-config.jpg")
+        except Exception:
+            return "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
+
+    def _cfg_as_rich_body(self, text: str) -> str:
+        s = str(text or "").strip()
+        if not s:
+            return "<p>⚙️ Config</p>"
+        low = s.lower()
+        if any(tag in low for tag in ("<h1", "<h2", "<p>", "<table", "<b>", "<i>", "<details")):
+            return s
+        return f"<p>{s}</p>"
+
+    def _cfg_figure(self, url: str | None) -> str:
+        if not url or not str(url).startswith(("http://", "https://")):
+            return ""
+        u = str(url).split()[0]
+        low = u.lower()
+        if any(low.endswith(ext) for ext in (".mp4", ".webm", ".mov", ".mkv", ".gif")):
+            return f'<figure><video src="{u}"/></figure>\n'
+        return f'<figure><img src="{u}"/></figure>\n'
+
+    def _cfg_register_markup(self, markup, unit_id: str | None = None):
+        """Assign callback_data + custom_map so tg-button presses route."""
+        from .. import utils as _u
+
+        im = self.inline
+        mk = im._validate_markup(markup) or markup or []
+        if unit_id and getattr(im, "_units", None) and unit_id in im._units:
+            im._units[unit_id]["buttons"] = mk
+            import contextlib as _cx
+            with _cx.suppress(Exception):
+                im.generate_markup(unit_id)
+            return im._units[unit_id].get("buttons") or mk
+
+        for row in mk:
+            for btn in row:
+                if not isinstance(btn, dict):
+                    continue
+                if btn.get("action") == "close" and "callback" not in btn:
+                    btn["callback"] = im._close_unit_handler
+                    btn["disable_security"] = True
+                    btn.setdefault("args", ())
+                if "callback" in btn and "_callback_data" not in btn:
+                    btn["_callback_data"] = _u.rand(30)
+                    args = btn.get("args", ())
+                    if isinstance(args, dict):
+                        args = ()
+                    im._custom_map[btn["_callback_data"]] = {
+                        "handler": btn["callback"],
+                        "always_allow": btn.get("always_allow", []) or [],
+                        "args": args if args is not None else (),
+                        "kwargs": btn.get("kwargs", {}) or {},
+                        "force_me": btn.get("force_me", False),
+                        "disable_security": btn.get("disable_security", False),
+                        "message": True,
+                    }
+                if "input" in btn and "_switch_query" not in btn:
+                    btn["_switch_query"] = _u.rand(10)
+        return mk
+
+    def _cfg_rich_html(self, text: str, markup, unit_id: str | None = None) -> str:
+        """RichProbe-style HTML: banner figure + body + tg-button-row."""
+        from ..utils.rich_api import markup_to_tg_rows, inject_banner_html
+        import re as _re
+
+        body = self._cfg_as_rich_body(text)
+        banner = self._cfg_banner_http()
+        # Prefer inject (img); for video force figure<video>
+        if banner and any(
+            str(banner).lower().endswith(ext)
+            for ext in (".mp4", ".webm", ".mov", ".mkv")
+        ):
+            html = self._cfg_figure(banner) + body
+        else:
+            html = inject_banner_html(body, banner, force=True)
+
+        mk = self._cfg_register_markup(markup, unit_id)
+        html = _re.sub(
+            r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
+            "",
+            html,
+            flags=_re.I | _re.S,
+        )
+        btn_html = markup_to_tg_rows(mk, unit_id or "")
+        if btn_html:
+            html = html.rstrip() + "\n" + btn_html
+        return html
+
+    async def _cfg_edit_rich(self, call, html: str) -> bool:
+        """editMessageText with rich_message (Bot API) — same idea as RichProbe."""
+        import aiohttp
+
+        token = None
+        for path in (
+            lambda: getattr(self.inline, "_token", None),
+            lambda: getattr(getattr(self.inline, "bot", None), "token", None),
+        ):
+            import contextlib as _cx
+            with _cx.suppress(Exception):
+                tkn = path()
+                if tkn and ":" in str(tkn):
+                    token = str(tkn)
+                    break
+        imid = getattr(call, "inline_message_id", None)
+        chat_id = getattr(call, "chat_id", None)
+        msg_id = getattr(call, "message_id", None)
+        payload = {
+            "rich_message": {
+                "html": html,
+                "skip_entity_detection": True,
+            }
+        }
+        if imid is not None:
+            payload["inline_message_id"] = str(imid)
+        elif chat_id is not None and msg_id is not None:
+            payload["chat_id"] = int(chat_id)
+            payload["message_id"] = int(msg_id)
+        else:
+            try:
+                await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+                return True
+            except Exception:
+                return False
+        if not token:
+            try:
+                await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+                return True
+            except Exception:
+                return False
+        url = f"https://api.telegram.org/bot{token}/editMessageText"
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
+                    data = await resp.json(content_type=None)
+                    if data.get("ok"):
+                        return True
+                    logger.debug("cfg editMessageText rich failed: %s", data)
+        except Exception:
+            logger.debug("cfg editMessageText request failed", exc_info=True)
+        import contextlib as _cx
+        with _cx.suppress(Exception):
+            await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+            return True
+        return False
+
+    async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
+        """Config UI: Rich+Premium → RichProbe-style (banner figure + tg-buttons).
+        Otherwise classic form + media banner.
         """
-        import contextlib
         import logging
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
+        from ..utils.rich import can_use_rich
 
         _log = logging.getLogger(__name__)
         markup = reply_markup if reply_markup is not None else []
+        use_rich = False
+        with contextlib.suppress(Exception):
+            use_rich = bool(can_use_rich(self._client, self._db))
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             return await self._safe_cfg_edit(message, text, reply_markup=markup)
@@ -127,6 +287,32 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
+        if use_rich:
+            # Pure Rich (like RichProbe + help): banner in HTML, buttons as tg-button
+            html = self._cfg_rich_html(text, markup)
+            chat = None
+            with contextlib.suppress(Exception):
+                from .. import utils as _u
+                chat = _u.get_chat_id(message)
+            try:
+                m = await self.inline.rich(
+                    chat if chat is not None else message,
+                    html,
+                    title="Hikkari Config",
+                    description="Config",
+                    thumbnail_url=self._cfg_banner_http(),
+                    silent=True,
+                    reply_markup=markup,  # unit buttons for callback routing; embedded in HTML
+                )
+                if m:
+                    with contextlib.suppress(Exception):
+                        if getattr(message, "out", False):
+                            await message.delete()
+                    return m
+            except Exception:
+                _log.debug("cfg rich open failed", exc_info=True)
+
+        # Classic form + optional media banner
         form_kw = dict(
             text=text,
             message=message,
@@ -135,7 +321,6 @@ class HikkariConfigMod(loader.Module):
             force_me=True,
             **kwargs,
         )
-
         media = self._cfg_banner_kwargs()
         if media:
             form_kw.update(media)
@@ -147,7 +332,6 @@ class HikkariConfigMod(loader.Module):
                 _log.debug("cfg form with banner failed", exc_info=True)
             for k in ("photo", "video", "gif", "file", "audio"):
                 form_kw.pop(k, None)
-
         with contextlib.suppress(Exception):
             return await self.inline.form(**form_kw)
         return None
@@ -1060,18 +1244,26 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config form with classic InlineKeyboard (always reliable + banner-safe).
-
-        Bot API note (editMessageText for inline): cannot upload new media by URL.
-        Media forms must keep classic caption + reply_markup; stripping markup leaves
-        a dead message. Pure Rich+tg-button is for non-media one-shots (see RichProbe).
-        """
+        """Edit config: Rich+Premium → Bot API rich_message + tg-buttons; else classic."""
         import contextlib
 
         with contextlib.suppress(Exception):
             await call.answer()
 
         text = self._clip_cfg_text(text, 950)
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(self._client, self._db))
+
+        if use_rich and reply_markup is not None:
+            unit_id = getattr(call, "unit_id", None)
+            html = self._cfg_rich_html(text, reply_markup, unit_id)
+            ok = await self._cfg_edit_rich(call, html)
+            if ok:
+                return True
+            logger.debug("cfg rich edit failed, classic fallback")
+
         try:
             return await call.edit(text, reply_markup=reply_markup, **kwargs)
         except Exception:
