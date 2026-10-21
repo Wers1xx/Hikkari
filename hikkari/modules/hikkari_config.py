@@ -165,47 +165,67 @@ class HikkariConfigMod(loader.Module):
         return f'<figure><img src="{u}"/></figure>\n'
 
     def _cfg_register_markup(self, markup, unit_id: str | None = None):
-        """Assign callback_data + custom_map + input_map so presses / input work."""
+        """Assign stable rich callbacks: hcfg|close + hcfgset MOD OPTION for input."""
         from .. import utils as _u
+        from ..utils.rich_api import tg_button, tg_button_row
 
         im = self.inline
         mk = im._validate_markup(markup) or markup or []
-        if not hasattr(im, "_input_map") or not isinstance(getattr(im, "_input_map", None), dict):
+        if not hasattr(im, "_input_map") or not isinstance(
+            getattr(im, "_input_map", None), dict
+        ):
             im._input_map = {}
 
-        # Prefer unit path so chosen_inline finds input buttons
-        if unit_id and getattr(im, "_units", None) and unit_id in im._units:
-            im._units[unit_id]["buttons"] = mk
-            import contextlib as _cx
-            with _cx.suppress(Exception):
-                im.generate_markup(unit_id)
-            mk = im._units[unit_id].get("buttons") or mk
-            # mirror input buttons into _input_map
-            for row in mk or []:
-                for btn in row:
-                    if not isinstance(btn, dict):
-                        continue
-                    if "input" in btn and btn.get("_switch_query"):
-                        im._input_map[str(btn["_switch_query"]).strip()] = {
-                            "handler": btn.get("handler"),
-                            "args": btn.get("args") or (),
-                            "kwargs": btn.get("kwargs") or {},
-                            "unit_id": unit_id,
-                            "button": btn,
-                        }
-            return mk
-
-        for row in mk:
+        for row in mk or []:
             for btn in row:
                 if not isinstance(btn, dict):
                     continue
+                # CLOSE → fixed callback
                 if btn.get("action") == "close":
                     btn["callback"] = im._close_unit_handler
                     btn["disable_security"] = True
                     btn["force_me"] = True
+                    btn["_callback_data"] = "hcfg|close"
                     btn.setdefault("args", ())
-                if "callback" in btn and "_callback_data" not in btn:
-                    btn["_callback_data"] = _u.rand(30)
+                    im._custom_map["hcfg|close"] = {
+                        "handler": im._close_unit_handler,
+                        "always_allow": [],
+                        "args": (),
+                        "kwargs": {},
+                        "force_me": True,
+                        "disable_security": True,
+                        "message": True,
+                    }
+                    continue
+                # INPUT → stable switch query encoding mod/option
+                if "input" in btn and btn.get("handler"):
+                    args = btn.get("args") or ()
+                    if isinstance(args, dict):
+                        args = ()
+                    # args typically (mod, option, inline_message_id)
+                    mod = args[0] if len(args) >= 1 else "mod"
+                    option = args[1] if len(args) >= 2 else "opt"
+                    # sanitize for query (no spaces)
+                    mod_s = str(mod).replace(" ", "_")[:40]
+                    opt_s = str(option).replace(" ", "_")[:40]
+                    q = f"hcfgset {mod_s} {opt_s} "
+                    btn["_switch_query"] = q
+                    im._input_map[q.strip().split()[0]] = {
+                        "handler": btn.get("handler"),
+                        "args": args,
+                        "kwargs": btn.get("kwargs") or {},
+                        "unit_id": unit_id,
+                        "button": btn,
+                    }
+                    # also key by full prefix without trailing space
+                    im._input_map[f"hcfgset {mod_s} {opt_s}"] = im._input_map[
+                        q.strip().split()[0]
+                    ]
+                    continue
+                # normal callbacks
+                if "callback" in btn:
+                    if not btn.get("_callback_data") or btn.get("_callback_data") == "noop":
+                        btn["_callback_data"] = _u.rand(30)
                     args = btn.get("args", ())
                     if isinstance(args, dict):
                         args = ()
@@ -214,21 +234,30 @@ class HikkariConfigMod(loader.Module):
                         "always_allow": btn.get("always_allow", []) or [],
                         "args": args if args is not None else (),
                         "kwargs": btn.get("kwargs", {}) or {},
-                        "force_me": btn.get("force_me", True),
-                        "disable_security": btn.get("disable_security", False)
-                        or btn.get("action") == "close",
+                        "force_me": True,
+                        "disable_security": btn.get("disable_security", False),
                         "message": True,
                     }
-                if "input" in btn:
-                    if "_switch_query" not in btn:
-                        btn["_switch_query"] = _u.rand(10)
-                    im._input_map[str(btn["_switch_query"]).strip()] = {
-                        "handler": btn.get("handler"),
-                        "args": btn.get("args") or (),
-                        "kwargs": btn.get("kwargs") or {},
-                        "unit_id": unit_id,
-                        "button": btn,
-                    }
+
+        if unit_id and getattr(im, "_units", None) and unit_id in im._units:
+            im._units[unit_id]["buttons"] = mk
+            import contextlib as _cx
+            with _cx.suppress(Exception):
+                # Do NOT re-randomize close/input — keep hcfg* ids
+                for row in mk:
+                    for btn in row:
+                        if not isinstance(btn, dict):
+                            continue
+                        if btn.get("action") == "close":
+                            btn["_callback_data"] = "hcfg|close"
+                            btn["callback"] = im._close_unit_handler
+                        if "input" in btn and btn.get("_switch_query", "").startswith(
+                            "hcfgset "
+                        ):
+                            pass  # keep
+                        elif "callback" in btn and "_callback_data" not in btn:
+                            btn["_callback_data"] = _u.rand(30)
+                im._units[unit_id]["buttons"] = mk
         return mk
 
     def _cfg_rich_html(self, text: str, markup, unit_id: str | None = None) -> str:

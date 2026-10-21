@@ -615,6 +615,69 @@ class Events(InlineUnit):
             list(self._units.keys())[:10],
         )
 
+        # Stable config input: "hcfgset MOD OPTION value..."
+        if query_key == "hcfgset" or str(query).startswith("hcfgset "):
+            try:
+                parts = str(query).split(maxsplit=3)
+                if len(parts) < 3:
+                    return
+                mod = parts[1]
+                option = parts[2]
+                value = parts[3] if len(parts) > 3 else ""
+                if not (value or "").strip() or "Transferring value" in value:
+                    return
+                cfg_mod = None
+                for m in getattr(self._allmodules, "modules", []) or []:
+                    if hasattr(m, "inline__set_config") and (
+                        "config" in (getattr(m, "name", "") or "").lower()
+                        or m.__class__.__name__.lower().find("config") >= 0
+                    ):
+                        cfg_mod = m
+                        break
+                if cfg_mod is None:
+                    for m in getattr(self._allmodules, "modules", []) or []:
+                        if hasattr(m, "inline__set_config"):
+                            cfg_mod = m
+                            break
+                if cfg_mod is None:
+                    logger.warning("hcfgset: no config module")
+                    return
+                unit_id = None
+                unit = None
+                units = getattr(self, "_units", None) or {}
+                if units:
+                    unit_id = next(iter(units))
+                    unit = units[unit_id]
+                chat = unit.get("chat") if isinstance(unit, dict) else None
+                mid = unit.get("message_id") if isinstance(unit, dict) else None
+
+                class ChosenInlineCall:
+                    data = b""
+
+                    def __init__(self, update, chat_id, message_id, imid):
+                        self.id = getattr(update, "id", None)
+                        self.sender_id = getattr(update, "user_id", None)
+                        self.query = update
+                        self.inline_message_id = imid or getattr(update, "msg_id", None)
+                        self.chat_id = chat_id
+                        self.message_id = message_id
+
+                    async def answer(self, *a, **k):
+                        return None
+
+                call = InlineCall(
+                    ChosenInlineCall(chosen_inline_query, chat, mid, msg_id),
+                    self,
+                    unit_id,
+                )
+                logger.info("hcfgset → %s.%s = %r", mod, option, value[:40])
+                return await cfg_mod.inline__set_config(
+                    call, value, mod, option, getattr(call, "inline_message_id", None)
+                )
+            except Exception:
+                logger.exception("hcfgset failed")
+                return
+
         # Form open: unit_id was the full query
         for unit_id, unit in self._units.items():
             if (
