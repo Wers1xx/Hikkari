@@ -684,11 +684,14 @@ class Gallery(InlineUnit):
         )
 
     async def _gallery_inline_handler(self: "InlineManager", inline_query):
-        for unit in self._units.copy().values():
+        for unit_id, unit in self._units.copy().items():
+            if not isinstance(unit, dict):
+                continue
+            uid = unit.get("uid") or unit_id
             if (
                 inline_query.from_user.id == self._me
-                and inline_query.query == unit["uid"]
-                and unit["type"] == "gallery"
+                and inline_query.query == uid
+                and unit.get("type") == "gallery"
             ):
                 try:
                     try:
@@ -698,9 +701,9 @@ class Gallery(InlineUnit):
                         ext = None
 
                     args = {
-                        "text": self._get_caption(unit["uid"], index=0),
+                        "text": self._get_caption(uid, index=0),
                         "parse_mode": "HTML",
-                        "buttons": self._gallery_markup(unit["uid"]),
+                        "buttons": self._gallery_markup(uid),
                         "id": utils.rand(20),
                         "title": "Processing inline gallery",
                     }
@@ -730,6 +733,6 @@ class Gallery(InlineUnit):
                         cache_time=0,
                     )
                 except Exception as e:
-                    if unit["uid"] in self._error_events:
-                        self._error_events[unit["uid"]].set()
-                        self._error_events[unit["uid"]] = e
+                    if uid in self._error_events:
+                        self._error_events[uid].set()
+                        self._error_events[uid] = e

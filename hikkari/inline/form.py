@@ -704,50 +704,97 @@ class Form(InlineUnit):
         except IndexError:
             return
 
-        for unit in self._units.copy().values():
+        def _allowed(uid: int, unit: dict | None = None) -> bool:
+            try:
+                me = int(self._me) if self._me is not None else None
+            except Exception:
+                me = self._me
+            owners = []
+            with contextlib.suppress(Exception):
+                owners = [int(x) for x in (self._client.dispatcher.security._owner or [])]
+            always = list((unit or {}).get("always_allow") or [])
+            try:
+                uid = int(uid)
+            except Exception:
+                pass
+            return uid in ([me] if me is not None else []) + owners + always
+
+        async def _answer_input(button: dict, unit: dict | None = None):
+            if not getattr(self, "_pending_config_input", None):
+                self._pending_config_input = {}
+            if button.get("handler"):
+                self._pending_config_input[inline_query.from_user.id] = (
+                    button["handler"],
+                    (unit or {}).get("uid") if isinstance(unit, dict) else None,
+                    list(button.get("args") or []),
+                    dict(button.get("kwargs") or {}),
+                )
+            title = button.get("input") or "Enter value"
+            try:
+                me = int(self._me)
+            except Exception:
+                me = self._me
+            is_me = inline_query.from_user.id == me
+            await inline_query.answer(
+                [
+                    await inline_query.builder.article(
+                        title=str(title)[:64],
+                        description=(
+                            self.translator.getkey("inline.keep_id").format(
+                                random.choice(VERIFICATION_EMOJIES)
+                            )
+                        ),
+                        text=(
+                            "🔄 <b>Transferring value to"
+                            " userbot...</b>\n<i>This message will be"
+                            " deleted automatically</i>"
+                            if is_me
+                            else "🔄 <b>Transferring value to userbot...</b>"
+                        ),
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=utils.rand(20),
+                    )
+                ],
+                cache_time=0,
+            )
+
+        # 1) Unit buttons (classic)
+        for unit_id, unit in self._units.copy().items():
+            if not isinstance(unit, dict):
+                continue
             for button in utils.array_sum(unit.get("buttons", [])):
+                if not isinstance(button, dict):
+                    continue
                 if (
                     "_switch_query" in button
                     and "input" in button
-                    and button["_switch_query"] == query
-                    and inline_query.from_user.id
-                    in [self._me]
-                    + self._client.dispatcher.security._owner
-                    + unit.get("always_allow", [])
+                    and str(button["_switch_query"]).strip() == str(query).strip()
+                    and _allowed(inline_query.from_user.id, unit)
                 ):
-                    if not getattr(self, "_pending_config_input", None):
-                        self._pending_config_input = {}
-                    if button.get("handler"):
-                        self._pending_config_input[inline_query.from_user.id] = (
-                            button["handler"],
-                            unit.get("uid") if isinstance(unit, dict) else None,
-                            list(button.get("args") or []),
-                            dict(button.get("kwargs") or {}),
-                        )
-                    await inline_query.answer(
-                        [
-                            await inline_query.builder.article(
-                                title=button["input"],
-                                description=(
-                                    self.translator.getkey("inline.keep_id").format(
-                                        random.choice(VERIFICATION_EMOJIES)
-                                    )
-                                ),
-                                text=(
-                                    "🔄 <b>Transferring value to"
-                                    " userbot...</b>\n<i>This message will be"
-                                    " deleted automatically</i>"
-                                    if inline_query.from_user.id == self._me
-                                    else "🔄 <b>Transferring value to userbot...</b>"
-                                ),
-                                parse_mode="HTML",
-                                link_preview=False,
-                                id=utils.rand(20),
-                            )
-                        ],
-                        cache_time=60,
-                    )
+                    await _answer_input(button, unit)
                     return
+
+        # 2) input_map fallback (rich config sticky)
+        imap = getattr(self, "_input_map", None) or {}
+        entry = imap.get(str(query).strip()) or imap.get(query)
+        if entry and entry.get("handler") and _allowed(inline_query.from_user.id):
+            fake_btn = {
+                "input": "Enter value",
+                "handler": entry["handler"],
+                "args": entry.get("args") or (),
+                "kwargs": entry.get("kwargs") or {},
+                "_switch_query": query,
+            }
+            # Prefer title from stored button
+            if isinstance(entry.get("button"), dict):
+                fake_btn["input"] = entry["button"].get("input") or fake_btn["input"]
+            unit = None
+            uid = entry.get("unit_id")
+            if uid and uid in (getattr(self, "_units", None) or {}):
+                unit = self._units[uid]
+            await _answer_input(fake_btn, unit)
+            return
 
         if (
             inline_query.query not in self._units

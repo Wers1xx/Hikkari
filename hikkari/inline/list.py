@@ -338,11 +338,14 @@ class List(InlineUnit):
         )
 
     async def _list_inline_handler(self: "InlineManager", inline_query):
-        for unit in self._units.copy().values():
+        for unit_id, unit in self._units.copy().items():
+            if not isinstance(unit, dict):
+                continue
+            uid = unit.get("uid") or unit_id
             if (
                 inline_query.from_user.id == self._me
-                and inline_query.query == unit["uid"]
-                and unit["type"] == "list"
+                and inline_query.query == uid
+                and unit.get("type") == "list"
             ):
                 try:
                     caption = (
@@ -370,6 +373,6 @@ class List(InlineUnit):
                         )
                     await inline_query.answer([result], cache_time=60)
                 except Exception as e:
-                    if unit["uid"] in self._error_events:
-                        self._error_events[unit["uid"]].set()
-                        self._error_events[unit["uid"]] = e
+                    if uid in self._error_events:
+                        self._error_events[uid].set()
+                        self._error_events[uid] = e

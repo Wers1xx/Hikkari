@@ -193,12 +193,15 @@ class HikkariConfigMod(loader.Module):
             im._units = {}
         if unit_id not in im._units:
             im._units[unit_id] = {
+                "uid": unit_id,
                 "type": "form",
                 "buttons": mk,
                 "always_allow": [],
             }
         else:
             im._units[unit_id]["buttons"] = mk
+            im._units[unit_id]["uid"] = unit_id
+            im._units[unit_id].setdefault("type", "form")
 
         for row in mk or []:
             for btn in row:
