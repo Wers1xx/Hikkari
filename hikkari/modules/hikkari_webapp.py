@@ -85,7 +85,7 @@ class HikkariWebAppMod(loader.Module):
 
 
     async def pause_public_tunnel(self) -> bool:
-        """Stop WebApp ngrok only (keep local server). Used when WebUI needs the tunnel."""
+        """Stop WebApp ngrok (keep local server). Used when WebUI needs the tunnel."""
         had = bool(self._ngrok_proc and getattr(self._ngrok_proc, "poll", lambda: 0)() is None)
         with contextlib.suppress(Exception):
             if self._ngrok_proc and self._ngrok_proc.poll() is None:
@@ -97,9 +97,12 @@ class HikkariWebAppMod(loader.Module):
                         self._ngrok_proc.kill()
         self._ngrok_proc = None
         self._public_base = None
-        self._tunnel_paused = had
-        if had:
-            logger.info("WebApp ngrok paused for WebUI registration tunnel")
+        # Also kill orphan ngrok agents (4040 may still serve old WebApp tunnel)
+        with contextlib.suppress(Exception):
+            from ..webapp.ngrok_tunnel import kill_all_ngrok
+            await asyncio.get_event_loop().run_in_executor(None, kill_all_ngrok)
+        self._tunnel_paused = True  # always allow resume after WebUI
+        logger.info("WebApp ngrok paused for WebUI registration tunnel (had=%s)", had)
         return had
 
     async def resume_public_tunnel(self) -> None:

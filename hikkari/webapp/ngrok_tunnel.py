@@ -40,8 +40,8 @@ def _tunnel_matches_port(tun: dict, port: int) -> bool:
 
 
 def pick_tunnel_url(data: dict, port: int | None = None) -> Optional[str]:
+    """Return public URL only for the tunnel that maps to *port* (no wrong fallback)."""
     tunnels = data.get("tunnels") or []
-    # Prefer exact port match
     if port is not None:
         for tun in tunnels:
             if not _tunnel_matches_port(tun, int(port)):
@@ -51,16 +51,15 @@ def pick_tunnel_url(data: dict, port: int | None = None) -> Optional[str]:
                 return pub
             if pub.startswith("http://") and "ngrok" in pub:
                 return pub.replace("http://", "https://", 1)
-    # Fallback only if single tunnel
-    https = []
+        # Port known but no match → refuse (never hand WebApp URL to WebUI)
+        return None
+    # No port filter: first https
     for tun in tunnels:
         pub = (tun.get("public_url") or "").rstrip("/")
         if pub.startswith("https://"):
-            https.append(pub)
-        elif pub.startswith("http://") and "ngrok" in pub:
-            https.append(pub.replace("http://", "https://", 1))
-    if len(https) == 1:
-        return https[0]
+            return pub
+        if pub.startswith("http://") and "ngrok" in pub:
+            return pub.replace("http://", "https://", 1)
     return None
 
 
@@ -83,6 +82,21 @@ def _safe_kill(proc: Optional[subprocess.Popen]) -> None:
     with contextlib.suppress(Exception):
         if proc.poll() is None:
             proc.wait(timeout=1)
+
+
+
+def kill_all_ngrok() -> None:
+    """Stop every ngrok agent so free plan has a free slot and 4040 is clean."""
+    import signal
+    # Our tracked-style: pkill by name
+    for cmd in (
+        ["pkill", "-f", "ngrok http"],
+        ["pkill", "-x", "ngrok"],
+        ["killall", "ngrok"],
+    ):
+        with contextlib.suppress(Exception):
+            subprocess.run(cmd, capture_output=True, timeout=5)
+    time.sleep(0.4)
 
 
 def ensure_ngrok() -> Optional[str]:
@@ -292,6 +306,8 @@ async def start_ngrok(
     port: int,
     token: str,
     retries: int = 2,
+    *,
+    exclusive: bool = True,
 ) -> tuple[Optional[str], Optional[subprocess.Popen], str]:
     token = (token or "").strip().strip('"').strip("'")
     if not token:
@@ -300,6 +316,10 @@ async def start_ngrok(
     binary = ensure_ngrok()
     if not binary:
         return None, None, "ngrok binary missing"
+
+    # Free ngrok: one agent. Kill others so we bind the correct local port.
+    if exclusive:
+        await asyncio.get_event_loop().run_in_executor(None, kill_all_ngrok)
 
     cfg = _write_config(token)
 
