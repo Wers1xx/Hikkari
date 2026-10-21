@@ -645,6 +645,12 @@ class HikkariConfigMod(loader.Module):
             with contextlib.suppress(Exception):
                 prev_q = self.lookup(mod).config[option]
             self.lookup(mod).config[option] = query
+            # Never leave pending input that would steal next chat message
+            with contextlib.suppress(Exception):
+                pend = getattr(self.inline, "_pending_config_input", None)
+                if isinstance(pend, dict):
+                    pend.clear()
+
             if self._is_banner_option(str(option)):
                 qs = str(query or "")
                 if not qs.startswith(("audio:", "audio_ref:")):

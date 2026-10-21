@@ -40,24 +40,62 @@ class Events(InlineUnit):
         if not message.is_private:
             return
 
-        # Config "enter value" PM fallback (when chosen_inline is unavailable)
-        pending = getattr(self, "_pending_config_input", None) or {}
+        # Config "enter value" PM fallback — ONLY fresh pending (<30s), then CLEAR
+        # Prevents random chat messages from being written into config.
+        pending = getattr(self, "_pending_config_input", None)
+        if not isinstance(pending, dict):
+            pending = {}
+            self._pending_config_input = pending
         uid = getattr(message, "sender_id", None) or getattr(
             getattr(message, "from_id", None), "user_id", None
         )
+        import time as _time
+        # Drop expired entries for everyone
+        for _uid in list(pending.keys()):
+            ent = pending.get(_uid)
+            ts = None
+            if isinstance(ent, (list, tuple)) and len(ent) >= 5:
+                ts = ent[4]
+            elif isinstance(ent, dict):
+                ts = ent.get("ts")
+            if ts is not None and (_time.time() - float(ts)) > 30:
+                pending.pop(_uid, None)
+
         if uid in pending and (message.raw_text or message.message):
             value = (message.raw_text or message.message or "").strip()
-            # Ignore transfer placeholder / empty
             if (
                 not value
                 or "Transferring value" in value
                 or "will be deleted automatically" in value
+                or value.startswith("/")
+                or value.startswith(".")
             ):
+                # Do not consume pending on commands / placeholders
                 return
             entry = pending.pop(uid, None)
+            # Always wipe any residual pending for this user
+            pending.pop(uid, None)
             if entry:
                 try:
-                    handler, unit_id, args, kwargs = entry
+                    if isinstance(entry, dict):
+                        handler = entry.get("handler")
+                        unit_id = entry.get("unit_id")
+                        args = list(entry.get("args") or [])
+                        kwargs = dict(entry.get("kwargs") or {})
+                        ts = entry.get("ts")
+                    else:
+                        handler, unit_id, args, kwargs = (
+                            entry[0],
+                            entry[1],
+                            list(entry[2] or []),
+                            dict(entry[3] or {}),
+                        )
+                        ts = entry[4] if len(entry) >= 5 else None
+                    if ts is not None and (_time.time() - float(ts)) > 30:
+                        logger.debug("pending config input expired for %s", uid)
+                        return
+                    if not callable(handler):
+                        return
                     from .types import InlineCall
 
                     self_ref = self
@@ -75,20 +113,29 @@ class Events(InlineUnit):
                             return None
 
                         async def edit(self, *a, **k):
-                            try:
-                                return await self_ref._edit_unit(
-                                    *a, unit_id=unit_id, **k
-                                )
-                            except Exception:
-                                return False
+                            return None
 
-                    call = InlineCall(_PmCall(), self, unit_id)
+                        async def delete(self, *a, **k):
+                            with contextlib.suppress(Exception):
+                                await message.delete()
+                            return True
+
+                    call = InlineCall(_PmCall(), self_ref, unit_id)
+                    logger.info(
+                        "pending PM config input → %s value=%r (then clear)",
+                        getattr(handler, "__name__", handler),
+                        value[:40],
+                    )
                     await handler(call, value, *args, **kwargs)
                     with contextlib.suppress(Exception):
                         await message.delete()
-                    return
                 except Exception:
                     logger.exception("Pending config PM input failed")
+                finally:
+                    # Hard clear so next chat message is never config
+                    with contextlib.suppress(Exception):
+                        self._pending_config_input.pop(uid, None)
+                return
 
         wrapped_message = self._bot_message(message)
         match True:
@@ -793,11 +840,15 @@ class Events(InlineUnit):
                         )
 
                     if not (value or "").strip():
-                        # User selected result without typing a value — keep pending
+                        # Empty select — clear pending, do NOT keep it
                         logger.debug(
-                            "chosen_inline empty value for %s — ignored",
+                            "chosen_inline empty value for %s — clear pending",
                             unit_id,
                         )
+                        with contextlib.suppress(Exception):
+                            pend = getattr(self, "_pending_config_input", None)
+                            if isinstance(pend, dict) and user_id in pend:
+                                pend.pop(user_id, None)
                         return
                     if "Transferring value" in value:
                         logger.debug("chosen_inline transfer text ignored")
@@ -811,8 +862,12 @@ class Events(InlineUnit):
                     # Clear PM-fallback pending so next chat message is NOT saved as config
                     try:
                         pend = getattr(self, "_pending_config_input", None)
-                        if isinstance(pend, dict) and user_id in pend:
-                            pend.pop(user_id, None)
+                        if isinstance(pend, dict):
+                            if user_id in pend:
+                                pend.pop(user_id, None)
+                            # also clear by int/str key variants
+                            pend.pop(int(user_id), None) if user_id is not None else None
+                            pend.pop(str(user_id), None) if user_id is not None else None
                     except Exception:
                         pass
                     result = await handler(call, value, *args, **kwargs)

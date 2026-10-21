@@ -723,11 +723,13 @@ class Form(InlineUnit):
             if not getattr(self, "_pending_config_input", None):
                 self._pending_config_input = {}
             if button.get("handler"):
+                import time as _time
                 self._pending_config_input[inline_query.from_user.id] = (
                     button["handler"],
                     (unit or {}).get("uid") if isinstance(unit, dict) else None,
                     list(button.get("args") or []),
                     dict(button.get("kwargs") or {}),
+                    _time.time(),  # TTL for PM fallback
                 )
             title = button.get("input") or "Enter value"
             try:
