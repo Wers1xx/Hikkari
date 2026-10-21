@@ -403,6 +403,19 @@ class Utils(InlineUnit):
             chat = getattr(call, "chat_id", None)
         if msg_id is None:
             msg_id = getattr(call, "message_id", None)
+        # via@ InlineCall may expose original Message on .message
+        if chat is None or msg_id is None:
+            with contextlib.suppress(Exception):
+                msg = getattr(call, "message", None) or getattr(
+                    getattr(call, "inline_message", None), "message", None
+                )
+                if msg is not None:
+                    if chat is None:
+                        chat = utils.get_chat_id(msg)
+                    if msg_id is None:
+                        msg_id = getattr(msg, "id", None) or getattr(
+                            msg, "message_id", None
+                        )
 
         deleted = False
 

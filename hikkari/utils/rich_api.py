@@ -274,6 +274,7 @@ def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
                 and not btn.get("callback")
                 and not btn.get("data")
                 and not btn.get("url")
+                and btn.get("action") != "close"
             ):
                 q = str(btn.get("_switch_query") or btn.get("data") or "cfg ")[:60]
                 if not q.endswith(" "):
@@ -287,11 +288,8 @@ def markup_to_tg_rows(markup: list, unit_id: str = "") -> str:
                     )
                 )
             else:
+                # callback / close / action
                 data = btn.get("_callback_data") or btn.get("data") or "noop"
-                if unit_id and not str(data).startswith(
-                    ("hk|", "rh|", "cfg|", "rp|")
-                ):
-                    data = str(data)[:64]
                 btns.append(
                     tg_button(
                         text,

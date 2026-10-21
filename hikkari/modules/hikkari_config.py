@@ -165,25 +165,44 @@ class HikkariConfigMod(loader.Module):
         return f'<figure><img src="{u}"/></figure>\n'
 
     def _cfg_register_markup(self, markup, unit_id: str | None = None):
-        """Assign callback_data + custom_map so tg-button presses route."""
+        """Assign callback_data + custom_map + input_map so presses / input work."""
         from .. import utils as _u
 
         im = self.inline
         mk = im._validate_markup(markup) or markup or []
+        if not hasattr(im, "_input_map") or not isinstance(getattr(im, "_input_map", None), dict):
+            im._input_map = {}
+
+        # Prefer unit path so chosen_inline finds input buttons
         if unit_id and getattr(im, "_units", None) and unit_id in im._units:
             im._units[unit_id]["buttons"] = mk
             import contextlib as _cx
             with _cx.suppress(Exception):
                 im.generate_markup(unit_id)
-            return im._units[unit_id].get("buttons") or mk
+            mk = im._units[unit_id].get("buttons") or mk
+            # mirror input buttons into _input_map
+            for row in mk or []:
+                for btn in row:
+                    if not isinstance(btn, dict):
+                        continue
+                    if "input" in btn and btn.get("_switch_query"):
+                        im._input_map[str(btn["_switch_query"]).strip()] = {
+                            "handler": btn.get("handler"),
+                            "args": btn.get("args") or (),
+                            "kwargs": btn.get("kwargs") or {},
+                            "unit_id": unit_id,
+                            "button": btn,
+                        }
+            return mk
 
         for row in mk:
             for btn in row:
                 if not isinstance(btn, dict):
                     continue
-                if btn.get("action") == "close" and "callback" not in btn:
+                if btn.get("action") == "close":
                     btn["callback"] = im._close_unit_handler
                     btn["disable_security"] = True
+                    btn["force_me"] = True
                     btn.setdefault("args", ())
                 if "callback" in btn and "_callback_data" not in btn:
                     btn["_callback_data"] = _u.rand(30)
@@ -195,12 +214,21 @@ class HikkariConfigMod(loader.Module):
                         "always_allow": btn.get("always_allow", []) or [],
                         "args": args if args is not None else (),
                         "kwargs": btn.get("kwargs", {}) or {},
-                        "force_me": btn.get("force_me", False),
-                        "disable_security": btn.get("disable_security", False),
+                        "force_me": btn.get("force_me", True),
+                        "disable_security": btn.get("disable_security", False)
+                        or btn.get("action") == "close",
                         "message": True,
                     }
-                if "input" in btn and "_switch_query" not in btn:
-                    btn["_switch_query"] = _u.rand(10)
+                if "input" in btn:
+                    if "_switch_query" not in btn:
+                        btn["_switch_query"] = _u.rand(10)
+                    im._input_map[str(btn["_switch_query"]).strip()] = {
+                        "handler": btn.get("handler"),
+                        "args": btn.get("args") or (),
+                        "kwargs": btn.get("kwargs") or {},
+                        "unit_id": unit_id,
+                        "button": btn,
+                    }
         return mk
 
     def _cfg_rich_html(self, text: str, markup, unit_id: str | None = None) -> str:
@@ -322,6 +350,19 @@ class HikkariConfigMod(loader.Module):
                     reply_markup=markup,  # unit buttons for callback routing; embedded in HTML
                 )
                 if m:
+                    # Sync input_map / custom_map from the created unit
+                    with contextlib.suppress(Exception):
+                        uid = getattr(m, "unit_id", None) or getattr(
+                            m, "form", {}
+                        ).get("unit_id")
+                        if not uid and getattr(self.inline, "_units", None):
+                            # last created unit
+                            uid = next(reversed(self.inline._units), None)
+                        if uid:
+                            self._cfg_register_markup(
+                                self.inline._units[uid].get("buttons") or markup,
+                                uid,
+                            )
                     with contextlib.suppress(Exception):
                         if getattr(message, "out", False):
                             await message.delete()

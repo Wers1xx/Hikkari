@@ -549,11 +549,13 @@ class Events(InlineUnit):
                 owners |= {int(x) for x in (self._client.dispatcher.security._owner or [])}
 
             allowed = self._inline_user_allowed(user_id, entry if isinstance(entry, dict) else None)
-            if entry.get("allow_public") is True:
+            if entry.get("allow_public") is True or entry.get("disable_security") is True:
                 allowed = True
             if not allowed and user_id in (entry.get("always_allow") or []):
                 allowed = True
             if not allowed and entry.get("force_me", False) and user_id == self._me:
+                allowed = True
+            if not allowed and user_id == self._me:
                 allowed = True
             if not allowed:
                 with contextlib.suppress(Exception):
@@ -744,6 +746,67 @@ class Events(InlineUnit):
                         "Exception while running chosen query watcher!"
                     )
                     return
+
+        # Fallback: config rich input_map (buttons registered outside unit)
+        entry = None
+        with contextlib.suppress(Exception):
+            imap = getattr(self, "_input_map", None) or {}
+            entry = imap.get(query_key) or imap.get(str(query_key).strip())
+        if entry and callable(entry.get("handler")):
+            value = (
+                query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
+            )
+            if not (value or "").strip() or "Transferring value" in value:
+                return
+            try:
+                unit_id = entry.get("unit_id")
+                unit = (
+                    self._units.get(unit_id)
+                    if unit_id and getattr(self, "_units", None)
+                    else None
+                )
+                chat = unit.get("chat") if isinstance(unit, dict) else None
+                mid = unit.get("message_id") if isinstance(unit, dict) else None
+
+                class ChosenInlineCall:
+                    data = b""
+
+                    def __init__(self, update, chat_id, message_id):
+                        self.id = getattr(update, "id", None)
+                        self.sender_id = getattr(update, "user_id", None)
+                        self.query = update
+                        self.inline_message_id = getattr(update, "msg_id", None)
+                        self.chat_id = chat_id
+                        self.message_id = message_id
+
+                    async def answer(self, *args, **kwargs):
+                        return None
+
+                call = InlineCall(
+                    ChosenInlineCall(chosen_inline_query, chat, mid),
+                    self,
+                    unit_id,
+                )
+                if msg_id is not None:
+                    call.inline_message_id = msg_id
+                handler = entry["handler"]
+                args = list(entry.get("args") or [])
+                kwargs = dict(entry.get("kwargs") or {})
+                if len(args) >= 3:
+                    args[2] = getattr(call, "inline_message_id", None) or args[2]
+                elif getattr(call, "inline_message_id", None) is not None:
+                    kwargs.setdefault(
+                        "inline_message_id", call.inline_message_id
+                    )
+                logger.info(
+                    "chosen_inline input_map → %s value=%r",
+                    getattr(handler, "__name__", handler),
+                    value[:50],
+                )
+                return await handler(call, value, *args, **kwargs)
+            except Exception:
+                logger.exception("chosen_inline input_map failed")
+                return
 
         logger.debug(
             "chosen_inline: no matching input button for key=%r", query_key
