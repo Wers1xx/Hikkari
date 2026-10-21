@@ -83,6 +83,44 @@ class HikkariWebAppMod(loader.Module):
         self._ngrok_proc = None
         self._public_base = None  # https://xxx.ngrok-free.app
 
+
+    async def pause_public_tunnel(self) -> bool:
+        """Stop WebApp ngrok only (keep local server). Used when WebUI needs the tunnel."""
+        had = bool(self._ngrok_proc and getattr(self._ngrok_proc, "poll", lambda: 0)() is None)
+        with contextlib.suppress(Exception):
+            if self._ngrok_proc and self._ngrok_proc.poll() is None:
+                self._ngrok_proc.terminate()
+                try:
+                    self._ngrok_proc.wait(timeout=3)
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        self._ngrok_proc.kill()
+        self._ngrok_proc = None
+        self._public_base = None
+        self._tunnel_paused = had
+        if had:
+            logger.info("WebApp ngrok paused for WebUI registration tunnel")
+        return had
+
+    async def resume_public_tunnel(self) -> None:
+        """Restore WebApp ngrok after WebUI registration finishes."""
+        if not getattr(self, "_tunnel_paused", False):
+            return
+        self._tunnel_paused = False
+        tok = str(self.config.get("ngrok_token") or "").strip()
+        if not tok or self._runner is None:
+            return
+        port = int(self.config.get("port") or 9268)
+        try:
+            from ..webapp.ngrok_tunnel import start_ngrok
+            base, proc, _err = await start_ngrok(port, tok)
+            self._ngrok_proc = proc
+            self._public_base = base
+            if base:
+                logger.info("WebApp ngrok resumed: %s", base)
+        except Exception:
+            logger.exception("WebApp ngrok resume failed")
+
     async def client_ready(self):
         self._web_token = self.get("token")
         if not self._web_token:

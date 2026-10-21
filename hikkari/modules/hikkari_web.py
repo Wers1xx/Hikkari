@@ -835,14 +835,25 @@ class HikkariWebMod(loader.Module):
             web.weburl_mode = "ngrok"
             web.ngrok_token = tok
             web.require_token = True
+            # Free ngrok = 1 tunnel. Pause WebApp public tunnel so WebUI wins.
+            webapp_mod = None
+            with contextlib.suppress(Exception):
+                webapp_mod = self.lookup("HikkariWebApp")
+            if webapp_mod is not None and hasattr(webapp_mod, "pause_public_tunnel"):
+                with contextlib.suppress(Exception):
+                    await webapp_mod.pause_public_tunnel()
             await web.start_server()
             public = await web.start_tunnel(retries=3)
             if not public:
                 await web.stop()
+                with contextlib.suppress(Exception):
+                    m = self.lookup("HikkariWebApp")
+                    if m is not None and hasattr(m, "resume_public_tunnel"):
+                        await m.resume_public_tunnel()
                 errs = getattr(web, "_tunnel_errors", []) or []
                 await utils.answer(
                     status,
-                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>ngrok не поднялся</b>\n"
+                    "<emoji document_id=5240241223632954241>🚫</emoji> <b>WebUI (регистрация): ngrok не поднялся</b>\n"
                     + ("<code>" + utils.escape_html(" | ".join(errs[:4])) + "</code>" if errs else ""),
                 )
                 return
@@ -850,7 +861,7 @@ class HikkariWebMod(loader.Module):
             href = utils.escape_html(public)
             await utils.answer(
                 status,
-                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI</b>\n\n"
+                "<emoji document_id=5283176512747507510>✨</emoji> <b>Hikkari WebUI · регистрация аккаунта</b>\n<i>Не путать с .webapp — это только логин нового аккаунта</i>\n\n"
                 f'<a href="{href}"><emoji document_id=5283176512747507510>✨</emoji> WebUI Hikkari</a>\n'
                 f"<code>{href}</code>\n\n"
                 "<i>ngrok · ~15 мин</i>",
@@ -860,26 +871,33 @@ class HikkariWebMod(loader.Module):
 
             async def _wait():
                 try:
-                    await asyncio.wait_for(web.done.wait(), timeout=900)
-                except asyncio.TimeoutError:
+                    try:
+                        await asyncio.wait_for(web.done.wait(), timeout=900)
+                    except asyncio.TimeoutError:
+                        await web.stop()
+                        return
+                    if not web.success or web.client is None:
+                        await web.stop()
+                        return
+                    client = web.client
                     await web.stop()
-                    return
-                if not web.success or web.client is None:
-                    await web.stop()
-                    return
-                client = web.client
-                await web.stop()
-                try:
-                    me = await client.get_me()
-                    client._tg_id = me.id
-                    client.tg_id = me.id
-                    client.hikka_me = me
-                    client.hikkari_me = me
-                    await main.hikkari.save_client_session(client, delay_restart=False)
-                    await asyncio.sleep(1)
-                    restart()
-                except Exception:
-                    logger.exception("weburl save")
+                    try:
+                        me = await client.get_me()
+                        client._tg_id = me.id
+                        client.tg_id = me.id
+                        client.hikka_me = me
+                        client.hikkari_me = me
+                        await main.hikkari.save_client_session(client, delay_restart=False)
+                        await asyncio.sleep(1)
+                        restart()
+                    except Exception:
+                        logger.exception("weburl save")
+                finally:
+                    # Give WebApp its public tunnel back if we paused it
+                    with contextlib.suppress(Exception):
+                        m = self.lookup("HikkariWebApp")
+                        if m is not None and hasattr(m, "resume_public_tunnel"):
+                            await m.resume_public_tunnel()
 
             asyncio.ensure_future(_wait())
         except Exception as e:

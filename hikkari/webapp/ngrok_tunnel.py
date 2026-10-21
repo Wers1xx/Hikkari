@@ -26,6 +26,44 @@ _URL_RE = re.compile(
     re.I,
 )
 
+def _tunnel_matches_port(tun: dict, port: int) -> bool:
+    """True if this ngrok tunnel forwards to our local port (not another service)."""
+    cfg = tun.get("config") or {}
+    addr = str(cfg.get("addr") or "")
+    name = str(tun.get("name") or "")
+    # addr examples: "http://localhost:9268", "localhost:9268", "127.0.0.1:8080"
+    if f":{port}" in addr or addr.endswith(str(port)):
+        return True
+    if f"webapp-{port}" in name or f"webui-{port}" in name or f"port-{port}" in name:
+        return True
+    return False
+
+
+def pick_tunnel_url(data: dict, port: int | None = None) -> Optional[str]:
+    tunnels = data.get("tunnels") or []
+    # Prefer exact port match
+    if port is not None:
+        for tun in tunnels:
+            if not _tunnel_matches_port(tun, int(port)):
+                continue
+            pub = (tun.get("public_url") or "").rstrip("/")
+            if pub.startswith("https://"):
+                return pub
+            if pub.startswith("http://") and "ngrok" in pub:
+                return pub.replace("http://", "https://", 1)
+    # Fallback only if single tunnel
+    https = []
+    for tun in tunnels:
+        pub = (tun.get("public_url") or "").rstrip("/")
+        if pub.startswith("https://"):
+            https.append(pub)
+        elif pub.startswith("http://") and "ngrok" in pub:
+            https.append(pub.replace("http://", "https://", 1))
+    if len(https) == 1:
+        return https[0]
+    return None
+
+
 
 
 def _safe_kill(proc: Optional[subprocess.Popen]) -> None:
@@ -119,7 +157,7 @@ def _find_url(text: str) -> Optional[str]:
     return None
 
 
-async def _api_url() -> Optional[str]:
+async def _api_url(port: int | None = None) -> Optional[str]:
     def fetch():
         req = urllib.request.Request(
             "http://127.0.0.1:4040/api/tunnels",
@@ -132,13 +170,7 @@ async def _api_url() -> Optional[str]:
         data = await asyncio.get_event_loop().run_in_executor(None, fetch)
     except Exception:
         return None
-    for tun in data.get("tunnels") or []:
-        pub = (tun.get("public_url") or "").rstrip("/")
-        if pub.startswith("https://"):
-            return pub
-        if pub.startswith("http://") and "ngrok" in pub:
-            return pub.replace("http://", "https://", 1)
-    return None
+    return pick_tunnel_url(data, port)
 
 
 def _run_once(binary: str, port: int, token: str, cfg: Path) -> tuple[Optional[str], Optional[subprocess.Popen], str]:
@@ -225,10 +257,9 @@ def _run_once(binary: str, port: int, token: str, cfg: Path) -> tuple[Optional[s
                 )
                 with urllib.request.urlopen(req, timeout=0.8) as resp:
                     data = json.loads(resp.read().decode())
-                for tun in data.get("tunnels") or []:
-                    pub = (tun.get("public_url") or "").rstrip("/")
-                    if pub.startswith("https://"):
-                        return pub, proc, ""
+                url = pick_tunnel_url(data, port)
+                if url:
+                    return url, proc, ""
             except Exception:
                 pass
             time.sleep(0.3)
@@ -241,10 +272,9 @@ def _run_once(binary: str, port: int, token: str, cfg: Path) -> tuple[Optional[s
                 )
                 with urllib.request.urlopen(req, timeout=1) as resp:
                     data = json.loads(resp.read().decode())
-                for tun in data.get("tunnels") or []:
-                    pub = (tun.get("public_url") or "").rstrip("/")
-                    if pub.startswith("https://"):
-                        return pub, proc, ""
+                url = pick_tunnel_url(data, port)
+                if url:
+                    return url, proc, ""
             except Exception:
                 pass
             with contextlib.suppress(Exception):
