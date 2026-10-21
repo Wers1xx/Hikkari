@@ -628,9 +628,11 @@ async def try_send_rich(
 
 def strip_external_media_for_inline(html: str) -> str:
     """
-    answerInlineQuery + InputRichMessageContent rejects many external media
-    (EXTERNAL_MEDIA_NOT_SUPPORTED): remote <img>, <audio>, <video>, tg-slideshow.
-    Keep structure (tables, details, text) so Rich still works via @bot.
+    Soften external media for answerInlineQuery.
+
+    Keep the FIRST banner <figure> (img or video) so config/help banners
+    still show via @bot. Drop slideshow / audio and extra figures that
+    often trigger EXTERNAL_MEDIA_NOT_SUPPORTED.
     """
     if not html:
         return html
@@ -641,42 +643,47 @@ def strip_external_media_for_inline(html: str) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-
-    def _fig_repl(m: re.Match) -> str:
-        body = m.group(0)
-        low = body.lower()
-        if not any(x in low for x in ("<img", "<audio", "<video", "src=")):
-            return body
-        cap = re.search(
-            r"<figcaption\b[^>]*>(.*?)</figcaption>",
-            body,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if cap:
-            return f"<p>{cap.group(1)}</p>"
-        return ""
-
-    text = re.sub(
-        r"<figure\b[^>]*>.*?</figure>",
-        _fig_repl,
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
     text = re.sub(
         r"<audio\b[^>]*>.*?</audio>",
         "",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    text = re.sub(
-        r"<video\b[^>]*>.*?</video>",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
+
+    figures = list(
+        re.finditer(r"<figure\b[^>]*>.*?</figure>", text, flags=re.I | re.S)
     )
-    text = re.sub(r"<img\b[^>]*>", "", text, flags=re.IGNORECASE)
-    cleaned = text.strip()
+    if not figures:
+        return text.strip() or str(html)
+
+    kept = False
+    out = []
+    last = 0
+    for m in figures:
+        out.append(text[last : m.start()])
+        body = m.group(0)
+        low = body.lower()
+        is_banner = ("<img" in low or "<video" in low) and "src=" in low
+        is_audio = "<audio" in low
+        if is_audio:
+            last = m.end()
+            continue
+        if is_banner and not kept:
+            out.append(body)
+            kept = True
+        else:
+            cap = re.search(
+                r"<figcaption\b[^>]*>(.*?)</figcaption>",
+                body,
+                flags=re.I | re.S,
+            )
+            if cap:
+                out.append(f"<p>{cap.group(1)}</p>")
+        last = m.end()
+    out.append(text[last:])
+    cleaned = "".join(out).strip()
     return cleaned if cleaned else str(html)
+
 
 
 async def answer_inline_rich(

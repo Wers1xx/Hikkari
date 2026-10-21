@@ -115,10 +115,16 @@ class HikkariConfigMod(loader.Module):
             raw = None
             with contextlib.suppress(Exception):
                 raw = self.config.get("banner_url")
+            # Empty / None after reset → default asset
+            if raw is None or (isinstance(raw, str) and not str(raw).strip()):
+                return pick_banner_url("hikkari-config.jpg")
             u = pick_banner_url(raw)
             if u:
                 return u
-            # default builtin
+            # raw may already be a direct URL pick_banner missed
+            s = str(raw).strip()
+            if s.startswith(("http://", "https://")):
+                return s.split()[0].strip("[],")
             return pick_banner_url("hikkari-config.jpg")
         except Exception:
             return "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
@@ -135,9 +141,26 @@ class HikkariConfigMod(loader.Module):
     def _cfg_figure(self, url: str | None) -> str:
         if not url or not str(url).startswith(("http://", "https://")):
             return ""
-        u = str(url).split()[0]
-        low = u.lower()
-        if any(low.endswith(ext) for ext in (".mp4", ".webm", ".mov", ".mkv", ".gif")):
+        u = str(url).split()[0].strip("[],")
+        low = u.lower().split("?", 1)[0]
+        is_img = any(
+            low.endswith(ext)
+            for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+        )
+        is_vid = any(
+            low.endswith(ext)
+            for ext in (".mp4", ".webm", ".mov", ".mkv", ".m4v")
+        )
+        # host without extension (x0.at etc.) — treat as video only if not image
+        if not is_img and not is_vid:
+            if any(
+                h in low
+                for h in ("x0.at/", "/video/", "cdn.discordapp.com/", "telegra.ph/")
+            ):
+                is_vid = True
+            else:
+                is_img = True
+        if is_vid:
             return f'<figure><video src="{u}"/></figure>\n'
         return f'<figure><img src="{u}"/></figure>\n'
 
@@ -181,20 +204,14 @@ class HikkariConfigMod(loader.Module):
         return mk
 
     def _cfg_rich_html(self, text: str, markup, unit_id: str | None = None) -> str:
-        """RichProbe-style HTML: banner figure + body + tg-button-row."""
-        from ..utils.rich_api import markup_to_tg_rows, inject_banner_html
+        """RichProbe-style HTML: banner figure + body + tg-button-row (every screen)."""
+        from ..utils.rich_api import markup_to_tg_rows
         import re as _re
 
         body = self._cfg_as_rich_body(text)
         banner = self._cfg_banner_http()
-        # Prefer inject (img); for video force figure<video>
-        if banner and any(
-            str(banner).lower().endswith(ext)
-            for ext in (".mp4", ".webm", ".mov", ".mkv")
-        ):
-            html = self._cfg_figure(banner) + body
-        else:
-            html = inject_banner_html(body, banner, force=True)
+        # Always force our figure first (img or video)
+        html = self._cfg_figure(banner) + body
 
         mk = self._cfg_register_markup(markup, unit_id)
         html = _re.sub(
