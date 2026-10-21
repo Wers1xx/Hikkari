@@ -432,6 +432,18 @@ class Events(InlineUnit):
                     await call.answer("Error", show_alert=True)
 
 
+
+        # Config close (tg-button callback_data fixed)
+        if isinstance(call_data, str) and call_data.strip() == "hcfg|close":
+            with contextlib.suppress(Exception):
+                await call.answer()
+            icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+                call, self, getattr(self, "_cfg_unit_id", None)
+            )
+            with contextlib.suppress(Exception):
+                await self._close_unit_handler(icall)
+            return
+
         # --- Hikkari Config Rich buttons (Bot API sendRichMessage + tg-button) ---
         if isinstance(call_data, str) and call_data.startswith("cfg|"):
             try:
@@ -803,7 +815,16 @@ class Events(InlineUnit):
                             pend.pop(user_id, None)
                     except Exception:
                         pass
-                    return await handler(call, value, *args, **kwargs)
+                    result = await handler(call, value, *args, **kwargs)
+                    # Remove "Transferring value..." via@ spam from chat
+                    with contextlib.suppress(Exception):
+                        if msg_id is not None:
+                            chat = unit.get("chat") if isinstance(unit, dict) else None
+                            if chat is not None:
+                                await self._client.delete_messages(
+                                    int(chat), [int(msg_id)]
+                                )
+                    return result
                 except Exception:
                     logger.exception(
                         "Exception while running chosen query watcher!"
