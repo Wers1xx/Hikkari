@@ -39,18 +39,22 @@ logger = logging.getLogger(__name__)
 BOT_BASE_PATTERN = re.compile(r"(\w*)_[0-9a-zA-Z]{6}_bot")
 
 def _token_backup_paths(tg_id: int | None = None) -> list:
-    """All places we may store the bot token (never lose it)."""
+    """Token file paths. With tg_id — only that account's files (no shared steal)."""
     from pathlib import Path
     from .. import main as _main
     base = Path(_main.BASE_PATH)
-    paths = [
-        base / "inline_bot.token",
-        base / "data" / "inline_bot.token",
-    ]
     if tg_id:
-        paths.insert(0, base / f"inline_bot-{tg_id}.token")
-        paths.append(base / "sessions" / f"inline_bot-{tg_id}.token")
-    # unique keep order
+        paths = [
+            base / f"inline_bot-{tg_id}.token",
+            base / "sessions" / f"inline_bot-{tg_id}.token",
+            base / "data" / f"inline_bot-{tg_id}.token",
+        ]
+    else:
+        # legacy fallback only when account id unknown
+        paths = [
+            base / "inline_bot.token",
+            base / "data" / "inline_bot.token",
+        ]
     seen = set()
     out = []
     for p in paths:
@@ -97,6 +101,9 @@ def _persist_bot_token(db, token: str, username: str | None = None, tg_id: int |
             tg_id = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
         except Exception:
             tg_id = None
+    if tg_id:
+        with contextlib.suppress(Exception):
+            db.set("hikkari.inline", "owner_id", int(tg_id))
 
     for path in _token_backup_paths(tg_id):
         try:
@@ -111,8 +118,16 @@ def _persist_bot_token(db, token: str, username: str | None = None, tg_id: int |
 
 
 def _load_bot_token(db, tg_id: int | None = None) -> str | None:
-    """Load token from DB and every backup location. Re-persist if restored from file."""
+    """Load token for THIS account only (DB + per-tg_id files)."""
     candidates = []
+    if not tg_id:
+        with contextlib.suppress(Exception):
+            tg_id = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
+
+    # DB token only if owner_id matches (or owner unknown)
+    owner = None
+    with contextlib.suppress(Exception):
+        owner = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
     for key_mod, key_name in (
         ("hikkari.inline", "bot_token"),
         ("heroku.inline", "bot_token"),
@@ -121,11 +136,10 @@ def _load_bot_token(db, tg_id: int | None = None) -> str | None:
         with contextlib.suppress(Exception):
             val = db.get(key_mod, key_name, None)
             if val and isinstance(val, str) and ":" in val.strip():
+                if tg_id and owner and int(owner) != int(tg_id):
+                    # Token in this DB belongs to another account — ignore
+                    continue
                 candidates.append(val.strip())
-
-    if not tg_id:
-        with contextlib.suppress(Exception):
-            tg_id = int(db.get("hikkari.inline", "owner_id", 0) or 0) or None
 
     for path in _token_backup_paths(tg_id):
         try:

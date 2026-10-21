@@ -175,6 +175,16 @@ class HikkariWebMod(loader.Module):
             inline_data["bot_token"] = None
             inline_data["custom_bot"] = False
             inline_data.pop("bot_id", None)
+            inline_data.pop("bot_username", None)
+            inline_data["owner_id"] = int(new_id)
+        # Own logs/backups channel per account
+        forums = data.setdefault("hikkari.forums", {})
+        if isinstance(forums, dict):
+            forums.pop("channel_id", None)
+        main_data = data.setdefault("hikkari.main", {})
+        if isinstance(main_data, dict):
+            for k in ("logchat", "log_chat", "logs_chat", "backup_channel"):
+                main_data.pop(k, None)
 
         security_data = data.setdefault(security.__name__, {})
         for key in ("owner", "all_users"):

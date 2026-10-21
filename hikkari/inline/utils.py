@@ -376,6 +376,18 @@ class Utils(InlineUnit):
         with contextlib.suppress(Exception):
             await call.answer()
 
+        # One-shot: ignore double-tap on same message
+        imid0 = getattr(call, "inline_message_id", None)
+        if not hasattr(self, "_closed_imids"):
+            self._closed_imids = set()
+        if imid0 is not None:
+            key = str(imid0)
+            if key in self._closed_imids:
+                return
+            self._closed_imids.add(key)
+            if len(self._closed_imids) > 64:
+                self._closed_imids = set(list(self._closed_imids)[-32:])
+
         unit_id = getattr(call, "unit_id", None)
         imid = getattr(call, "inline_message_id", None)
         units = getattr(self, "_units", None) or {}

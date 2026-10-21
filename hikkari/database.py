@@ -151,8 +151,13 @@ class Database(dict):
                 self.set("hikkari.forums", "forums_cache", {"hikkari-userbot": {}})
 
         if not content_channel:
+            _tg = int(getattr(self._client, "tg_id", 0) or 0)
+            _want = (f"hikkari-{_tg}" if _tg else "hikkari-userbot").lower()
             async for dialog in self._client.iter_dialogs():
-                if dialog.title and "hikkari-userbot" in dialog.title.lower():
+                title = (dialog.title or "").lower()
+                if title == _want or (
+                    not _tg and "hikkari-userbot" in title
+                ):
                     content_channel = dialog.entity
                     logger.debug(
                         "Found existing channel '%s' with ID %s",
@@ -168,9 +173,11 @@ class Database(dict):
             _ava = _eba("hikkari-ava.png")
             _ava_bytes = _ava.read_bytes() if _ava and _ava.is_file() else None
             try:
+                _tg = int(getattr(self._client, "tg_id", 0) or 0)
+                _title = f"hikkari-{_tg}" if _tg else "hikkari-userbot"
                 content_channel, _ = await utils.asset_channel(
                     client=self._client,
-                    title="hikkari-userbot",
+                    title=_title,
                     description="<emoji document_id=5283176512747507510>✨</emoji> Content related to Hikkari will be here",
                     silent=True,
                     invite_bot=True,
