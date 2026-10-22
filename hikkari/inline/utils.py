@@ -123,7 +123,19 @@ class Utils(InlineUnit):
                     if button.get("action") == "close":
                         button["callback"] = self._close_unit_handler
                         button["disable_security"] = True
+                        button["force_me"] = True
                         button.setdefault("args", ())
+                        if not button.get("_callback_data"):
+                            button["_callback_data"] = "hcfg|close"
+                        self._custom_map["hcfg|close"] = {
+                            "handler": self._close_unit_handler,
+                            "always_allow": [],
+                            "args": (),
+                            "kwargs": {},
+                            "force_me": True,
+                            "disable_security": True,
+                            "message": True,
+                        }
 
                     if button.get("action") == "unload":
                         button["callback"] = self._unload_unit_handler
@@ -371,12 +383,13 @@ class Utils(InlineUnit):
 
 
 
-    async def _close_unit_handler(self: "InlineManager", call: InlineCall, unit_id: str | None = None):
-        """Close form/list/rich: answer + DELETE only THIS message/unit."""
+    async def _close_unit_handler(
+        self: "InlineManager", call: InlineCall, unit_id: str | None = None
+    ):
+        """Close the form/message the user actually pressed (no cross-delete)."""
         with contextlib.suppress(Exception):
             await call.answer()
 
-        # One-shot: ignore double-tap on same message
         imid0 = getattr(call, "inline_message_id", None)
         if not hasattr(self, "_closed_imids"):
             self._closed_imids = set()
@@ -388,7 +401,6 @@ class Utils(InlineUnit):
             if len(self._closed_imids) > 64:
                 self._closed_imids = set(list(self._closed_imids)[-32:])
 
-        # Prefer explicit unit_id from callback kwargs / data (multi-config safe)
         if not unit_id:
             unit_id = getattr(call, "unit_id", None)
         if not unit_id:
@@ -398,24 +410,21 @@ class Utils(InlineUnit):
                     raw = raw.decode("utf-8", "ignore")
                 if isinstance(raw, str) and raw.startswith("hcfg|c|"):
                     unit_id = raw.split("|", 2)[-1] or None
-        imid = getattr(call, "inline_message_id", None)
-        units = getattr(self, "_units", None) or {}
 
-        # Resolve unit: by id, by imid — NEVER fall back to "last form" (cross-delete)
+        imid = imid0 or getattr(call, "inline_message_id", None)
+        units = getattr(self, "_units", None) or {}
         unit = units.get(unit_id) if unit_id else None
+
         if unit is None and imid is not None:
             imid_s = str(imid)
             for uid, u in units.items():
                 if not isinstance(u, dict):
                     continue
                 stored = u.get("inline_message_id")
-                if stored is not None and (
-                    stored == imid or str(stored) == imid_s
-                ):
+                if stored is not None and (stored == imid or str(stored) == imid_s):
                     unit_id = uid
                     unit = u
                     break
-        # no cross-unit fallback — close only the pressed message
 
         chat = None
         msg_id = None
@@ -423,33 +432,28 @@ class Utils(InlineUnit):
             chat = unit.get("chat")
             msg_id = unit.get("message_id")
             imid = imid or unit.get("inline_message_id")
-        if chat is None:
-            chat = getattr(call, "chat_id", None)
-        if msg_id is None:
-            msg_id = getattr(call, "message_id", None)
-        if chat is None or msg_id is None:
-            with contextlib.suppress(Exception):
-                msg = getattr(call, "message", None)
-                if msg is not None and hasattr(msg, "id"):
-                    chat = chat or utils.get_chat_id(msg)
-                    msg_id = msg_id or getattr(msg, "id", None)
-                elif msg is not None and getattr(msg, "chat_id", None):
-                    chat = chat or msg.chat_id
-                    msg_id = msg_id or getattr(msg, "message_id", None)
+
+        chat = getattr(call, "chat_id", None) or chat
+        msg_id = getattr(call, "message_id", None) or msg_id
+        with contextlib.suppress(Exception):
+            msg = getattr(call, "message", None)
+            if msg is not None:
+                if chat is None:
+                    chat = utils.get_chat_id(msg)
+                if msg_id is None:
+                    msg_id = getattr(msg, "id", None) or getattr(msg, "message_id", None)
 
         deleted = False
 
-        # 1) User client delete (via@ message is owned by the user)
-        if chat is not None and msg_id is not None:
+        with contextlib.suppress(Exception):
+            if hasattr(call, "delete") and await call.delete():
+                deleted = True
+
+        if not deleted and chat is not None and msg_id is not None:
             with contextlib.suppress(Exception):
                 await self._client.delete_messages(int(chat), [int(msg_id)])
                 deleted = True
 
-        # 2) call.delete / unit delete
-        if not deleted:
-            with contextlib.suppress(Exception):
-                if hasattr(call, "delete") and await call.delete():
-                    deleted = True
         if not deleted and unit_id:
             with contextlib.suppress(Exception):
                 if await self._delete_unit_message(
@@ -457,7 +461,6 @@ class Utils(InlineUnit):
                 ):
                     deleted = True
 
-        # 3) Bot API deleteMessage
         if not deleted and chat is not None and msg_id is not None:
             token = getattr(self, "_token", None)
             if token:
@@ -473,7 +476,6 @@ class Utils(InlineUnit):
                             if data.get("ok"):
                                 deleted = True
 
-        # 4) via@ cannot always be deleted → edit to closed state
         if not deleted:
             token = getattr(self, "_token", None)
             if token and imid is not None:
@@ -495,18 +497,18 @@ class Utils(InlineUnit):
                                 deleted = True
             if not deleted:
                 with contextlib.suppress(Exception):
-                    if hasattr(call, "edit"):
-                        await call.edit("✖️", reply_markup=None)
+                    await call.edit("✖️", reply_markup=[])
+                    deleted = True
 
-        with contextlib.suppress(Exception):
-            if unit_id and unit_id in self._units:
-                on_unload = self._units[unit_id].get("on_unload")
-                del self._units[unit_id]
+        if unit_id and unit_id in units:
+            with contextlib.suppress(Exception):
+                on_unload = units[unit_id].get("on_unload")
                 if callable(on_unload):
-                    on_unload()
-        with contextlib.suppress(Exception):
-            if getattr(self, "_cfg_unit_id", None) == unit_id:
-                self._cfg_unit_id = None
+                    r = on_unload()
+                    if asyncio.iscoroutine(r):
+                        await r
+            with contextlib.suppress(Exception):
+                del units[unit_id]
 
 
     async def _unload_unit_handler(self: "InlineManager", call: InlineCall):

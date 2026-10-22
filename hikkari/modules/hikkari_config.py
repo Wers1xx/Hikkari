@@ -207,24 +207,26 @@ class HikkariConfigMod(loader.Module):
             for btn in row:
                 if not isinstance(btn, dict):
                     continue
-                # CLOSE — unique per unit so multi-config doesn't cross-delete
+                # CLOSE — unit-specific + global alias
                 if btn.get("action") == "close":
                     btn["callback"] = im._close_unit_handler
                     btn["disable_security"] = True
                     btn["force_me"] = True
-                    close_data = f"hcfg|c|{unit_id}"
+                    close_data = f"hcfg|c|{unit_id}" if unit_id else "hcfg|close"
                     btn["_callback_data"] = close_data
                     btn["data"] = close_data
                     btn.setdefault("args", ())
-                    im._custom_map[close_data] = {
+                    entry = {
                         "handler": im._close_unit_handler,
                         "always_allow": [],
                         "args": (),
-                        "kwargs": {"unit_id": unit_id},
+                        "kwargs": {"unit_id": unit_id} if unit_id else {},
                         "force_me": True,
                         "disable_security": True,
                         "message": True,
                     }
+                    im._custom_map[close_data] = entry
+                    im._custom_map["hcfg|close"] = entry
                     continue
 
                 # INPUT — classic random switch query (same as inline form)
@@ -454,14 +456,9 @@ class HikkariConfigMod(loader.Module):
                                 self.inline._units[uid].get("buttons") or markup,
                                 uid,
                             )
-                    # Re-apply rich with figure — first via@ answer often strips media
-                    async def _banner_touch():
-                        import asyncio as _aio
-                        await _aio.sleep(0.35)
-                        with contextlib.suppress(Exception):
-                            await self._cfg_edit_rich(m, html)
-                    import asyncio as _aio
-                    _aio.ensure_future(_banner_touch())
+                    # form() already waited for inline_message_id — inject banner now
+                    with contextlib.suppress(Exception):
+                        await self._cfg_edit_rich(m, html)
                     return m
             except Exception:
                 _log.debug("cfg rich form open failed", exc_info=True)
