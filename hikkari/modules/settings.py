@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import gc
 import os
@@ -349,6 +350,15 @@ class CoreMod(loader.Module):
             self._db.set("hikkari.rich", "template", str(self.config["rich_template"] or "{text}"))
         except Exception:
             pass
+        # Restore aliases (with args) after all commands are registered
+        with contextlib.suppress(Exception):
+            stored = self.get("aliases", None)
+            if not stored:
+                stored = self._db.get("CoreMod", "aliases", None) or self._db.get(
+                    "Settings", "aliases", None
+                )
+            if isinstance(stored, dict) and stored:
+                self.allmodules.add_aliases(stored)
         self._markup = lambda: utils.chunks(
             [
                 {
@@ -776,6 +786,15 @@ class CoreMod(loader.Module):
 
         if added_lines:
             self.set("aliases", stored_aliases)
+            # Mirror for legacy key + force apply into runtime map
+            with contextlib.suppress(Exception):
+                self._db.set("Settings", "aliases", stored_aliases)
+            with contextlib.suppress(Exception):
+                self._db.set("CoreMod", "aliases", stored_aliases)
+            with contextlib.suppress(Exception):
+                self.allmodules.add_aliases(stored_aliases)
+            with contextlib.suppress(Exception):
+                self._db.save()
 
         if not added_lines:
             await utils.answer(

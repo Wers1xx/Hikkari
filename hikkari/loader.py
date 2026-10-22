@@ -1071,10 +1071,23 @@ class Modules:
         return ret
 
     def add_aliases(self, aliases: dict):
-        """Saves aliases and applies them to <core>/<file> modules"""
-        self.aliases.update(aliases)
+        """Restore aliases from DB (supports targets with args, e.g. update -f)."""
+        if not aliases:
+            return
         for alias, cmd in aliases.items():
-            self.add_alias(alias, *cmd.split(maxsplit=1))
+            if not alias or cmd is None:
+                continue
+            target = str(cmd).strip()
+            if not target:
+                continue
+            key = str(alias).lower().strip()
+            # Always keep in map (even if command not registered yet)
+            self.aliases[key] = target
+            parts = target.split(maxsplit=1)
+            c = parts[0].lstrip(".")
+            a = parts[1] if len(parts) > 1 else None
+            if c in self.commands:
+                self.aliases[key] = f"{c} {a}".strip() if a else c
 
     def register_raw_handlers(self, instance: Module):
         """Register event handlers for a module"""
@@ -1686,7 +1699,9 @@ class Modules:
                 )
                 del self.commands[name]
                 for alias, _command in self.aliases.copy().items():
-                    if _command == name:
+                    # Match "update" and "update -f"
+                    base = str(_command).split(maxsplit=1)[0].lower()
+                    if base == name.lower() or str(_command).lower() == name.lower():
                         del self.aliases[alias]
 
     def unregister_watchers(self, instance: Module, purpose: str):
@@ -1713,11 +1728,18 @@ class Modules:
                 )
 
     def add_alias(self, alias: str, cmd: str, args: str = None) -> bool:
-        """Make an alias"""
-        if cmd not in self.commands:
+        """Make an alias (cmd may include args via `args`)."""
+        cmd = (cmd or "").lstrip(".")
+        if not cmd:
             return False
+        # Allow storing before command is registered; warn only if missing
+        if cmd not in self.commands:
+            # still persist so restart/re-register can pick it up
+            target = f"{cmd} {args}".strip() if args else cmd
+            self.aliases[alias.lower().strip()] = target
+            return True
 
-        self.aliases[alias.lower().strip()] = f"{cmd} {args}" if args else cmd
+        self.aliases[alias.lower().strip()] = f"{cmd} {args}".strip() if args else cmd
         return True
 
     def remove_alias(self, alias: str) -> bool:
