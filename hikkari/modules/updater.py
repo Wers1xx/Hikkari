@@ -363,24 +363,91 @@ class UpdaterMod(loader.Module):
                 pass
 
     async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
-        """Notify owner ONLY via inline bot (never Saved Messages / user client)."""
-        markup = reply_markup
-        bot = getattr(getattr(self, "inline", None), "bot", None)
-        if bot is None:
+        """Notify owner ONLY via Bot API HTTP → bot PM. Never user client / Saved Messages."""
+        token = None
+        with contextlib.suppress(Exception):
+            token = getattr(self.inline, "_token", None) or getattr(
+                self.inline, "token", None
+            )
+        if not token:
             with contextlib.suppress(Exception):
                 if hasattr(self.inline, "ensure_inline_ready"):
                     await self.inline.ensure_inline_ready()
-                bot = getattr(self.inline, "bot", None)
-        if bot is None:
-            logger.warning("update notify skipped: no inline bot")
+                token = getattr(self.inline, "_token", None)
+        if not token:
+            with contextlib.suppress(Exception):
+                token = self._db.get("hikkari.inline", "bot_token", None) or self._db.get(
+                    "hikka.inline", "bot_token", None
+                )
+        if not token:
+            logger.warning("update notify skipped: no bot token (will not use Saved Messages)")
             return None
+
+        chat_id = int(self.tg_id)
+        # Convert Hikkari markup → Bot API inline_keyboard (callbacks only)
+        ikb = None
+        if reply_markup:
+            with contextlib.suppress(Exception):
+                rows_out = []
+                for row in reply_markup:
+                    if not isinstance(row, (list, tuple)):
+                        row = [row]
+                    r = []
+                    for btn in row:
+                        if not isinstance(btn, dict):
+                            continue
+                        t = str(btn.get("text") or "•")[:64]
+                        item = {"text": t}
+                        if btn.get("url"):
+                            item["url"] = str(btn["url"])
+                        else:
+                            data = (
+                                btn.get("data")
+                                or btn.get("_callback_data")
+                                or (
+                                    "hikkari/update"
+                                    if "update" in t.lower() or "обнов" in t.lower()
+                                    else "hikkari/ignore_upd"
+                                    if "ignore" in t.lower() or "игнор" in t.lower()
+                                    else "noop"
+                                )
+                            )
+                            item["callback_data"] = str(data)[:64]
+                        r.append(item)
+                    if r:
+                        rows_out.append(r)
+                if rows_out:
+                    ikb = {"inline_keyboard": rows_out}
+
+        payload = {
+            "chat_id": chat_id,
+            "text": str(text)[:4090],
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if ikb:
+            payload["reply_markup"] = ikb
+
         try:
-            kw = {"disable_web_page_preview": True}
-            if markup is not None:
-                kw["reply_markup"] = markup
-            return await bot.send_message(self.tg_id, text, **kw)
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json=payload,
+                ) as resp:
+                    data = await resp.json(content_type=None)
+            if not data.get("ok"):
+                logger.warning("Bot API update notify failed: %s", data)
+                return None
+            # minimal object with message_id for upd_msg tracking
+            class _Msg:
+                pass
+            m = _Msg()
+            m.message_id = (data.get("result") or {}).get("message_id")
+            m.id = m.message_id
+            return m
         except Exception:
-            logger.warning("bot update notify failed", exc_info=True)
+            logger.warning("Bot API update notify request failed", exc_info=True)
             return None
 
     @loader.loop(interval=60, autostart=True)
