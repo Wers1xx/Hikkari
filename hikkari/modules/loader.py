@@ -309,6 +309,7 @@ class LoaderMod(loader.Module):
             return linked
         return html_mod.escape(s[:80])
 
+    @staticmethod
     def _plain_cmd_doc(text, fallback="—"):
         import html as html_mod
         if not text:
