@@ -746,6 +746,7 @@ async def answer_inline_rich(
     if ok:
         logger.info("answerInlineQuery(rich) OK id=%s", inline_query_id)
         return True
+    logger.warning("answerInlineQuery(rich) failed: %s", err)
 
     # 2) EXTERNAL_MEDIA / media issues → strip media, retry once
     if "EXTERNAL_MEDIA" in err.upper() or "MEDIA" in err.upper():

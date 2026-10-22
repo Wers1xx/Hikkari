@@ -397,15 +397,20 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Loader announce like HikkariConfig: inline.rich / form(rich_message=).
+        """Module load card as real Telegram Rich Message.
 
-        Native MTProto path skipped — same stack as working config UI.
+        Per Bot API 10.1+ / MTProto:
+          - Bots: sendRichMessage / answerInlineQuery(InputRichMessageContent)
+          - Users with Premium: messages.SendMessage(rich_message=...)
+        In a private chat with a friend the bot often cannot post → user
+        client path is required. Via@ classic article is last resort only.
         """
         try:
             from ..utils.rich_api import (
                 html_table,
                 markup_to_tg_rows,
                 strip_external_media_for_inline,
+                try_send_rich,
                 to_rich_compatible,
                 inject_banner_html,
             )
@@ -442,6 +447,7 @@ class LoaderMod(loader.Module):
                 )
 
             ver = f" (v{version})" if version else ""
+            # Official Rich HTML (Bot API 10.1 rich message formatting)
             parts = [f"<h2>{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"]
             if desc:
                 parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
@@ -466,10 +472,58 @@ class LoaderMod(loader.Module):
                 if meta_banner and str(meta_banner).startswith(("http://", "https://"))
                 else None
             )
+            # Banner only for via@ path — external media breaks native often
+            html_native = html
+            html_banner = html
             if thumb:
                 with contextlib.suppress(Exception):
-                    html = inject_banner_html(html, thumb, force=True)
+                    html_banner = inject_banner_html(html, thumb, force=True)
 
+            chat = None
+            with contextlib.suppress(Exception):
+                chat = utils.get_chat_id(message)
+
+            me = getattr(self._client, "hikkari_me", None)
+            premium = bool(getattr(me, "premium", False)) if me else False
+
+            # ── 1) User client MTProto Rich (Premium) — no buttons ──────────
+            # Docs: users with Premium can send rich_message on SendMessage.
+            if premium and hasattr(self._client, "edit_rich_message"):
+                try:
+                    if getattr(message, "out", False) and getattr(message, "id", None):
+                        await self._client.edit_rich_message(
+                            message.peer_id,
+                            message,
+                            html_native,
+                        )
+                        logger.info("loader: native edit_rich_message OK")
+                        return True
+                except Exception as e:
+                    logger.warning("loader native edit_rich failed: %s", e)
+                try:
+                    if chat is not None:
+                        await self._client.send_rich_message(chat, html_native)
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
+                                await message.delete()
+                        logger.info("loader: native send_rich_message OK")
+                        return True
+                except Exception as e:
+                    logger.warning("loader native send_rich failed: %s", e)
+
+            # ── 2) Bot API sendRichMessage (bot must reach the chat) ────────
+            if chat is not None:
+                try:
+                    if await try_send_rich(self._client, chat, html_native):
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
+                                await message.delete()
+                        logger.info("loader: bot sendRichMessage OK chat=%s", chat)
+                        return True
+                except Exception as e:
+                    logger.warning("loader bot sendRichMessage failed: %s", e)
+
+            # ── 3) via@ InputRichMessageContent (answerInlineQuery) ─────────
             close_row = [
                 {
                     "text": "\U0001f53b \u0417\u0430\u043a\u0440\u044b\u0442\u044c",
@@ -479,13 +533,11 @@ class LoaderMod(loader.Module):
             markup = list(subscribe_markup) if subscribe_markup else []
             markup.append(close_row)
 
-            # Embed tg-buttons into HTML (config-style)
+            html_via = strip_external_media_for_inline(html_banner)
             with contextlib.suppress(Exception):
                 btn_html = markup_to_tg_rows(markup, "")
                 if btn_html:
-                    html = html.rstrip() + "\n" + btn_html
-
-            html_inline = strip_external_media_for_inline(html)
+                    html_via = html_via.rstrip() + "\n" + btn_html
 
             if not getattr(self.inline, "init_complete", False) or not getattr(
                 self.inline, "bot_username", None
@@ -496,72 +548,63 @@ class LoaderMod(loader.Module):
                     else:
                         await self.inline.register_manager(ignore_token_checks=True)
 
-            if not getattr(self.inline, "bot_username", None):
-                return False
+            if getattr(self.inline, "bot_username", None):
+                target = chat if chat is not None else message
+                try:
+                    m = await self.inline.rich(
+                        target,
+                        html_via,
+                        title=f"\u2713 {name}"[:64],
+                        description=(desc[:80] if desc else "Module loaded"),
+                        silent=True,
+                        reply_markup=markup,
+                        thumbnail_url=None,  # avoid EXTERNAL_MEDIA
+                    )
+                    if m:
+                        with contextlib.suppress(Exception):
+                            im = self.inline
+                            uid = getattr(m, "unit_id", None)
+                            if not uid and getattr(im, "_units", None):
+                                uid = next(reversed(im._units), None)
+                            if uid and uid in getattr(im, "_units", {}):
+                                for row in im._units[uid].get("buttons") or markup:
+                                    for btn in row:
+                                        if isinstance(btn, dict) and btn.get("action") == "close":
+                                            btn["callback"] = im._close_unit_handler
+                                            btn["_callback_data"] = "hcfg|close"
+                                            im._custom_map["hcfg|close"] = {
+                                                "handler": im._close_unit_handler,
+                                                "always_allow": [],
+                                                "args": (),
+                                                "kwargs": {},
+                                                "force_me": True,
+                                                "disable_security": True,
+                                                "message": True,
+                                            }
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False) and message != m:
+                                await message.delete()
+                        logger.info("loader: inline.rich OK")
+                        return True
+                except Exception as e:
+                    logger.warning("loader inline.rich failed: %s", e)
 
-            chat = None
-            with contextlib.suppress(Exception):
-                chat = utils.get_chat_id(message)
-            target = chat if chat is not None else message
+                # form(rich_message=) same as config
+                try:
+                    m = await self.inline.form(
+                        text="\u2728",
+                        message=message if getattr(message, "out", False) else target,
+                        rich_message=html_via,
+                        reply_markup=markup,
+                        silent=True,
+                    )
+                    if m:
+                        logger.info("loader: form rich_message OK")
+                        return True
+                except Exception as e:
+                    logger.warning("loader form rich_message failed: %s", e)
 
-            # 1) Same as config: inline.rich
-            try:
-                m = await self.inline.rich(
-                    target,
-                    html_inline,
-                    title=f"\u2713 {name}"[:64],
-                    description=(desc[:80] if desc else "Module loaded"),
-                    silent=True,
-                    reply_markup=markup,
-                    thumbnail_url=thumb,
-                )
-                if m:
-                    # Wire close like config
-                    with contextlib.suppress(Exception):
-                        im = self.inline
-                        uid = getattr(m, "unit_id", None)
-                        if not uid and getattr(im, "_units", None):
-                            uid = next(reversed(im._units), None)
-                        if uid and uid in im._units:
-                            for row in im._units[uid].get("buttons") or markup:
-                                for btn in row:
-                                    if isinstance(btn, dict) and btn.get("action") == "close":
-                                        btn["callback"] = im._close_unit_handler
-                                        btn["_callback_data"] = "hcfg|close"
-                                        im._custom_map["hcfg|close"] = {
-                                            "handler": im._close_unit_handler,
-                                            "always_allow": [],
-                                            "args": (),
-                                            "kwargs": {},
-                                            "force_me": True,
-                                            "disable_security": True,
-                                            "message": True,
-                                        }
-                    with contextlib.suppress(Exception):
-                        if getattr(message, "out", False) and message != m:
-                            await message.delete()
-                    return True
-            except Exception:
-                logger.debug("loader inline.rich failed", exc_info=True)
-
-            # 2) Config fallback: form(rich_message=html)
-            try:
-                m = await self.inline.form(
-                    text="\u2728",
-                    message=message if getattr(message, "out", False) else target,
-                    rich_message=html_inline,
-                    reply_markup=markup,
-                    silent=True,
-                )
-                if m:
-                    with contextlib.suppress(Exception):
-                        if getattr(message, "out", False) and message != m:
-                            await message.delete()
-                    return True
-            except Exception:
-                logger.debug("loader form rich_message failed", exc_info=True)
-
-            # 3) Classic form with Close
+            # ── 4) Classic form ─────────────────────────────────────────────
             try:
                 text_parts = [
                     f"<b>\u2728 Module {html_mod.escape(name)} loaded</b>",
@@ -577,19 +620,20 @@ class LoaderMod(loader.Module):
                     text_parts.append(
                         f"\u2764\ufe0f Developer: {self._linkify_developer(dev_plain[:120])}"
                     )
-                m = await self.inline.form(
-                    "\n".join(text_parts),
-                    message=message if getattr(message, "out", False) else target,
-                    reply_markup=markup,
-                    silent=True,
-                )
-                if m:
-                    return True
+                if getattr(self.inline, "init_complete", False):
+                    m = await self.inline.form(
+                        "\n".join(text_parts),
+                        message=message if getattr(message, "out", False) else (chat or message),
+                        reply_markup=markup,
+                        silent=True,
+                    )
+                    if m:
+                        return True
             except Exception:
                 logger.debug("loader classic form failed", exc_info=True)
 
         except Exception:
-            logger.debug("loader rich single failed", exc_info=True)
+            logger.exception("loader rich single failed")
         return False
 
     async def _announce_module_loaded(
