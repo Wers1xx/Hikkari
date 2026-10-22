@@ -490,58 +490,30 @@ class LoaderMod(loader.Module):
             me = getattr(self._client, "hikkari_me", None)
             premium = bool(getattr(me, "premium", False)) if me else False
 
-            # ── 1) User client MTProto Rich (Premium) — no buttons ──────────
-            # Docs: users with Premium can send rich_message on SendMessage.
-            if premium and hasattr(self._client, "edit_rich_message"):
-                try:
-                    if getattr(message, "out", False) and getattr(message, "id", None):
-                        await self._client.edit_rich_message(
-                            message.peer_id,
-                            message,
-                            html_native,
-                        )
-                        logger.info("loader: native edit_rich_message OK")
-                        return True
-                except Exception as e:
-                    logger.warning("loader native edit_rich failed: %s", e)
-                try:
-                    if chat is not None:
-                        await self._client.send_rich_message(chat, html_native)
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        logger.info("loader: native send_rich_message OK")
-                        return True
-                except Exception as e:
-                    logger.warning("loader native send_rich failed: %s", e)
-
-            # ── 2) Bot API sendRichMessage (bot must reach the chat) ────────
-            if chat is not None:
-                try:
-                    if await try_send_rich(self._client, chat, html_native):
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        logger.info("loader: bot sendRichMessage OK chat=%s", chat)
-                        return True
-                except Exception as e:
-                    logger.warning("loader bot sendRichMessage failed: %s", e)
-
-            # ── 3) via@ InputRichMessageContent (answerInlineQuery) ─────────
+            # Close button + optional subscribe always present
             close_row = [
                 {
-                    "text": "\U0001f53b \u0417\u0430\u043a\u0440\u044b\u0442\u044c",
+                    "text": "🔻 Закрыть",
                     "action": "close",
                 }
             ]
             markup = list(subscribe_markup) if subscribe_markup else []
             markup.append(close_row)
 
-            html_via = strip_external_media_for_inline(html_banner)
+            # Embed tg-buttons into HTML (premium + close)
+            html_with_btns = html_banner
             with contextlib.suppress(Exception):
                 btn_html = markup_to_tg_rows(markup, "")
                 if btn_html:
-                    html_via = html_via.rstrip() + "\n" + btn_html
+                    html_with_btns = html_banner.rstrip() + "\n" + btn_html
+            html_native = html_with_btns
+            with contextlib.suppress(Exception):
+                html_native = to_rich_compatible(html_native)
+
+            # Prefer via@ / form WITH working close (native alone has no callback unit)
+            # ── via@ / form with close ─────────────────────────────────────
+            # ── via@ InputRichMessageContent ───────────────────────────────
+            html_via = strip_external_media_for_inline(html_with_btns)
 
             if not getattr(self.inline, "init_complete", False) or not getattr(
                 self.inline, "bot_username", None

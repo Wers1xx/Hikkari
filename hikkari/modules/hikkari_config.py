@@ -366,10 +366,15 @@ class HikkariConfigMod(loader.Module):
         return False
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI: Rich+Premium → RichProbe-style (banner figure + tg-buttons).
-        Otherwise classic form + media banner.
+        """Open config UI.
+
+        Mode is fixed for the whole session of the form:
+          rich_mode+Premium → form/rich with tg-buttons (same as later edits)
+          else → classic form + optional photo banner
+        Never open classic then switch to rich on the next click.
         """
         import logging
+        import contextlib
 
         from ..inline.types import BotInlineCall, InlineCall, InlineMessage
         from ..utils.rich import can_use_rich
@@ -380,20 +385,22 @@ class HikkariConfigMod(loader.Module):
         with contextlib.suppress(Exception):
             use_rich = bool(can_use_rich(self._client, self._db))
 
+        # Callback / already-open form → edit in the same mode
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             return await self._safe_cfg_edit(message, text, reply_markup=markup)
 
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        # Initial open (Message): classic form first so text always appears.
-        # Broken via@ rich previously left only ⚙️ / media shell.
-        # Rich + tg-buttons are applied on later edits via _safe_cfg_edit.
-        if False and use_rich:
-            # Pure Rich: text + tg-buttons. Video banners often break via@
-            # (EXTERNAL_MEDIA / empty caption) — use image thumb only.
+        plain = (str(text) or "⚙️ Config").strip()
+        # strip tags for plain caption safety
+        with contextlib.suppress(Exception):
+            plain = self._cfg_plain_from_html(f"<p>{plain}</p>") if "<" in plain else plain
+        if not plain:
+            plain = "⚙️ Config"
+
+        if use_rich:
             html = self._cfg_rich_html(text, markup)
-            # Drop <video> figures for inline reliability
             with contextlib.suppress(Exception):
                 import re as _re
                 html = _re.sub(
@@ -402,17 +409,44 @@ class HikkariConfigMod(loader.Module):
                     html,
                     flags=_re.I | _re.S,
                 )
-            chat = None
-            with contextlib.suppress(Exception):
-                from .. import utils as _u
-                chat = _u.get_chat_id(message)
-            thumb = self._cfg_banner_http()
-            if thumb and any(
-                str(thumb).lower().split("?", 1)[0].endswith(e)
-                for e in (".mp4", ".mov", ".webm", ".mkv", ".m4v")
-            ):
-                thumb = None
+            # 1) form with rich_message — same surface as later _safe_cfg_edit
             try:
+                m = await self.inline.form(
+                    text=plain[:900],
+                    message=message,
+                    rich_message=html,
+                    reply_markup=markup,
+                    silent=True,
+                    force_me=True,
+                )
+                if m:
+                    with contextlib.suppress(Exception):
+                        uid = getattr(m, "unit_id", None)
+                        if not uid and getattr(self.inline, "_units", None):
+                            uid = next(reversed(self.inline._units), None)
+                        if uid and uid in (self.inline._units or {}):
+                            self.inline._units[uid]["rich_message"] = html
+                            self.inline._units[uid]["rich_html"] = html
+                            self._cfg_register_markup(
+                                self.inline._units[uid].get("buttons") or markup,
+                                uid,
+                            )
+                    return m
+            except Exception:
+                _log.debug("cfg form rich_message open failed", exc_info=True)
+
+            # 2) inline.rich
+            try:
+                chat = None
+                with contextlib.suppress(Exception):
+                    from .. import utils as _u
+                    chat = _u.get_chat_id(message)
+                thumb = self._cfg_banner_http()
+                if thumb and any(
+                    str(thumb).lower().split("?", 1)[0].endswith(e)
+                    for e in (".mp4", ".mov", ".webm", ".mkv", ".m4v")
+                ):
+                    thumb = None
                 m = await self.inline.rich(
                     chat if chat is not None else message,
                     html,
@@ -423,13 +457,9 @@ class HikkariConfigMod(loader.Module):
                     reply_markup=markup,
                 )
                 if m:
-                    # Sync input_map / custom_map from the created unit
                     with contextlib.suppress(Exception):
-                        uid = getattr(m, "unit_id", None) or getattr(
-                            m, "form", {}
-                        ).get("unit_id")
+                        uid = getattr(m, "unit_id", None)
                         if not uid and getattr(self.inline, "_units", None):
-                            # last created unit
                             uid = next(reversed(self.inline._units), None)
                         if uid:
                             self._cfg_register_markup(
@@ -443,7 +473,7 @@ class HikkariConfigMod(loader.Module):
             except Exception:
                 _log.debug("cfg rich open failed", exc_info=True)
 
-        # Classic form: text first (always readable), optional photo banner second
+        # Classic form (also fallback if rich open failed)
         form_kw = dict(
             text=text or "⚙️ Config",
             message=message,
@@ -452,7 +482,6 @@ class HikkariConfigMod(loader.Module):
             force_me=True,
             **kwargs,
         )
-        # Prefer text-only so UI never hangs on media-only shell
         try:
             m = await self.inline.form(**form_kw)
             if m:
@@ -460,7 +489,6 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             _log.debug("cfg form text-only failed", exc_info=True)
         media = self._cfg_banner_kwargs()
-        # photo/gif only — video stripped in _cfg_banner_kwargs
         if media:
             form_kw.update(media)
             try:
@@ -474,6 +502,7 @@ class HikkariConfigMod(loader.Module):
             with contextlib.suppress(Exception):
                 return await self.inline.form(**form_kw)
         return None
+
 
     def _cfg_banner_kwargs(self) -> dict:
         """Pass banner URL straight to Telegram like ping/info (no local download)."""
@@ -1389,7 +1418,7 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config: Rich+Premium → Bot API rich_message + tg-buttons; else classic."""
+        """Edit config in the SAME mode it was opened (no inline→rich jump)."""
         import contextlib
 
         with contextlib.suppress(Exception):
@@ -1401,8 +1430,17 @@ class HikkariConfigMod(loader.Module):
             from ..utils.rich import can_use_rich
             use_rich = bool(can_use_rich(self._client, self._db))
 
+        unit_id = getattr(call, "unit_id", None)
+        unit = {}
+        with contextlib.suppress(Exception):
+            unit = (getattr(self.inline, "_units", None) or {}).get(unit_id) or {}
+        # Stay classic if this unit was opened without rich
+        if unit and unit.get("type") == "form" and not (
+            unit.get("rich_html") or unit.get("rich_message")
+        ):
+            use_rich = False
+
         if use_rich and reply_markup is not None:
-            unit_id = getattr(call, "unit_id", None)
             html = self._cfg_rich_html(text, reply_markup, unit_id)
             ok = await self._cfg_edit_rich(call, html)
             if ok:
