@@ -1,8 +1,9 @@
+from __future__ import annotations
+import contextlib
 # ©️ Wers1xx, 2025-2026
 # Rich text mode for Hikkari — Telegram-style tables, blockquotes, premium emoji
 # 🌐 https://github.com/Wers1xx/Hikkari
 
-from __future__ import annotations
 
 import html as html_mod
 import re
@@ -33,17 +34,22 @@ def is_rich_enabled(db: Any = None) -> bool:
     if db is None:
         return False
     try:
-        val = db.get(RICH_DB_MOD, RICH_DB_KEY, None)
-        if val is None:
-            val = db.get("Settings", "rich_mode", None)
-        if val is None:
-            # ModuleConfig storage
-            conf = db.get("Settings", "config", None) or db.get("CoreMod", "config", None)
-            if isinstance(conf, dict) and "rich_mode" in conf:
-                val = conf.get("rich_mode")
-        if val is None:
-            return False
-        return bool(val)
+        for mod, key in (
+            (RICH_DB_MOD, RICH_DB_KEY),
+            ("Settings", "rich_mode"),
+            ("HikkariSettings", "rich_mode"),
+            ("CoreMod", "rich_mode"),
+        ):
+            with contextlib.suppress(Exception):
+                val = db.get(mod, key, None)
+                if val is not None:
+                    return bool(val)
+        for mod in ("Settings", "CoreMod", "HikkariSettings", "TestMod"):
+            with contextlib.suppress(Exception):
+                conf = db.get(mod, "config", None)
+                if isinstance(conf, dict) and "rich_mode" in conf:
+                    return bool(conf.get("rich_mode"))
+        return False
     except Exception:
         return False
 
@@ -52,17 +58,20 @@ def can_use_rich(client: Any = None, db: Any = None) -> bool:
     """
     Rich Messages require:
       1) rich_mode enabled in Settings
-      2) account has Telegram Premium (native rich is Premium/bot; userbot owner needs Premium)
+      2) account has Telegram Premium
     """
     if not is_rich_enabled(db):
         return False
     if client is None:
         return False
     try:
-        me = getattr(client, "hikkari_me", None)
-        if me is None:
-            return False
-        return bool(getattr(me, "premium", False))
+        me = getattr(client, "hikkari_me", None) or getattr(client, "hikka_me", None)
+        if me is not None and bool(getattr(me, "premium", False)):
+            return True
+        # some builds stash premium on client
+        if bool(getattr(client, "premium", False)):
+            return True
+        return False
     except Exception:
         return False
 

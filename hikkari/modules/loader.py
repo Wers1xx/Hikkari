@@ -397,7 +397,7 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Announce module load like Ping/Info: edit message (rich) + Close button."""
+        """Same stack as Ping/Info: native rich_message → bot API → via@ + Close."""
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
@@ -469,7 +469,7 @@ class LoaderMod(loader.Module):
                     html = inject_banner_html(html, thumb, force=True)
             html_inline = strip_external_media_for_inline(html)
 
-            close_row = [{"text": "🔻 Закрыть", "action": "close"}]
+            close_row = [{"text": "\U0001f53b \u0417\u0430\u043a\u0440\u044b\u0442\u044c", "action": "close"}]
             markup = list(subscribe_markup) if subscribe_markup else []
             markup.append(close_row)
 
@@ -477,26 +477,28 @@ class LoaderMod(loader.Module):
             with contextlib.suppress(Exception):
                 chat = utils.get_chat_id(message)
 
-            # 1) Same path as Ping/Info: native rich edit (no via@ form)
-            if can_use_rich(self._client, self._db) and chat is not None:
+            # 1) Ping/Info path: native MTProto rich (Premium) — NO buttons
+            #    (buttons force via@ form in utils.answer)
+            if can_use_rich(self._client, self._db):
                 try:
-                    ok = await try_send_rich(
-                        self._client,
-                        chat,
-                        html,
-                        reply_to=getattr(message, "id", None)
-                        if getattr(message, "out", False)
-                        else None,
+                    await utils.answer_with_media_fallback(
+                        message, rich_message=html
                     )
-                    if ok:
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        return True
+                    return True
+                except Exception:
+                    logger.debug("loader native rich failed", exc_info=True)
+                try:
+                    if chat is not None:
+                        ok = await try_send_rich(self._client, chat, html)
+                        if ok:
+                            with contextlib.suppress(Exception):
+                                if getattr(message, "out", False):
+                                    await message.delete()
+                            return True
                 except Exception:
                     logger.debug("loader try_send_rich failed", exc_info=True)
 
-            # 2) via@ rich with Close button
+            # 2) via@ rich / form WITH Close (works without Premium / when native fails)
             if not getattr(self.inline, "init_complete", False) or not getattr(
                 self.inline, "bot_username", None
             ):
@@ -526,7 +528,6 @@ class LoaderMod(loader.Module):
                 except Exception:
                     logger.debug("loader rich via failed", exc_info=True)
 
-            # 3) Classic form with Close (works without Premium)
             try:
                 text_parts = [
                     f"<b>\u2728 Module {html_mod.escape(name)} loaded</b>",
