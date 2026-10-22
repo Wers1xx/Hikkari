@@ -370,21 +370,37 @@ class HikkariConfigMod(loader.Module):
             kwargs.pop(k, None)
 
         if use_rich:
-            # Pure Rich (like RichProbe + help): banner in HTML, buttons as tg-button
+            # Pure Rich: text + tg-buttons. Video banners often break via@
+            # (EXTERNAL_MEDIA / empty caption) — use image thumb only.
             html = self._cfg_rich_html(text, markup)
+            # Drop <video> figures for inline reliability
+            with contextlib.suppress(Exception):
+                import re as _re
+                html = _re.sub(
+                    r"<figure\b[^>]*>\s*<video\b[^>]*>.*?</figure>",
+                    "",
+                    html,
+                    flags=_re.I | _re.S,
+                )
             chat = None
             with contextlib.suppress(Exception):
                 from .. import utils as _u
                 chat = _u.get_chat_id(message)
+            thumb = self._cfg_banner_http()
+            if thumb and any(
+                str(thumb).lower().split("?", 1)[0].endswith(e)
+                for e in (".mp4", ".mov", ".webm", ".mkv", ".m4v")
+            ):
+                thumb = None
             try:
                 m = await self.inline.rich(
                     chat if chat is not None else message,
                     html,
                     title="Hikkari Config",
                     description="Config",
-                    thumbnail_url=self._cfg_banner_http(),
+                    thumbnail_url=thumb,
                     silent=True,
-                    reply_markup=markup,  # unit buttons for callback routing; embedded in HTML
+                    reply_markup=markup,
                 )
                 if m:
                     # Sync input_map / custom_map from the created unit
@@ -407,16 +423,24 @@ class HikkariConfigMod(loader.Module):
             except Exception:
                 _log.debug("cfg rich open failed", exc_info=True)
 
-        # Classic form + optional media banner
+        # Classic form: text first (always readable), optional photo banner second
         form_kw = dict(
-            text=text,
+            text=text or "⚙️ Config",
             message=message,
             reply_markup=markup,
             silent=True,
             force_me=True,
             **kwargs,
         )
+        # Prefer text-only so UI never hangs on media-only shell
+        try:
+            m = await self.inline.form(**form_kw)
+            if m:
+                return m
+        except Exception:
+            _log.debug("cfg form text-only failed", exc_info=True)
         media = self._cfg_banner_kwargs()
+        # photo/gif only — video stripped in _cfg_banner_kwargs
         if media:
             form_kw.update(media)
             try:
@@ -427,8 +451,8 @@ class HikkariConfigMod(loader.Module):
                 _log.debug("cfg form with banner failed", exc_info=True)
             for k in ("photo", "video", "gif", "file", "audio"):
                 form_kw.pop(k, None)
-        with contextlib.suppress(Exception):
-            return await self.inline.form(**form_kw)
+            with contextlib.suppress(Exception):
+                return await self.inline.form(**form_kw)
         return None
 
     def _cfg_banner_kwargs(self) -> dict:
