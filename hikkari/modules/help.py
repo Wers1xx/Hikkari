@@ -790,13 +790,41 @@ class Help(loader.Module):
                 loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
-                # Exact Heroku path — NO tg-button / NO reply_markup.
-                # callback tg-buttons → ButtonTypeInvalidError on user SendMessageRequest → via@ fallback.
-                # «Показать больше» is Telegram client UI for long <details>, not a custom button.
+                # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                await _u.answer_with_media_fallback(
-                    message, rich_message=rich_message
-                )
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                sent = False
+                if getattr(self.inline, "init_complete", False):
+                    with contextlib.suppress(Exception):
+                        from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                        html = to_rich_compatible(
+                            rich_message
+                            + "\n"
+                            + (markup_to_tg_rows(close_mk, "") or "")
+                        )
+                        m = await self.inline.form(
+                            text=str(reply)[:200] or "Hikkari Help",
+                            message=message,
+                            rich_message=html,
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        sent = bool(m)
+                    if not sent:
+                        with contextlib.suppress(Exception):
+                            m = await self.inline.rich(
+                                message,
+                                rich_message,
+                                title="Hikkari Help",
+                                description=str(reply)[:80],
+                                reply_markup=close_mk,
+                                silent=True,
+                            )
+                            sent = bool(m)
+                if not sent:
+                    await _u.answer_with_media_fallback(
+                        message, rich_message=rich_message
+                    )
                 return
             except Exception:
                 logger.exception("Heroku-style rich help failed, fallback")
@@ -894,7 +922,7 @@ class Help(loader.Module):
                         description=text_header[:80],
                         thumbnail_url=banner_url,
                         reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
-                    silent=True,
+                        silent=True,
                         pages=None,
                     )
                     return bool(m)
@@ -983,7 +1011,7 @@ class Help(loader.Module):
                         description=text_header[:80],
                         thumbnail_url=None,
                         reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
-                    silent=True,
+                        silent=True,
                         pages=None,
                         page=0,
                     )
