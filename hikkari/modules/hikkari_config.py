@@ -368,10 +368,8 @@ class HikkariConfigMod(loader.Module):
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
         """Open config UI.
 
-        Mode is fixed for the whole session of the form:
-          rich_mode+Premium → form/rich with tg-buttons (same as later edits)
-          else → classic form + optional photo banner
-        Never open classic then switch to rich on the next click.
+        rich_mode ON  (+ Premium) → ONLY Rich (form/rich + tg-buttons). No classic inline.
+        rich_mode OFF             → ONLY classic form + InlineKeyboard.
         """
         import logging
         import contextlib
@@ -385,7 +383,6 @@ class HikkariConfigMod(loader.Module):
         with contextlib.suppress(Exception):
             use_rich = bool(can_use_rich(self._client, self._db))
 
-        # Callback / already-open form → edit in the same mode
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             return await self._safe_cfg_edit(message, text, reply_markup=markup)
 
@@ -393,7 +390,6 @@ class HikkariConfigMod(loader.Module):
             kwargs.pop(k, None)
 
         plain = (str(text) or "⚙️ Config").strip()
-        # strip tags for plain caption safety
         with contextlib.suppress(Exception):
             plain = self._cfg_plain_from_html(f"<p>{plain}</p>") if "<" in plain else plain
         if not plain:
@@ -409,7 +405,22 @@ class HikkariConfigMod(loader.Module):
                     html,
                     flags=_re.I | _re.S,
                 )
-            # 1) form with rich_message — same surface as later _safe_cfg_edit
+
+            def _stamp(m):
+                with contextlib.suppress(Exception):
+                    uid = getattr(m, "unit_id", None)
+                    if not uid and getattr(self.inline, "_units", None):
+                        uid = next(reversed(self.inline._units), None)
+                    if uid and uid in (self.inline._units or {}):
+                        self.inline._units[uid]["rich_message"] = html
+                        self.inline._units[uid]["rich_html"] = html
+                        self.inline._units[uid]["cfg_rich"] = True
+                        self._cfg_register_markup(
+                            self.inline._units[uid].get("buttons") or markup,
+                            uid,
+                        )
+
+            # 1) form + rich_message (callbacks via reply_markup, UI via tg-button in HTML)
             try:
                 m = await self.inline.form(
                     text=plain[:900],
@@ -420,17 +431,7 @@ class HikkariConfigMod(loader.Module):
                     force_me=True,
                 )
                 if m:
-                    with contextlib.suppress(Exception):
-                        uid = getattr(m, "unit_id", None)
-                        if not uid and getattr(self.inline, "_units", None):
-                            uid = next(reversed(self.inline._units), None)
-                        if uid and uid in (self.inline._units or {}):
-                            self.inline._units[uid]["rich_message"] = html
-                            self.inline._units[uid]["rich_html"] = html
-                            self._cfg_register_markup(
-                                self.inline._units[uid].get("buttons") or markup,
-                                uid,
-                            )
+                    _stamp(m)
                     return m
             except Exception:
                 _log.debug("cfg form rich_message open failed", exc_info=True)
@@ -457,15 +458,7 @@ class HikkariConfigMod(loader.Module):
                     reply_markup=markup,
                 )
                 if m:
-                    with contextlib.suppress(Exception):
-                        uid = getattr(m, "unit_id", None)
-                        if not uid and getattr(self.inline, "_units", None):
-                            uid = next(reversed(self.inline._units), None)
-                        if uid:
-                            self._cfg_register_markup(
-                                self.inline._units[uid].get("buttons") or markup,
-                                uid,
-                            )
+                    _stamp(m)
                     with contextlib.suppress(Exception):
                         if getattr(message, "out", False):
                             await message.delete()
@@ -473,7 +466,24 @@ class HikkariConfigMod(loader.Module):
             except Exception:
                 _log.debug("cfg rich open failed", exc_info=True)
 
-        # Classic form (also fallback if rich open failed)
+            # 3) Retry form without media-ish failures — still rich, never classic
+            try:
+                m = await self.inline.form(
+                    text=plain[:900],
+                    message=message,
+                    rich_message=html,
+                    reply_markup=markup,
+                    silent=True,
+                    force_me=True,
+                )
+                if m:
+                    _stamp(m)
+                    return m
+            except Exception:
+                _log.debug("cfg rich retry failed", exc_info=True)
+            return None
+
+        # ── classic only when rich_mode is OFF ─────────────────────────────
         form_kw = dict(
             text=text or "⚙️ Config",
             message=message,
@@ -1418,7 +1428,7 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _safe_cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Edit config in the SAME mode it was opened (no inline→rich jump)."""
+        """Edit config: rich_mode ON → always Rich; OFF → classic InlineKeyboard."""
         import contextlib
 
         with contextlib.suppress(Exception):
@@ -1431,22 +1441,19 @@ class HikkariConfigMod(loader.Module):
             use_rich = bool(can_use_rich(self._client, self._db))
 
         unit_id = getattr(call, "unit_id", None)
-        unit = {}
-        with contextlib.suppress(Exception):
-            unit = (getattr(self.inline, "_units", None) or {}).get(unit_id) or {}
-        # Stay classic if this unit was opened without rich
-        if unit and unit.get("type") == "form" and not (
-            unit.get("rich_html") or unit.get("rich_message")
-        ):
-            use_rich = False
 
         if use_rich and reply_markup is not None:
             html = self._cfg_rich_html(text, reply_markup, unit_id)
             ok = await self._cfg_edit_rich(call, html)
             if ok:
+                with contextlib.suppress(Exception):
+                    if unit_id and unit_id in (getattr(self.inline, "_units", None) or {}):
+                        self.inline._units[unit_id]["rich_html"] = html
+                        self.inline._units[unit_id]["cfg_rich"] = True
                 return True
-            logger.debug("cfg rich edit failed, classic fallback")
+            logger.debug("cfg rich edit failed, trying classic edit as last resort")
 
+        # Classic path only when rich is off (or rich edit failed hard)
         try:
             return await call.edit(text, reply_markup=reply_markup, **kwargs)
         except Exception:
