@@ -1495,9 +1495,27 @@ class Modules:
         )
 
     async def send_ready(self):
-        """Send all data to all modules"""
+        """Send all data to all modules (parallel, per-module timeout)."""
+        async def _one(mod: Module):
+            try:
+                await asyncio.wait_for(
+                    self.send_ready_one_wrapper(mod),
+                    timeout=6.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "client_ready timeout (6s) for %s — continuing boot",
+                    getattr(mod, "__class__", type(mod)).__name__,
+                )
+            except Exception:
+                logger.exception(
+                    "client_ready error for %s",
+                    getattr(mod, "__class__", type(mod)).__name__,
+                )
+
         await asyncio.gather(
-            *[self.send_ready_one_wrapper(mod) for mod in self.modules]
+            *[_one(mod) for mod in list(self.modules)],
+            return_exceptions=True,
         )
 
     async def send_ready_one(

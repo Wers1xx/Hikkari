@@ -1255,7 +1255,7 @@ class Hikkari:
         await db.init()
         logging.debug("Got DB")
 
-        # Project blacklist (GitHub assets/BlackList.txt)
+        # Project blacklist (GitHub) — hard 2.5s cap so net lag never blocks boot
         try:
             from .blacklist import enforce_blacklist, is_locally_blocked, notify_blocked
             me = getattr(client, "hikkari_me", None)
@@ -1264,11 +1264,21 @@ class Hikkari:
                 with contextlib.suppress(Exception):
                     me = await client.get_me()
                     uid = int(me.id)
-            if uid and (is_locally_blocked(db) or await enforce_blacklist(client, db, user_id=uid)):
+            blocked = bool(uid and is_locally_blocked(db))
+            if uid and not blocked:
+                try:
+                    blocked = await asyncio.wait_for(
+                        enforce_blacklist(client, db, user_id=uid),
+                        timeout=2.5,
+                    )
+                except asyncio.TimeoutError:
+                    logging.warning("blacklist check timed out (2.5s) — continue boot")
+                    blocked = False
+            if blocked:
                 logging.critical("Hikkari blacklist: account %s blocked — exit", uid)
                 with contextlib.suppress(Exception):
                     await notify_blocked(client, uid)
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.2)
                 raise SystemExit(1)
         except SystemExit:
             raise

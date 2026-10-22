@@ -89,7 +89,7 @@ _BL_CACHE_AT: float = 0.0
 _BL_CACHE_TTL = 300.0  # 5 min — avoid network on every restart / loop tick
 
 
-async def fetch_blacklist_ids(timeout: float = 5.0) -> set[int] | None:
+async def fetch_blacklist_ids(timeout: float = 2.0) -> set[int] | None:
     """Fetch union of IDs from mirrors (parallel). Cached briefly in-process."""
     global _BL_CACHE, _BL_CACHE_AT
     now = time.time()

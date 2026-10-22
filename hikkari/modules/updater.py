@@ -1522,11 +1522,14 @@ class UpdaterMod(loader.Module):
                 logger.exception("Failed to complete update!")
 
         if not self.get("do_not_create", False):
-            try:
-                await self._add_folder()
-            except Exception:
-                logger.exception("Failed to add folder!")
-            self.set("do_not_create", True)
+            async def _bg_folder():
+                try:
+                    await self._add_folder()
+                    self.set("do_not_create", True)
+                except Exception:
+                    logger.exception("Failed to add folder!")
+
+            asyncio.ensure_future(_bg_folder())
 
         # Autoupdate disabled by design — no startup prompt
         with contextlib.suppress(Exception):
@@ -1548,15 +1551,19 @@ class UpdaterMod(loader.Module):
             with contextlib.suppress(Exception):
                 self._clear_pre_update()
 
-        with contextlib.suppress(Exception):
-            await self._ensure_preferred_branch()
+        # Git branch restore can take up to 30s — never block ready
+        async def _bg_branch():
+            with contextlib.suppress(Exception):
+                await self._ensure_preferred_branch()
+
+        asyncio.ensure_future(_bg_branch())
 
         with contextlib.suppress(Exception):
             self._notified = self.get("last_notified") or None
 
         async def _boot_poll():
-            # Let UI/restart status settle; fetch is non-blocking (thread)
-            await asyncio.sleep(20)
+            # First update check soon after ready (was 20s — felt like slow boot)
+            await asyncio.sleep(3)
             with contextlib.suppress(Exception):
                 await self.poller()
 
