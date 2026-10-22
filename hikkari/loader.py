@@ -1312,6 +1312,13 @@ class Modules:
 
         instance.allmodules = self
         instance.internal_init()
+        # Guarantee Hikka-compat aliases even if internal_init was overridden
+        if not getattr(instance, "_me", None):
+            me = getattr(self.client, "hikkari_me", None) or getattr(
+                self.client, "hikka_me", None
+            )
+            instance._me = me
+            instance.me = me
 
         for module in self.modules:
             if module.__class__.__name__ == instance.__class__.__name__:

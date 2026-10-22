@@ -715,6 +715,11 @@ class Library:
         self._client = self.allmodules.client
         self.tg_id = self._client.tg_id
         self._tg_id = self._client.tg_id
+        me = getattr(self._client, "hikkari_me", None) or getattr(
+            self._client, "hikka_me", None
+        )
+        self._me = me
+        self.me = me
         self.lookup = self.allmodules.lookup
         self.get_prefix = self.allmodules.get_prefix
         self.get_prefixes = self.allmodules.get_prefixes
