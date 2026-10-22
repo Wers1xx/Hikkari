@@ -775,33 +775,53 @@ class LoaderMod(loader.Module):
                     if self.fully_loaded:
                         self.update_modules_in_db()
         else:
-            await self.inline.list(
-                message,
-                [
-                    self.strings["avail_header"]
-                    + f"\n☁️ {repo.strip('/')}\n\n"
-                    + "\n".join(
-                        [
-                            " | ".join(chunk)
-                            for chunk in utils.chunks(
-                                [
-                                    f"<code>{i}</code>"
-                                    for i in sorted(
-                                        [
-                                            utils.escape_html(
-                                                i.split("/")[-1].split(".")[0]
-                                            )
-                                            for i in mods.values()
-                                        ]
-                                    )
-                                ],
-                                5,
-                            )
-                        ]
+            pages = [
+                self.strings["avail_header"]
+                + f"\n☁️ {repo.strip('/')}\n\n"
+                + "\n".join(
+                    [
+                        " | ".join(chunk)
+                        for chunk in utils.chunks(
+                            [
+                                f"<code>{i}</code>"
+                                for i in sorted(
+                                    [
+                                        utils.escape_html(
+                                            i.split("/")[-1].split(".")[0]
+                                        )
+                                        for i in mods.values()
+                                    ]
+                                )
+                            ],
+                            5,
+                        )
+                    ]
+                )
+                for repo, mods in (await self.get_repo_list()).items()
+            ]
+            close_mk = [[{"text": "🔻 Close", "action": "close"}]]
+            use_rich = False
+            with contextlib.suppress(Exception):
+                from ..utils.rich import can_use_rich
+                use_rich = bool(can_use_rich(self._client, self._db))
+            if use_rich and pages:
+                try:
+                    from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                    body = "<p>" + pages[0].replace("\n", "<br/>") + "</p>"
+                    html = to_rich_compatible(
+                        body + "\n" + (markup_to_tg_rows(close_mk) or "")
                     )
-                    for repo, mods in (await self.get_repo_list()).items()
-                ],
-            )
+                    await self.inline.form(
+                        text=pages[0][:200],
+                        message=message,
+                        rich_message=html,
+                        reply_markup=close_mk,
+                        silent=True,
+                    )
+                except Exception:
+                    await self.inline.list(message, pages)
+            else:
+                await self.inline.list(message, pages)
 
     @loader.command()
     async def dlmall(self, message: Message):
@@ -823,16 +843,43 @@ class LoaderMod(loader.Module):
         buttons.append(
             [
                 {
-                    "text": "⬇️ Close",
+                    "text": "🔻 Close",
                     "action": "close",
                 }
             ]
         )
-        await self.inline.form(
-            self.strings["choose_repo"],
-            message,
-            reply_markup=buttons,
-        )
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(self._client, self._db))
+        if use_rich:
+            try:
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                txt = self.strings["choose_repo"]
+                html = to_rich_compatible(
+                    f"<p>{txt}</p>\n" + (markup_to_tg_rows(buttons) or "")
+                )
+                await self.inline.form(
+                    text=txt[:200],
+                    message=message,
+                    rich_message=html,
+                    reply_markup=buttons,
+                    silent=True,
+                )
+            except Exception:
+                await self.inline.form(
+                    self.strings["choose_repo"],
+                    message,
+                    reply_markup=buttons,
+                    silent=True,
+                )
+        else:
+            await self.inline.form(
+                self.strings["choose_repo"],
+                message,
+                reply_markup=buttons,
+                silent=True,
+            )
 
     async def _inline__install_all_from_repo(
         self,

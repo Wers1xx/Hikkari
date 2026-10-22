@@ -207,18 +207,20 @@ class HikkariConfigMod(loader.Module):
             for btn in row:
                 if not isinstance(btn, dict):
                     continue
-                # CLOSE — fixed id (works without unit match)
+                # CLOSE — unique per unit so multi-config doesn't cross-delete
                 if btn.get("action") == "close":
                     btn["callback"] = im._close_unit_handler
                     btn["disable_security"] = True
                     btn["force_me"] = True
-                    btn["_callback_data"] = "hcfg|close"
+                    close_data = f"hcfg|c|{unit_id}"
+                    btn["_callback_data"] = close_data
+                    btn["data"] = close_data
                     btn.setdefault("args", ())
-                    im._custom_map["hcfg|close"] = {
+                    im._custom_map[close_data] = {
                         "handler": im._close_unit_handler,
                         "always_allow": [],
                         "args": (),
-                        "kwargs": {},
+                        "kwargs": {"unit_id": unit_id},
                         "force_me": True,
                         "disable_security": True,
                         "message": True,
@@ -398,6 +400,20 @@ class HikkariConfigMod(loader.Module):
 
         # Photo/gif only — video as form media is slow / empty caption
         media = self._cfg_banner_kwargs() or {}
+        if not media:
+            # Always show something on first open (video banner_url → default photo)
+            with contextlib.suppress(Exception):
+                from pathlib import Path as _P
+                p = utils.ensure_builtin_asset("hikkari-config.jpg")
+                if p and _P(str(p)).is_file():
+                    media = {"photo": str(p)}
+                else:
+                    u = self._cfg_banner_http()
+                    if u and not any(
+                        str(u).lower().split("?", 1)[0].endswith(e)
+                        for e in (".mp4", ".mov", ".webm", ".mkv")
+                    ):
+                        media = {"photo": u}
 
         if use_rich:
             html = self._cfg_rich_html(text, markup)

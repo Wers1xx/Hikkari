@@ -352,12 +352,45 @@ class HikkariFindMod(loader.Module):
                 }
             )
         rows = [nav, [{"text": self.strings["close_btn"], "action": "close"}]]
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(self._client, self._db))
+
         if edit and hasattr(message_or_call, "edit"):
             try:
-                await message_or_call.edit(text, reply_markup=rows)
+                if use_rich:
+                    from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                    import html as html_mod
+                    body = text if "<" in str(text) else f"<p>{text}</p>"
+                    html = to_rich_compatible(body + "\n" + (markup_to_tg_rows(rows) or ""))
+                    await message_or_call.edit(
+                        text=str(text)[:200],
+                        rich_message=html,
+                        reply_markup=rows,
+                    )
+                else:
+                    await message_or_call.edit(text, reply_markup=rows)
                 return
             except Exception:
                 logger.debug("find page edit failed", exc_info=True)
+
+        if use_rich:
+            try:
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                body = text if "<" in str(text) else f"<p>{text}</p>"
+                html = to_rich_compatible(body + "\n" + (markup_to_tg_rows(rows) or ""))
+                await self.inline.form(
+                    text=str(text)[:200] if text else "HikkariFind",
+                    message=message_or_call,
+                    rich_message=html,
+                    reply_markup=rows,
+                    silent=True,
+                )
+                return
+            except Exception:
+                logger.debug("find rich form failed", exc_info=True)
+
         await self.inline.form(
             text, message=message_or_call, reply_markup=rows, silent=True
         )

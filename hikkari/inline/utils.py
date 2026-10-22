@@ -371,8 +371,8 @@ class Utils(InlineUnit):
 
 
 
-    async def _close_unit_handler(self: "InlineManager", call: InlineCall):
-        """Close form/list/rich: answer + DELETE (or ✖️ edit for via@)."""
+    async def _close_unit_handler(self: "InlineManager", call: InlineCall, unit_id: str | None = None):
+        """Close form/list/rich: answer + DELETE only THIS message/unit."""
         with contextlib.suppress(Exception):
             await call.answer()
 
@@ -388,17 +388,21 @@ class Utils(InlineUnit):
             if len(self._closed_imids) > 64:
                 self._closed_imids = set(list(self._closed_imids)[-32:])
 
-        unit_id = getattr(call, "unit_id", None)
+        # Prefer explicit unit_id from callback kwargs / data (multi-config safe)
+        if not unit_id:
+            unit_id = getattr(call, "unit_id", None)
+        if not unit_id:
+            with contextlib.suppress(Exception):
+                raw = getattr(call, "data", None)
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", "ignore")
+                if isinstance(raw, str) and raw.startswith("hcfg|c|"):
+                    unit_id = raw.split("|", 2)[-1] or None
         imid = getattr(call, "inline_message_id", None)
         units = getattr(self, "_units", None) or {}
 
-        # Resolve unit: by id, by sticky cfg unit, by imid, or last form
+        # Resolve unit: by id, by imid — NEVER fall back to "last form" (cross-delete)
         unit = units.get(unit_id) if unit_id else None
-        if unit is None:
-            cfg_uid = getattr(self, "_cfg_unit_id", None)
-            if cfg_uid and cfg_uid in units:
-                unit_id = cfg_uid
-                unit = units[cfg_uid]
         if unit is None and imid is not None:
             imid_s = str(imid)
             for uid, u in units.items():
@@ -411,12 +415,7 @@ class Utils(InlineUnit):
                     unit_id = uid
                     unit = u
                     break
-        if unit is None:
-            for uid, u in reversed(list(units.items())):
-                if isinstance(u, dict) and u.get("type") in ("form", "rich", None):
-                    unit_id = uid
-                    unit = u
-                    break
+        # no cross-unit fallback — close only the pressed message
 
         chat = None
         msg_id = None

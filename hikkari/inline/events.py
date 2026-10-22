@@ -481,7 +481,7 @@ class Events(InlineUnit):
 
 
         # Config close (tg-button callback_data fixed)
-        if isinstance(call_data, str) and call_data.strip() == "hcfg|close":
+        if isinstance(call_data, str) and call_data.strip() == "hcfg|close" or call_data.strip().startswith("hcfg|c|"):
             with contextlib.suppress(Exception):
                 await call.answer()
             icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
