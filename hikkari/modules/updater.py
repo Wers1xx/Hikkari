@@ -1010,9 +1010,28 @@ class UpdaterMod(loader.Module):
             r = subprocess.run(
                 cmd,
                 check=False,
-                timeout=600,
+                timeout=180,
                 capture_output=True,
             )
+            # Force latest hikkaritl (PyPI) every update
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "-q",
+                        "--disable-pip-version-check",
+                        "--prefer-binary",
+                        *([] if not use_user else ["--user"]),
+                        "hikkaritl>=1.1.7",
+                    ],
+                    check=False,
+                    timeout=120,
+                    capture_output=True,
+                )
             if r.returncode != 0:
                 err = ((r.stderr or r.stdout) or b"").decode(errors="ignore")
                 logger.error(

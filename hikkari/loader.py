@@ -881,7 +881,9 @@ class Modules:
             return []
 
         # Parallel load (Heroku-style speed): bound concurrency, lock registration
-        sem = asyncio.Semaphore(8)
+        import os as _os
+        _par = 16 if _os.environ.get("HIKKARI_FAST_START") else 8
+        sem = asyncio.Semaphore(_par)
         lock = asyncio.Lock()
         loaded: list = []
         failed: list = []
@@ -1503,15 +1505,17 @@ class Modules:
 
     async def send_ready(self):
         """Send all data to all modules (parallel, per-module timeout)."""
+        import os as _os
+        _to = 2.5 if _os.environ.get("HIKKARI_FAST_START") else 6.0
         async def _one(mod: Module):
             try:
                 await asyncio.wait_for(
                     self.send_ready_one_wrapper(mod),
-                    timeout=6.0,
+                    timeout=_to,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "client_ready timeout (6s) for %s — continuing boot",
+                    "client_ready timeout for %s — continuing boot",
                     getattr(mod, "__class__", type(mod)).__name__,
                 )
             except Exception:

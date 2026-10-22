@@ -1325,7 +1325,7 @@ class Hikkari:
             lambda t: t.exception() if not t.cancelled() and t.exception() else None
         )
 
-        if first:
+        if first and not os.environ.get("HIKKARI_FAST_START"):
             await self._badge(client)
 
         await client.run_until_disconnected()
