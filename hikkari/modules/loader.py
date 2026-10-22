@@ -449,7 +449,10 @@ class LoaderMod(loader.Module):
 
             ver = f" (v{version})" if version else ""
             # Official Rich HTML (Bot API 10.1 rich message formatting)
-            parts = [f"<h2>{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"]
+            parts = [
+                f'<h2><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> '
+                f"{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"
+            ]
             if desc:
                 parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
             if clean_rows:
@@ -590,10 +593,13 @@ class LoaderMod(loader.Module):
                 except Exception as e:
                     logger.warning("loader inline.rich failed: %s", e)
 
-                # form(rich_message=) same as config
+                # form(rich_message=) — text must be real content (not single emoji)
                 try:
+                    plain_fb = f"✅ Module {name} loaded"
+                    if desc:
+                        plain_fb = plain_fb + "\n" + desc[:200]
                     m = await self.inline.form(
-                        text="\u2728",
+                        text=plain_fb,
                         message=message if getattr(message, "out", False) else target,
                         rich_message=html_via,
                         reply_markup=markup,
@@ -608,7 +614,7 @@ class LoaderMod(loader.Module):
             # ── 4) Classic form ─────────────────────────────────────────────
             try:
                 text_parts = [
-                    f"<b>\u2728 Module {html_mod.escape(name)} loaded</b>",
+                    f'<b><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> Module {html_mod.escape(name)} loaded</b>',
                 ]
                 if desc:
                     text_parts.append(f"<i>{html_mod.escape(desc)}</i>")

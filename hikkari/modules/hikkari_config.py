@@ -290,16 +290,35 @@ class HikkariConfigMod(loader.Module):
             html = html.rstrip() + "\n" + btn_html
         return html
 
-    async def _cfg_edit_rich(self, call, html: str) -> bool:
-        """editMessageText with rich_message (Bot API) — same idea as RichProbe."""
-        import aiohttp
+    def _cfg_plain_from_html(self, html: str) -> str:
+        """Visible fallback text when client ignores rich_message (never leave ⚙️ alone)."""
+        import re as _re
+        import html as _html
+        s = str(html or "")
+        s = _re.sub(r"<tg-button-row\b[^>]*>.*?</tg-button-row>", "", s, flags=_re.I | _re.S)
+        s = _re.sub(r"<tg-button\b[^>]*>.*?</tg-button>", "", s, flags=_re.I | _re.S)
+        s = _re.sub(r"<figure\b[^>]*>.*?</figure>", "", s, flags=_re.I | _re.S)
+        s = _re.sub(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", r"\1", s, flags=_re.I | _re.S)
+        s = _re.sub(r"<emoji\b[^>]*>(.*?)</emoji>", r"\1", s, flags=_re.I | _re.S)
+        s = _re.sub(r"<br\s*/?>", "\n", s, flags=_re.I)
+        s = _re.sub(r"</p>", "\n", s, flags=_re.I)
+        s = _re.sub(r"<[^>]+>", "", s)
+        s = _html.unescape(s)
+        s = _re.sub(r"[ \t]+", " ", s)
+        s = _re.sub(r"\n{3,}", "\n\n", s).strip()
+        return (s[:900] if s else "⚙️ Config")
 
+    async def _cfg_edit_rich(self, call, html: str) -> bool:
+        """editMessageText with rich_message; text= is always real content (not ⚙️)."""
+        import aiohttp
+        import contextlib as _cx
+
+        plain = self._cfg_plain_from_html(html)
         token = None
         for path in (
             lambda: getattr(self.inline, "_token", None),
             lambda: getattr(getattr(self.inline, "bot", None), "token", None),
         ):
-            import contextlib as _cx
             with _cx.suppress(Exception):
                 tkn = path()
                 if tkn and ":" in str(tkn):
@@ -309,10 +328,11 @@ class HikkariConfigMod(loader.Module):
         chat_id = getattr(call, "chat_id", None)
         msg_id = getattr(call, "message_id", None)
         payload = {
+            "text": plain,
             "rich_message": {
                 "html": html,
                 "skip_entity_detection": True,
-            }
+            },
         }
         if imid is not None:
             payload["inline_message_id"] = str(imid)
@@ -320,17 +340,15 @@ class HikkariConfigMod(loader.Module):
             payload["chat_id"] = int(chat_id)
             payload["message_id"] = int(msg_id)
         else:
-            try:
-                await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+            with _cx.suppress(Exception):
+                await call.edit(text=plain, rich_message=html, reply_markup=[])
                 return True
-            except Exception:
-                return False
+            return False
         if not token:
-            try:
-                await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+            with _cx.suppress(Exception):
+                await call.edit(text=plain, rich_message=html, reply_markup=[])
                 return True
-            except Exception:
-                return False
+            return False
         url = f"https://api.telegram.org/bot{token}/editMessageText"
         try:
             timeout = aiohttp.ClientTimeout(total=15)
@@ -342,9 +360,8 @@ class HikkariConfigMod(loader.Module):
                     logger.debug("cfg editMessageText rich failed: %s", data)
         except Exception:
             logger.debug("cfg editMessageText request failed", exc_info=True)
-        import contextlib as _cx
         with _cx.suppress(Exception):
-            await call.edit(text="⚙️", rich_message=html, reply_markup=[])
+            await call.edit(text=plain, rich_message=html, reply_markup=[])
             return True
         return False
 
@@ -369,7 +386,10 @@ class HikkariConfigMod(loader.Module):
         for k in ("photo", "video", "gif", "file", "audio", "rich_message"):
             kwargs.pop(k, None)
 
-        if use_rich:
+        # Initial open (Message): classic form first so text always appears.
+        # Broken via@ rich previously left only ⚙️ / media shell.
+        # Rich + tg-buttons are applied on later edits via _safe_cfg_edit.
+        if False and use_rich:
             # Pure Rich: text + tg-buttons. Video banners often break via@
             # (EXTERNAL_MEDIA / empty caption) — use image thumb only.
             html = self._cfg_rich_html(text, markup)
