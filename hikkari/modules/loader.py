@@ -397,47 +397,25 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Announce module load as via@ Rich (same as Help/Info when possible).
-
-        Always tries inline.rich when the bot is ready — do not depend only on
-        Premium gate (via@ works in Saved Messages / chats with bot).
-        Target chat by id so we never edit the .py document message.
-        """
+        """Announce module load like Ping/Info: edit message (rich) + Close button."""
         try:
+            from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
                 html_table,
                 strip_external_media_for_inline,
                 try_send_rich,
                 to_rich_compatible,
+                inject_banner_html,
             )
             import html as html_mod
-
-            if not getattr(self.inline, "init_complete", False) or not getattr(
-                self.inline, "bot_username", None
-            ):
-                with contextlib.suppress(Exception):
-                    if hasattr(self.inline, "ensure_inline_ready"):
-                        await self.inline.ensure_inline_ready()
-                    else:
-                        await self.inline.register_manager(ignore_token_checks=True)
-
-            if not getattr(self.inline, "bot_username", None):
-                logger.debug("loader rich: no inline bot")
-                return False
 
             name = self._plain_cmd_doc(modname, str(modname))[:64]
             desc = self._plain_cmd_doc(mod_doc, "")[:300]
             dev_plain = self._plain_cmd_doc(developer, "")
             dev_plain = re.sub(r"\s+", " ", dev_plain).strip()
             for junk in (
-                "Developer:",
-                "Developers:",
-                "Разработчик:",
-                "Разработчики:",
-                "Entwickler:",
-                "開発者:",
-                "Dev:",
-                "D3v:",
+                "Developer:", "Developers:", "Разработчик:", "Разработчики:",
+                "Entwickler:", "開発者:", "Dev:", "D3v:",
             ):
                 if dev_plain.lower().startswith(junk.lower()):
                     dev_plain = dev_plain[len(junk) :].strip()
@@ -466,10 +444,8 @@ class LoaderMod(loader.Module):
             if desc:
                 parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
             if clean_rows:
-                # details-friendly table
                 parts.append(html_table(clean_rows, header=("Command", "Description")))
             if dev_plain:
-                # clickable developer(s)
                 linked = self._linkify_developer(dev_plain[:120])
                 parts.append(f"<p>\u2764\ufe0f Developer: {linked}</p>")
             if origin_url:
@@ -483,76 +459,105 @@ class LoaderMod(loader.Module):
             html = "\n".join(parts)
             with contextlib.suppress(Exception):
                 html = to_rich_compatible(html)
-            html = strip_external_media_for_inline(html)
-
-            title = f"\u2713 {name}"[:64]
-            description = (desc[:80] if desc else "Module loaded")
             thumb = (
                 meta_banner
                 if meta_banner and str(meta_banner).startswith(("http://", "https://"))
                 else None
             )
+            if thumb:
+                with contextlib.suppress(Exception):
+                    html = inject_banner_html(html, thumb, force=True)
+            html_inline = strip_external_media_for_inline(html)
 
-            # Always target chat id — never the document message itself
-            try:
+            close_row = [{"text": "🔻 Закрыть", "action": "close"}]
+            markup = list(subscribe_markup) if subscribe_markup else []
+            markup.append(close_row)
+
+            chat = None
+            with contextlib.suppress(Exception):
                 chat = utils.get_chat_id(message)
-            except Exception:
-                chat = None
-            target = chat if chat is not None else message
 
-            m = None
-            try:
-                m = await self.inline.rich(
-                    target,
-                    html,
-                    title=title,
-                    description=description,
-                    silent=True,
-                    reply_markup=None,
-                    thumbnail_url=thumb,
-                )
-            except Exception:
-                logger.debug("loader rich via failed", exc_info=True)
-            if not m:
-                await asyncio.sleep(0.4)
+            # 1) Same path as Ping/Info: native rich edit (no via@ form)
+            if can_use_rich(self._client, self._db) and chat is not None:
                 try:
-                    m = await self.inline.rich(
-                        target,
+                    ok = await try_send_rich(
+                        self._client,
+                        chat,
                         html,
-                        title=title,
-                        description=description,
-                        silent=True,
-                        reply_markup=None,
-                        thumbnail_url=thumb,
+                        reply_to=getattr(message, "id", None)
+                        if getattr(message, "out", False)
+                        else None,
                     )
-                except Exception:
-                    logger.debug("loader rich via retry failed", exc_info=True)
-
-            if m:
-                if isinstance(message, Message) and getattr(message, "out", False):
-                    with contextlib.suppress(Exception):
-                        await message.delete()
-                return True
-
-            # Bot API sendRichMessage fallback
-            if chat is not None:
-                try:
-                    ok = await try_send_rich(self._client, chat, html)
                     if ok:
-                        if isinstance(message, Message) and getattr(
-                            message, "out", False
-                        ):
-                            with contextlib.suppress(Exception):
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
                                 await message.delete()
                         return True
                 except Exception:
                     logger.debug("loader try_send_rich failed", exc_info=True)
-            return False
+
+            # 2) via@ rich with Close button
+            if not getattr(self.inline, "init_complete", False) or not getattr(
+                self.inline, "bot_username", None
+            ):
+                with contextlib.suppress(Exception):
+                    if hasattr(self.inline, "ensure_inline_ready"):
+                        await self.inline.ensure_inline_ready()
+                    else:
+                        await self.inline.register_manager(ignore_token_checks=True)
+
+            if getattr(self.inline, "bot_username", None):
+                target = chat if chat is not None else message
+                try:
+                    m = await self.inline.rich(
+                        target,
+                        html_inline,
+                        title=f"\u2713 {name}"[:64],
+                        description=(desc[:80] if desc else "Module loaded"),
+                        silent=True,
+                        reply_markup=markup,
+                        thumbnail_url=thumb,
+                    )
+                    if m:
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False) and message != m:
+                                await message.delete()
+                        return True
+                except Exception:
+                    logger.debug("loader rich via failed", exc_info=True)
+
+            # 3) Classic form with Close (works without Premium)
+            try:
+                text_parts = [
+                    f"<b>\u2728 Module {html_mod.escape(name)} loaded</b>",
+                ]
+                if desc:
+                    text_parts.append(f"<i>{html_mod.escape(desc)}</i>")
+                if clean_rows:
+                    cmds = "\n".join(
+                        f"<code>{c}</code> — {d}" for c, d in clean_rows[:20]
+                    )
+                    text_parts.append(f"<blockquote expandable>{cmds}</blockquote>")
+                if dev_plain:
+                    text_parts.append(
+                        f"\u2764\ufe0f Developer: {self._linkify_developer(dev_plain[:120])}"
+                    )
+                form_text = "\n".join(text_parts)
+                if getattr(self.inline, "init_complete", False):
+                    m = await self.inline.form(
+                        form_text,
+                        message=message if getattr(message, "out", False) else (chat or message),
+                        reply_markup=markup,
+                        silent=True,
+                    )
+                    if m:
+                        return True
+            except Exception:
+                logger.debug("loader form fallback failed", exc_info=True)
+
         except Exception:
             logger.debug("loader rich single failed", exc_info=True)
-            return False
-
-
+        return False
 
     async def _announce_module_loaded(
         self,
@@ -2283,15 +2288,21 @@ class LoaderMod(loader.Module):
         except Exception:
             logger.debug("rich announce failed", exc_info=True)
 
-        # Prefer a FRESH HTML message (editing a .py document caption often
-        # shows raw <a> tags and looks like "file + text under it").
+        # Classic / form fallback with Close under commands
         text = loaded_msg()
+        close_mk = list(subscribe_markup) if subscribe_markup else []
+        close_mk.append([{"text": "🔻 Закрыть", "action": "close"}])
         sent = False
         try:
-            chat = utils.get_chat_id(message)
-            kw = {"link_preview": False, "parse_mode": "HTML"}
-            if subscribe_markup:
-                # reply_markup for client messages needs different shape — use answer
+            if getattr(self.inline, "init_complete", False):
+                m = await self.inline.form(
+                    text,
+                    message=message if getattr(message, "out", False) else utils.get_chat_id(message),
+                    reply_markup=close_mk,
+                    silent=True,
+                )
+                sent = bool(m)
+            if not sent:
                 await utils.answer(
                     message,
                     text,
@@ -2299,12 +2310,6 @@ class LoaderMod(loader.Module):
                     skip_rich=True,
                 )
                 sent = True
-            else:
-                m = await self._client.send_message(chat, text, **kw)
-                sent = bool(m)
-                if sent and isinstance(message, Message) and getattr(message, "out", False):
-                    with contextlib.suppress(Exception):
-                        await message.delete()
         except MediaCaptionTooLongError:
             with contextlib.suppress(Exception):
                 await self._announce_module_loaded(message, loaded_msg(False))

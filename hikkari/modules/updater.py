@@ -23,6 +23,7 @@ from pathlib import Path
 import contextlib
 import errno
 import json
+import contextlib
 import logging
 import os
 import os
@@ -362,25 +363,24 @@ class UpdaterMod(loader.Module):
                 pass
 
     async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
-        """Notify owner via inline bot, fallback to user client."""
+        """Notify owner ONLY via inline bot (never Saved Messages / user client)."""
         markup = reply_markup
         bot = getattr(getattr(self, "inline", None), "bot", None)
-        if bot is not None:
-            try:
-                kw = {"disable_web_page_preview": True}
-                if markup is not None:
-                    kw["reply_markup"] = markup
-                return await bot.send_message(self.tg_id, text, **kw)
-            except Exception:
-                logger.debug("bot notify failed", exc_info=True)
+        if bot is None:
+            with contextlib.suppress(Exception):
+                if hasattr(self.inline, "ensure_inline_ready"):
+                    await self.inline.ensure_inline_ready()
+                bot = getattr(self.inline, "bot", None)
+        if bot is None:
+            logger.warning("update notify skipped: no inline bot")
+            return None
         try:
-            return await self._client.send_message(
-                self.tg_id,
-                text,
-                link_preview=False,
-            )
+            kw = {"disable_web_page_preview": True}
+            if markup is not None:
+                kw["reply_markup"] = markup
+            return await bot.send_message(self.tg_id, text, **kw)
         except Exception:
-            logger.warning("owner notify failed", exc_info=True)
+            logger.warning("bot update notify failed", exc_info=True)
             return None
 
     @loader.loop(interval=60, autostart=True)

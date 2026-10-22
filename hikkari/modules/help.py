@@ -512,6 +512,7 @@ class Help(loader.Module):
                         :80
                     ],
                     thumbnail_url=burl,
+                    reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
                     silent=True,
                 )
                 if m:
@@ -892,7 +893,8 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        silent=True,
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                    silent=True,
                         pages=None,
                     )
                     return bool(m)
@@ -980,7 +982,8 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        silent=True,
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                    silent=True,
                         pages=None,
                         page=0,
                     )
