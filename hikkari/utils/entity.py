@@ -17,6 +17,7 @@
 # 🔑 https://www.gnu.org/licenses/agpl-3.0.html
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import random
@@ -500,6 +501,47 @@ async def wait_for_content_channel(
     return None
 
 
+def _channel_title_candidates(db: "Database") -> list[str]:
+    """Possible forums_cache keys for this account's content channel."""
+    keys: list[str] = []
+    with contextlib.suppress(Exception):
+        tg = int(getattr(getattr(db, "_client", None), "tg_id", 0) or 0)
+        if tg:
+            keys.append(f"hikkari-{tg}")
+    keys.append("hikkari-userbot")
+    # any keys already in cache
+    with contextlib.suppress(Exception):
+        cache = db.get("hikkari.forums", "forums_cache", {}) or {}
+        if isinstance(cache, dict):
+            for k in cache.keys():
+                if k not in keys:
+                    keys.append(k)
+    return keys
+
+
+def resolve_topic_id(db: "Database", topic_name: str) -> int | None:
+    """Find topic id under any known channel-title key in forums_cache."""
+    try:
+        forums_cache = db.get("hikkari.forums", "forums_cache", {}) or {}
+        if not isinstance(forums_cache, dict):
+            return None
+        for key in _channel_title_candidates(db):
+            bucket = forums_cache.get(key)
+            if isinstance(bucket, dict) and topic_name in bucket:
+                tid = bucket[topic_name]
+                if tid is not None:
+                    return int(tid)
+        # last resort: scan all buckets
+        for bucket in forums_cache.values():
+            if isinstance(bucket, dict) and topic_name in bucket:
+                tid = bucket[topic_name]
+                if tid is not None:
+                    return int(tid)
+    except Exception:
+        return None
+    return None
+
+
 async def get_topic_id(db: "Database", topic_name: str) -> int | None:
     """
     Get forum topic ID from database
@@ -507,11 +549,34 @@ async def get_topic_id(db: "Database", topic_name: str) -> int | None:
     :param topic_name: Topic name (e.g., "Assets", "Logs", "Backups")
     :return: Topic ID or None if not found
     """
-    try:
-        forums_cache = db.get("hikkari.forums", "forums_cache", {})
-        return forums_cache.get("hikkari-userbot", {}).get(topic_name)
-    except Exception:
-        return None
+    return resolve_topic_id(db, topic_name)
+
+
+STANDARD_FORUM_TOPICS = (
+    ("Logs", "📊 Inline logs and error reports will be stored here", 5877307202888273539),
+    ("Assets", "🌆 Your Hikkari assets will be stored here", 5877307202888273539),
+    ("Backups", "💾 Your Hikkari backups will be stored here", 5877307202888273539),
+)
+
+
+async def ensure_standard_forum_topics(
+    client: CustomTelegramClient,
+    db: "Database",
+    peer,
+) -> None:
+    """Create Logs / Assets / Backups topics if missing."""
+    for title, desc, emoji in STANDARD_FORUM_TOPICS:
+        try:
+            await asset_forum_topic(
+                client=client,
+                db=db,
+                peer=peer,
+                title=title,
+                description=desc,
+                icon_emoji_id=emoji,
+            )
+        except Exception:
+            logger.exception("Failed to ensure forum topic %r", title)
 
 
 async def set_avatar(

@@ -199,6 +199,27 @@ class Database(dict):
 
             self.set("hikkari.forums", "channel_id", int(content_channel.id))
 
+        # Ensure forum mode + standard topics (Logs / Assets / Backups)
+        if content_channel is not None:
+            try:
+                # Convert to forum if needed
+                if not getattr(content_channel, "forum", False):
+                    from hikkaritl.tl.functions.channels import ToggleForumRequest
+                    with contextlib.suppress(Exception):
+                        await self._client(
+                            ToggleForumRequest(channel=content_channel, enabled=True)
+                        )
+                        content_channel = await self._client.get_entity(content_channel)
+                self.set("hikkari.forums", "forum_id", int(content_channel.id))
+                from .utils.entity import ensure_standard_forum_topics
+                await ensure_standard_forum_topics(
+                    self._client, self, content_channel
+                )
+            except Exception:
+                logger.exception(
+                    "ensure_content_channel: failed to create forum topics"
+                )
+
         return content_channel
 
     def read(self):
@@ -358,11 +379,9 @@ class Database(dict):
         returns asset_id as integer
         """
 
-        try:
-            _assets_topic_id = self.get("hikkari.forums", "forums_cache", {})[
-                "hikkari-userbot"
-            ]["Assets"]
-        except (TypeError, KeyError):
+        from .utils.entity import resolve_topic_id
+        _assets_topic_id = resolve_topic_id(self, "Assets")
+        if not _assets_topic_id:
             raise NoAssetsChannel("Tried to save asset to non-existing asset topic.")
 
         if not (_content_channel_id := self.get("hikkari.forums", "channel_id", None)):
@@ -395,11 +414,9 @@ class Database(dict):
                 "Tried to save asset with non-existing content channel."
             )
 
-        try:
-            _assets_topic_id = self.get("hikkari.forums", "forums_cache", {})[
-                "hikkari-userbot"
-            ]["Assets"]
-        except (TypeError, KeyError):
+        from .utils.entity import resolve_topic_id
+        _assets_topic_id = resolve_topic_id(self, "Assets")
+        if not _assets_topic_id:
             raise NoAssetsChannel("Tried to save asset to non-existing asset topic.")
 
         asset = await self._client.get_messages(

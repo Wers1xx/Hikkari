@@ -58,12 +58,18 @@ class Quickstart(loader.Module):
                     )
                     content_channel = None
                     self.db.set(
-                        "hikkari.forums", "forums_cache", {"hikkari-userbot": {}}
+                        "hikkari.forums", "forums_cache", {}
                     )
 
             if not content_channel:
                 async for dialog in self.client.iter_dialogs():
-                    if dialog.title and "hikkari-userbot" in dialog.title.lower():
+                    _tg = int(getattr(self.client, "tg_id", 0) or 0)
+                    _titles = {f"hikkari-{_tg}" if _tg else "", "hikkari-userbot"}
+                    if dialog.title and (
+                        dialog.title.lower() in {t.lower() for t in _titles if t}
+                        or "hikkari-userbot" in dialog.title.lower()
+                        or ( _tg and f"hikkari-{_tg}" in dialog.title.lower())
+                    ):
                         content_channel = dialog.entity
                         logger.debug(
                             "Found existing channel '%s' with ID %s",
@@ -123,6 +129,11 @@ class Quickstart(loader.Module):
                         forum_entity = content_channel
 
                 required_topics = [
+                    (
+                        "Logs",
+                        "📊 Inline logs and error reports will be stored here",
+                        5877307202888273539,
+                    ),
                     (
                         "Assets",
                         "🌆 Your Hikkari assets will be stored here",
