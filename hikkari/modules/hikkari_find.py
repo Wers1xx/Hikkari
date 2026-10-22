@@ -357,6 +357,14 @@ class HikkariFindMod(loader.Module):
             from ..utils.rich import can_use_rich
             use_rich = bool(can_use_rich(self._client, self._db))
 
+        if use_rich:
+            with contextlib.suppress(Exception):
+                uid = getattr(message_or_call, "unit_id", None)
+                if uid and uid in (getattr(self.inline, "_units", None) or {}):
+                    self.inline._units[uid]["buttons"] = rows
+                    self.inline.generate_markup(uid)
+                    rows = self.inline._units[uid].get("buttons") or rows
+
         if edit and hasattr(message_or_call, "edit"):
             try:
                 if use_rich:
@@ -369,7 +377,7 @@ class HikkariFindMod(loader.Module):
                     await message_or_call.edit(
                         text=str(text)[:200],
                         rich_message=html,
-                        reply_markup=[],
+                        reply_markup=rows,  # unit callbacks; rich edit sends kb=None
                     )
                 else:
                     await message_or_call.edit(text, reply_markup=rows)

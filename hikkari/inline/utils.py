@@ -713,23 +713,25 @@ class Utils(InlineUnit):
                 mid = inline_message_id
                 if mid is None and unit_id in self._units:
                     mid = self._units[unit_id].get("inline_message_id")
-                markup = self.generate_markup(reply_markup) if reply_markup else None
+                # Keep/update unit callbacks; never wipe with []
+                if unit_id and unit_id in self._units and reply_markup:
+                    self._units[unit_id]["buttons"] = reply_markup
+                    with contextlib.suppress(Exception):
+                        self.generate_markup(unit_id)
+                # Rich = tg-buttons in HTML only (no classic InlineKeyboard)
                 if mid and hasattr(self.bot, "edit_rich_message"):
                     await self.bot.edit_rich_message(
                         html=rm if isinstance(rm, str) else None,
                         rich_message=None if isinstance(rm, str) else rm,
                         inline_message_id=mid,
-                        reply_markup=markup,
+                        reply_markup=None,
                     )
                     if unit_id in self._units:
-                        if reply_markup is not None:
-                            self._units[unit_id]["buttons"] = reply_markup
                         if text is not None:
                             self._units[unit_id]["text"] = text
                         if rich_message is not None:
                             self._units[unit_id]["rich_message"] = rm
                         elif text is not None:
-                            # text-only edit cleared stale rich
                             self._units[unit_id].pop("rich_message", None)
                     return True
             except Exception:
