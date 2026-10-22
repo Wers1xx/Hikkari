@@ -957,15 +957,18 @@ class Form(InlineUnit):
                         from ..utils.rich_api import strip_external_media_for_inline
                         rich_value = strip_external_media_for_inline(str(rich_value))
                     except Exception:
+                        # Keep first <figure><img> banner — only drop video/audio
                         import re as _re
+                        def _keep_img_banner(m):
+                            b = m.group(0).lower()
+                            if "<img" in b and "src=" in b:
+                                return m.group(0)
+                            return ""
                         rich_value = _re.sub(
                             r"<figure\b[^>]*>.*?</figure>",
-                            "",
+                            _keep_img_banner,
                             str(rich_value),
                             flags=_re.I | _re.S,
-                        )
-                        rich_value = _re.sub(
-                            r"<img\b[^>]*/?>", "", rich_value, flags=_re.I
                         )
 
                     # 1) Finalize callbacks on unit buttons (must be before embed)

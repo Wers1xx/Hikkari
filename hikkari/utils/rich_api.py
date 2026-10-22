@@ -748,9 +748,22 @@ async def answer_inline_rich(
         return True
     logger.warning("answerInlineQuery(rich) failed: %s", err)
 
-    # 2) EXTERNAL_MEDIA / media issues → strip media, retry once
+    # 2) EXTERNAL_MEDIA → drop video/audio only, keep <img> banner
     if "EXTERNAL_MEDIA" in err.upper() or "MEDIA" in err.upper():
-        stripped = strip_external_media_for_inline(html)
+        import re as _re
+        stripped = _re.sub(
+            r"<figure\b[^>]*>\s*<video\b[^>]*>.*?</figure>",
+            "",
+            html,
+            flags=_re.I | _re.S,
+        )
+        stripped = _re.sub(
+            r"<audio\b[^>]*>.*?</audio>",
+            "",
+            stripped,
+            flags=_re.I | _re.S,
+        )
+        stripped = strip_external_media_for_inline(stripped)
         if stripped and stripped != html:
             ok2, err2 = await _post(stripped, None, rid_suffix="_nm")
             if ok2:

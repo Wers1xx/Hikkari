@@ -454,6 +454,14 @@ class HikkariConfigMod(loader.Module):
                                 self.inline._units[uid].get("buttons") or markup,
                                 uid,
                             )
+                    # Re-apply rich with figure — first via@ answer often strips media
+                    async def _banner_touch():
+                        import asyncio as _aio
+                        await _aio.sleep(0.35)
+                        with contextlib.suppress(Exception):
+                            await self._cfg_edit_rich(m, html)
+                    import asyncio as _aio
+                    _aio.ensure_future(_banner_touch())
                     return m
             except Exception:
                 _log.debug("cfg rich form open failed", exc_info=True)
@@ -497,10 +505,10 @@ class HikkariConfigMod(loader.Module):
         from urllib.parse import urlparse
 
         def _default() -> dict:
-            p = utils.ensure_builtin_asset("hikkari-config.jpg")
-            if p and _P(str(p)).is_file():
-                return {"photo": str(p)}
-            return {}
+            # Prefer public HTTP so via@ rich figure works (local path → no figure)
+            return {
+                "photo": "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
+            }
 
         def _by_ref(s: str) -> dict:
             low = s.lower().split("?", 1)[0]

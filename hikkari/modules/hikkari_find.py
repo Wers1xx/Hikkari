@@ -361,13 +361,15 @@ class HikkariFindMod(loader.Module):
             try:
                 if use_rich:
                     from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                    import html as html_mod
                     body = text if "<" in str(text) else f"<p>{text}</p>"
-                    html = to_rich_compatible(body + "\n" + (markup_to_tg_rows(rows) or ""))
+                    # tg-buttons only in HTML — empty reply_markup avoids double keyboard
+                    html = to_rich_compatible(
+                        body + "\n" + (markup_to_tg_rows(rows, "") or "")
+                    )
                     await message_or_call.edit(
                         text=str(text)[:200],
                         rich_message=html,
-                        reply_markup=rows,
+                        reply_markup=[],
                     )
                 else:
                     await message_or_call.edit(text, reply_markup=rows)
@@ -379,7 +381,11 @@ class HikkariFindMod(loader.Module):
             try:
                 from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
                 body = text if "<" in str(text) else f"<p>{text}</p>"
-                html = to_rich_compatible(body + "\n" + (markup_to_tg_rows(rows) or ""))
+                html = to_rich_compatible(
+                    body + "\n" + (markup_to_tg_rows(rows, "") or "")
+                )
+                # form still needs reply_markup for callback map; form.py embeds
+                # tg-buttons and answers with buttons=None when rich succeeds
                 await self.inline.form(
                     text=str(text)[:200] if text else "HikkariFind",
                     message=message_or_call,
