@@ -775,53 +775,119 @@ class LoaderMod(loader.Module):
                     if self.fully_loaded:
                         self.update_modules_in_db()
         else:
-            pages = [
-                self.strings["avail_header"]
-                + f"\n☁️ {repo.strip('/')}\n\n"
-                + "\n".join(
-                    [
-                        " | ".join(chunk)
-                        for chunk in utils.chunks(
-                            [
-                                f"<code>{i}</code>"
-                                for i in sorted(
-                                    [
-                                        utils.escape_html(
-                                            i.split("/")[-1].split(".")[0]
-                                        )
-                                        for i in mods.values()
-                                    ]
-                                )
-                            ],
-                            5,
-                        )
-                    ]
+            repo_map = await self.get_repo_list()
+            pages = []
+            for repo, mods in repo_map.items():
+                names = sorted(
+                    {
+                        utils.escape_html(i.split("/")[-1].split(".")[0])
+                        for i in mods.values()
+                    }
                 )
-                for repo, mods in (await self.get_repo_list()).items()
-            ]
-            close_mk = [[{"text": "🔻 Close", "action": "close"}]]
-            use_rich = False
-            with contextlib.suppress(Exception):
-                from ..utils.rich import can_use_rich
-                use_rich = bool(can_use_rich(self._client, self._db))
-            if use_rich and pages:
-                try:
+                body = "\n".join(
+                    " | ".join(chunk) for chunk in utils.chunks(
+                        [f"<code>{i}</code>" for i in names], 5
+                    )
+                )
+                pages.append(
+                    self.strings["avail_header"]
+                    + f"\n☁️ {repo.strip('/')}\n\n"
+                    + (body or "—")
+                )
+            if not pages:
+                await utils.answer(message, self.strings.get("no_modules", "No modules"))
+                return
+            self._dlm_pages = pages
+            await self._render_dlm_page(message, page=0, edit=False)
+
+    async def _render_dlm_page(self, message_or_call, page: int = 0, edit: bool = True):
+        """One repo per page with prev/next navigation."""
+        pages = getattr(self, "_dlm_pages", None) or []
+        if not pages:
+            return
+        page = max(0, min(int(page), len(pages) - 1))
+        text = pages[page] + f"\n\n📄 <b>{page + 1}/{len(pages)}</b>"
+
+        nav = []
+        if page > 0:
+            nav.append(
+                {
+                    "text": "⬅️",
+                    "callback": self._dlm_page,
+                    "args": (page - 1,),
+                }
+            )
+        nav.append({"text": f"{page + 1}/{len(pages)}", "data": "noop"})
+        if page < len(pages) - 1:
+            nav.append(
+                {
+                    "text": "➡️",
+                    "callback": self._dlm_page,
+                    "args": (page + 1,),
+                }
+            )
+        rows = [nav, [{"text": "🔻 Close", "action": "close"}]]
+
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(self._client, self._db))
+
+        if edit and hasattr(message_or_call, "edit"):
+            try:
+                if use_rich:
                     from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                    body = "<p>" + pages[0].replace("\n", "<br/>") + "</p>"
+                    body = "<p>" + text.replace("\n", "<br/>") + "</p>"
+                    uid = getattr(message_or_call, "unit_id", "") or ""
+                    with contextlib.suppress(Exception):
+                        if uid and uid in (getattr(self.inline, "_units", None) or {}):
+                            self.inline._units[uid]["buttons"] = rows
+                            self.inline.generate_markup(uid)
+                            rows = self.inline._units[uid].get("buttons") or rows
                     html = to_rich_compatible(
-                        body + "\n" + (markup_to_tg_rows(close_mk) or "")
+                        body + "\n" + (markup_to_tg_rows(rows, uid) or "")
                     )
-                    await self.inline.form(
-                        text=pages[0][:200],
-                        message=message,
+                    await message_or_call.edit(
+                        text=text[:200],
                         rich_message=html,
-                        reply_markup=close_mk,
-                        silent=True,
+                        reply_markup=rows,
                     )
-                except Exception:
-                    await self.inline.list(message, pages)
-            else:
-                await self.inline.list(message, pages)
+                else:
+                    await message_or_call.edit(text, reply_markup=rows)
+                return
+            except Exception:
+                logger.debug("dlm page edit failed", exc_info=True)
+
+        if use_rich:
+            try:
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                body = "<p>" + text.replace("\n", "<br/>") + "</p>"
+                html = to_rich_compatible(
+                    body + "\n" + (markup_to_tg_rows(rows, "") or "")
+                )
+                await self.inline.form(
+                    text=text[:200],
+                    message=message_or_call,
+                    rich_message=html,
+                    reply_markup=rows,
+                    silent=True,
+                )
+                return
+            except Exception:
+                logger.debug("dlm rich form failed", exc_info=True)
+
+        await self.inline.form(
+            text,
+            message=message_or_call,
+            reply_markup=rows,
+            silent=True,
+        )
+
+    async def _dlm_page(self, call, page: int):
+        with contextlib.suppress(Exception):
+            await call.answer()
+        await self._render_dlm_page(call, page=page, edit=True)
+
 
     @loader.command()
     async def dlmall(self, message: Message):
