@@ -186,7 +186,7 @@ async def notify_blocked(client, user_id: int) -> None:
     except Exception:
         logger.debug("blacklist bot notify failed", exc_info=True)
     try:
-        await client.send_message("me", text)
+        await client.send_message(int(getattr(client, "tg_id", 0) or 0), text)
     except Exception:
         logger.debug("blacklist Saved Messages notify failed", exc_info=True)
 

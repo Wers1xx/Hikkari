@@ -158,6 +158,18 @@ class Module:
         self.chat_id: int = self._client.tg_id
         self.chat = _OwnerChat(self._client.tg_id)
 
+    def __getattr__(self, name: str):
+        # Fallback for modules that skip internal_init or wipe attrs
+        if name in ("chat_id", "chat", "tg_id", "_tg_id"):
+            client = object.__getattribute__(self, "__dict__").get("_client") or object.__getattribute__(self, "__dict__").get("client")
+            tid = getattr(client, "tg_id", None) if client is not None else None
+            if name in ("tg_id", "_tg_id", "chat_id"):
+                return tid
+            if name == "chat" and tid is not None:
+                return _OwnerChat(tid)
+            return None
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     async def inline_ready(self):
         """Called when inline bot becomes ready (Heroku 2.2 parity)."""
 

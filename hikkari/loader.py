@@ -1334,6 +1334,17 @@ class Modules:
             )
             instance._me = me
             instance.me = me
+        # Always ensure chat_id/chat exist (external modules rely on them)
+        tid = getattr(self.client, "tg_id", None)
+        if tid is not None:
+            if not hasattr(instance, "tg_id") or getattr(instance, "tg_id", None) is None:
+                instance.tg_id = tid
+                instance._tg_id = tid
+            if not hasattr(instance, "chat_id"):
+                instance.chat_id = tid
+            if not hasattr(instance, "chat"):
+                from .types import _OwnerChat
+                instance.chat = _OwnerChat(tid)
 
         for module in self.modules:
             if module.__class__.__name__ == instance.__class__.__name__:
@@ -1568,8 +1579,15 @@ class Modules:
                 logger.info("Can't process `on_dlmod` hook", exc_info=True)
 
         try:
-            if len(inspect.signature(mod.client_ready).parameters) == 2:
+            # Bound method: params without self. Unbound: drop self.
+            _cr_params = [
+                p for p in inspect.signature(mod.client_ready).parameters.values()
+                if p.name != "self"
+            ]
+            if len(_cr_params) >= 2:
                 await mod.client_ready(self.client, self._db)
+            elif len(_cr_params) == 1:
+                await mod.client_ready(self.client)
             else:
                 await mod.client_ready()
         except SelfUnload as e:

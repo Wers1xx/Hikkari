@@ -314,10 +314,18 @@ def array_sum(array: list[list[typing.Any]], /) -> list[typing.Any]:
 
 
 async def _answer_restricted_fallback(message: Message, response: str, **kwargs):
-    """If edit/reply fails due to account limits, drop reply to Saved Messages."""
+    """If edit/reply fails due to account limits, notify owner via bot/owner id (not Saved Messages)."""
     client = message.client
     try:
-        return await client.send_message("me", response, **{k: v for k, v in kwargs.items() if k in ("parse_mode", "link_preview", "file")})
+        # Prefer bot PM / owner id — never Saved Messages "me" alias spam
+        peer = getattr(client, "tg_id", None)
+        bot = getattr(getattr(client, "inline", None), "bot", None)
+        kw = {k: v for k, v in kwargs.items() if k in ("parse_mode", "link_preview", "file")}
+        if bot is not None and peer:
+            return await bot.send_message(int(peer), response, **kw)
+        if peer:
+            return await client.send_message(int(peer), response, **kw)
+        return await client.send_message(int(peer or 0), response, **kw)
     except Exception:
         logger.exception("answer fallback to Saved Messages failed")
         return None
