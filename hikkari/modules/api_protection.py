@@ -167,7 +167,7 @@ class APIRatelimiterMod(loader.Module):
             ordered: bool = False,
             flood_sleep_threshold: int = None,
         ):
-            await asyncio.sleep(random.randint(0, 2) / 1000)
+            # no artificial delay — keep owner commands snappy
             req = (request,) if not is_list_like(request) else request
             for r in req:
                 if (

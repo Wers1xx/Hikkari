@@ -462,6 +462,17 @@ class SecurityManager:
         except (TypeError, ValueError):
             user_id = 0
 
+        # Fast-path: own outgoing commands must not wait on admin log / heavy checks
+        if message is not None and getattr(message, "out", False):
+            if not (
+                getattr(message, "is_channel", False)
+                and not getattr(message, "is_group", False)
+                and getattr(message, "edit_date", None)
+            ):
+                return True
+        if user_id and user_id == self._client.tg_id:
+            return True
+
         is_channel = False
 
         if (
