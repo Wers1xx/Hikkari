@@ -125,9 +125,10 @@ class Utils(InlineUnit):
                         button["disable_security"] = True
                         button["force_me"] = True
                         button.setdefault("args", ())
+                        # Unique data per form — shared "hcfg|close" broke multi-form close
                         if not button.get("_callback_data"):
-                            button["_callback_data"] = "hcfg|close"
-                        self._custom_map["hcfg|close"] = {
+                            button["_callback_data"] = f"close/{utils.rand(20)}"
+                        self._custom_map[button["_callback_data"]] = {
                             "handler": self._close_unit_handler,
                             "always_allow": [],
                             "args": (),
@@ -386,28 +387,20 @@ class Utils(InlineUnit):
     async def _close_unit_handler(
         self: "InlineManager", call: InlineCall, unit_id: str | None = None
     ):
-        """Close the form/message the user pressed. Always try hard to delete."""
+        """Close form. Via/inline messages cannot be deleted — only edited away."""
         with contextlib.suppress(Exception):
             await call.answer()
 
-        imid0 = getattr(call, "inline_message_id", None)
         if not unit_id:
             unit_id = getattr(call, "unit_id", None)
-        if not unit_id:
-            with contextlib.suppress(Exception):
-                raw = getattr(call, "data", None)
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8", "ignore")
-                if isinstance(raw, str) and raw.startswith("hcfg|c|"):
-                    unit_id = raw.split("|", 2)[-1] or None
 
-        imid = imid0 or getattr(call, "inline_message_id", None)
+        imid = getattr(call, "inline_message_id", None)
         units = getattr(self, "_units", None) or {}
         unit = units.get(unit_id) if unit_id else None
 
         if unit is None and imid is not None:
             imid_s = str(imid)
-            for uid, u_ent in units.items():
+            for uid, u_ent in list(units.items()):
                 if not isinstance(u_ent, dict):
                     continue
                 stored = u_ent.get("inline_message_id")
@@ -416,61 +409,24 @@ class Utils(InlineUnit):
                     unit = u_ent
                     break
 
-        chat = None
-        msg_id = None
+        chat = getattr(call, "chat_id", None)
+        msg_id = getattr(call, "message_id", None)
         if isinstance(unit, dict):
-            chat = unit.get("chat")
-            msg_id = unit.get("message_id")
+            chat = chat or unit.get("chat")
+            msg_id = msg_id or unit.get("message_id")
             imid = imid or unit.get("inline_message_id")
-
-        chat = getattr(call, "chat_id", None) or chat
-        msg_id = getattr(call, "message_id", None) or msg_id
         with contextlib.suppress(Exception):
             msg = getattr(call, "message", None)
             if msg is not None:
-                if chat is None:
-                    chat = utils.get_chat_id(msg)
-                if msg_id is None:
-                    msg_id = getattr(msg, "id", None) or getattr(msg, "message_id", None)
+                chat = chat or utils.get_chat_id(msg)
+                msg_id = msg_id or getattr(msg, "id", None) or getattr(msg, "message_id", None)
 
-        deleted = False
-
-        # 1) InlineCall / BotInlineCall delete
-        with contextlib.suppress(Exception):
-            if hasattr(call, "delete") and await call.delete():
-                deleted = True
-
-        # 2) unit helper
-        if not deleted and unit_id:
-            with contextlib.suppress(Exception):
-                if await self._delete_unit_message(
-                    call, unit_id=unit_id, chat_id=chat, message_id=msg_id
-                ):
-                    deleted = True
-
-        # 3) user client
-        if not deleted and chat is not None and msg_id is not None:
-            with contextlib.suppress(Exception):
-                await self._client.delete_messages(int(chat), [int(msg_id)])
-                deleted = True
-
-        # 4) Bot API deleteMessage
+        via = bool(getattr(call, "via_inline", False) or imid)
         token = getattr(self, "_token", None)
-        if not deleted and token and chat is not None and msg_id is not None:
-            with contextlib.suppress(Exception):
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"https://api.telegram.org/bot{token}/deleteMessage",
-                        json={"chat_id": int(chat), "message_id": int(msg_id)},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        data = await resp.json(content_type=None)
-                        if data.get("ok"):
-                            deleted = True
+        done = False
 
-        # 5) inline message: edit empty then stop
-        if not deleted and token and imid is not None:
+        # Via forms: ONLY edit (Telegram forbids deleteMessage on inline messages)
+        if via and token and imid is not None:
             with contextlib.suppress(Exception):
                 import aiohttp
                 payload = {
@@ -482,17 +438,49 @@ class Utils(InlineUnit):
                     async with session.post(
                         f"https://api.telegram.org/bot{token}/editMessageText",
                         json=payload,
-                        timeout=aiohttp.ClientTimeout(total=10),
+                        timeout=aiohttp.ClientTimeout(total=8),
                     ) as resp:
                         data = await resp.json(content_type=None)
                         if data.get("ok"):
-                            deleted = True
+                            done = True
+            if not done:
+                with contextlib.suppress(Exception):
+                    if hasattr(call, "edit"):
+                        await call.edit("✖️", reply_markup=None)
+                        done = True
+
+        # Normal bot messages in chat: delete
+        if not done:
+            with contextlib.suppress(Exception):
+                if hasattr(call, "delete") and await call.delete():
+                    done = True
+        if not done and unit_id:
+            with contextlib.suppress(Exception):
+                if await self._delete_unit_message(
+                    call, unit_id=unit_id, chat_id=chat, message_id=msg_id
+                ):
+                    done = True
+        if not done and chat is not None and msg_id is not None:
+            with contextlib.suppress(Exception):
+                await self._client.delete_messages(int(chat), [int(msg_id)])
+                done = True
+            if not done and token:
+                with contextlib.suppress(Exception):
+                    import aiohttp
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"https://api.telegram.org/bot{token}/deleteMessage",
+                            json={"chat_id": int(chat), "message_id": int(msg_id)},
+                            timeout=aiohttp.ClientTimeout(total=8),
+                        ) as resp:
+                            data = await resp.json(content_type=None)
+                            if data.get("ok"):
+                                done = True
 
         if unit_id and isinstance(units, dict):
             with contextlib.suppress(Exception):
                 units.pop(unit_id, None)
-
-        return deleted
+        return done
 
 
     async def _unload_unit_handler(self: "InlineManager", call: InlineCall):

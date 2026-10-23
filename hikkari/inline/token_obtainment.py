@@ -207,70 +207,58 @@ class TokenObtainment(InlineUnit):
             return str(root)
         return None
 
-    async def _apply_bot_avatar(self: "InlineManager", conv, username: str) -> bool:
-        """
-        Set inline bot profile photo via @BotFather.
-        Sequence: /setuserpic → @username → image file as photo.
-        """
-        await asyncio.sleep(1.0)
-        m = await conv.send_message("/setuserpic")
-        r = await conv.get_response()
-        logger.debug(">> /setuserpic")
-        logger.debug("<< %s", (r.raw_text or "")[:200])
-        await asyncio.sleep(0.6)
-        with contextlib.suppress(Exception):
-            await m.delete()
-            await r.delete()
-
-        uname = (username or "").strip()
-        if uname and not uname.startswith("@"):
-            uname = f"@{uname}" if not uname.endswith("bot") else uname
-        # BotFather expects the bot username without @ usually
-        uname_plain = uname.lstrip("@")
-
-        await asyncio.sleep(0.5)
-        m = await conv.send_message(uname_plain)
-        r = await conv.get_response()
-        logger.debug(">> %s", uname_plain)
-        logger.debug("<< %s", (r.raw_text or "")[:200])
-        await asyncio.sleep(0.6)
-        with contextlib.suppress(Exception):
-            await m.delete()
-            await r.delete()
-
-        path = await self._resolve_bot_avatar_path()
-        if not path:
-            logger.warning("No local bot avatar asset found")
-            # last resort: github
-            try:
-                m = await conv.send_file(
-                    "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png",
-                    force_document=False,
-                )
-            except Exception:
-                logger.exception("remote avatar send failed")
-                return False
-        else:
-            logger.info("Setting bot avatar from %s", path)
-            m = await conv.send_file(path, force_document=False)
-
-        r = await conv.get_response()
-        logger.debug(">> <avatar photo>")
-        logger.debug("<< %s", (r.raw_text or "")[:200])
-        await asyncio.sleep(0.5)
-        with contextlib.suppress(Exception):
-            await m.delete()
-            await r.delete()
-
-        raw = (r.raw_text or "").lower()
-        if any(x in raw for x in ("success", "успех", "changed", "updated", "saved", "установ")):
-            logger.info("Bot avatar applied OK")
-            return True
-        # BotFather sometimes answers generically — still OK if no error
-        if any(x in raw for x in ("error", "invalid", "невер", "fail", "sorry")):
-            logger.warning("BotFather avatar response looks like error: %s", r.raw_text)
+    
+    async def ensure_bot_inline_enabled(self, force: bool = False) -> bool:
+        """If BotFather inline mode is off, turn it on for our bot username."""
+        bot_un = getattr(self, "bot_username", None)
+        if not bot_un:
             return False
-        return True
+        username = str(bot_un).lstrip("@")
+        flag_key = f"inline_mode_ok_{username}"
+        if not force and self._db.get("hikkari.inline", flag_key, False):
+            return True
+
+        try:
+            from hikkaritl.tl.functions.contacts import UnblockRequest
+        except Exception:
+            UnblockRequest = None
+
+        try:
+            if UnblockRequest is not None:
+                with contextlib.suppress(Exception):
+                    await self._client(UnblockRequest(id="@BotFather"))
+            async with self._client.conversation("@BotFather", exclusive=False) as conv:
+                for msg in (
+                    "/setinline",
+                    username,
+                    "user@hikkari:~$",
+                    "/setinlinefeedback",
+                    username,
+                    "Enabled",
+                ):
+                    try:
+                        await asyncio.sleep(0.35)
+                        m = await conv.send_message(msg)
+                        r = await conv.get_response()
+                        logger.debug(
+                            "BotFather ensure >> %s << %s",
+                            msg,
+                            (getattr(r, "raw_text", None) or "")[:80],
+                        )
+                        with contextlib.suppress(Exception):
+                            await m.delete()
+                        with contextlib.suppress(Exception):
+                            await r.delete()
+                    except Exception:
+                        logger.debug("BotFather ensure step failed: %s", msg, exc_info=True)
+                with contextlib.suppress(Exception):
+                    await conv.send_message("/cancel")
+            self._db.set("hikkari.inline", flag_key, True)
+            logger.info("Ensured BotFather inline mode for @%s", username)
+            return True
+        except Exception:
+            logger.warning("ensure_bot_inline_enabled failed for @%s", username, exc_info=True)
+            return False
 
 
     async def _create_bot(self: "InlineManager"):

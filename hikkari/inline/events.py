@@ -349,12 +349,21 @@ class Events(InlineUnit):
         """Only account owner and co-owners may use inline forms/buttons by default."""
         if user_id is None:
             return False
-        # Explicit public button (rare): both flags must opt-in
-        if button and button.get("allow_public") is True:
+        if button and (
+            button.get("allow_public") is True
+            or button.get("disable_security") is True
+        ):
             return True
-        if unit and unit.get("allow_public") is True:
+        if unit and (
+            unit.get("allow_public") is True
+            or unit.get("disable_security") is True
+        ):
             return True
-        return int(user_id) in self._inline_allowed_users(unit, button)
+        try:
+            uid = int(user_id)
+        except Exception:
+            return False
+        return uid in self._inline_allowed_users(unit, button)
 
 
     async def _callback_query_handler(

@@ -303,6 +303,10 @@ class InlineManager(
 
         self.init_complete = True
 
+        # Keep BotFather inline mode on (some accounts lose it silently)
+        with contextlib.suppress(Exception):
+            asyncio.ensure_future(self.ensure_bot_inline_enabled())
+
         try:
             import asyncio
             am = getattr(self, "_allmodules", None)
@@ -562,26 +566,25 @@ class InlineManager(
         async def result_getter():
             nonlocal unit_id, q
             last_err = None
-            # unit must be registered before first query
-            await asyncio.sleep(0.04)
-            for attempt in range(5):
+            # Fast path: no artificial delay — unit is registered before invoke
+            for attempt in range(3):
                 try:
-                    if unit_id not in self._units:
-                        await asyncio.sleep(0.2)
+                    if unit_id not in self._units and attempt:
+                        await asyncio.sleep(0.05 * attempt)
                     q = await self._client.inline_query(bot_un, unit_id)
                     if q:
                         return
-                    await asyncio.sleep(0.15 * (attempt + 1))
+                    await asyncio.sleep(0.05 * (attempt + 1))
                 except Exception as e:
                     last_err = e
                     logger.debug("inline_query attempt %s failed: %s", attempt, e)
-                    await asyncio.sleep(0.15 * (attempt + 1))
+                    await asyncio.sleep(0.05 * (attempt + 1))
             if last_err:
                 logger.warning("inline_query failed: %s", last_err)
 
         async def event_poller():
             nonlocal exception
-            await asyncio.wait_for(event.wait(), timeout=8)
+            await asyncio.wait_for(event.wait(), timeout=4)
             if self._error_events.get(unit_id):
                 exception = self._error_events[unit_id]
 
@@ -609,7 +612,13 @@ class InlineManager(
                 self.init_complete,
                 unit_id in self._units,
             )
-            raise Exception("No query results")
+            # BotFather inline mode may be off — enable and retry once
+            with contextlib.suppress(Exception):
+                await self.ensure_bot_inline_enabled(force=True)
+                await asyncio.sleep(0.3)
+                q = await self._client.inline_query(bot_un, unit_id)
+            if not q:
+                raise Exception("No query results")
 
         return await q[0].click(
             utils.get_chat_id(message) if isinstance(message, Message) else message,
