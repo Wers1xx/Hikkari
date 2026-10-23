@@ -363,7 +363,19 @@ class UpdaterMod(loader.Module):
                 pass
 
     async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
-        """Notify owner ONLY via Bot API HTTP → bot PM. Never user client / Saved Messages."""
+        """Notify owner via Bot API HTTP → bot PM; fallback to Telethon bot client."""
+        import re as _re
+
+        def _plain_html(s: str) -> str:
+            s = str(s or "")
+            # Bot API HTML does not support <tg-emoji>
+            s = _re.sub(r"<tg-emoji[^>]*>", "", s)
+            s = s.replace("</tg-emoji>", "")
+            s = _re.sub(r"<emoji[^>]*>", "", s)
+            s = s.replace("</emoji>", "")
+            return s[:4090]
+
+        text = _plain_html(text)
         token = None
         with contextlib.suppress(Exception):
             token = getattr(self.inline, "_token", None) or getattr(
@@ -379,12 +391,8 @@ class UpdaterMod(loader.Module):
                 token = self._db.get("hikkari.inline", "bot_token", None) or self._db.get(
                     "hikka.inline", "bot_token", None
                 )
-        if not token:
-            logger.warning("update notify skipped: no bot token (will not use Saved Messages)")
-            return None
 
         chat_id = int(self.tg_id)
-        # Convert Hikkari markup → Bot API inline_keyboard (callbacks only)
         ikb = None
         if reply_markup:
             with contextlib.suppress(Exception):
@@ -419,38 +427,56 @@ class UpdaterMod(loader.Module):
                 if rows_out:
                     ikb = {"inline_keyboard": rows_out}
 
-        payload = {
-            "chat_id": chat_id,
-            "text": str(text)[:4090],
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        if ikb:
-            payload["reply_markup"] = ikb
-
-        try:
-            timeout = aiohttp.ClientTimeout(total=20)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json=payload,
-                ) as resp:
-                    data = await resp.json(content_type=None)
-            if not data.get("ok"):
+        # 1) Bot API HTTP
+        if token:
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            if ikb:
+                payload["reply_markup"] = ikb
+            try:
+                timeout = aiohttp.ClientTimeout(total=20)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json=payload,
+                    ) as resp:
+                        data = await resp.json(content_type=None)
+                if data.get("ok"):
+                    class _Msg:
+                        pass
+                    m = _Msg()
+                    res = data.get("result") or {}
+                    m.message_id = res.get("message_id")
+                    m.id = m.message_id
+                    return m
                 logger.warning("Bot API update notify failed: %s", data)
-                return None
-            # minimal object with message_id for upd_msg tracking
-            class _Msg:
-                pass
-            m = _Msg()
-            m.message_id = (data.get("result") or {}).get("message_id")
-            m.id = m.message_id
-            return m
-        except Exception:
-            logger.warning("Bot API update notify request failed", exc_info=True)
-            return None
+            except Exception:
+                logger.warning("Bot API update notify request failed", exc_info=True)
 
-    @loader.loop(interval=60, autostart=True)
+        # 2) Telethon bot client (still bot PM, not Saved Messages)
+        with contextlib.suppress(Exception):
+            bot = getattr(self.inline, "bot", None)
+            if bot is not None:
+                kwargs = {"parse_mode": "HTML", "link_preview": False}
+                if reply_markup is not None:
+                    with contextlib.suppress(Exception):
+                        kwargs["reply_markup"] = (
+                            self._markup() if callable(getattr(self, "_markup", None)) else reply_markup
+                        )
+                # prefer generate via inline
+                with contextlib.suppress(Exception):
+                    if reply_markup is not None and hasattr(self.inline, "generate_markup"):
+                        kwargs["reply_markup"] = self.inline.generate_markup(reply_markup)
+                return await bot.send_message(chat_id, text, **kwargs)
+
+        logger.warning("update notify skipped: no bot token/client")
+        return None
+
+
     async def poller(self):
 
         if NO_GIT:
@@ -521,6 +547,9 @@ class UpdaterMod(loader.Module):
                     else None
                 )
             m = await self._send_owner_notice(text, reply_markup=markup)
+            if m is None:
+                logger.warning("update notice not delivered — will retry next poll")
+                return
             self._notified = pending
             self.set("last_notified", pending)
             self.set("ignore_permanent", False)
