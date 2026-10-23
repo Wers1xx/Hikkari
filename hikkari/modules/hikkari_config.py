@@ -117,9 +117,10 @@ class HikkariConfigMod(loader.Module):
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
-        """photo + invert for config forms."""
+        """photo or video for config forms from banner_url."""
         from pathlib import Path as _P
         from ..utils.other import ensure_builtin_asset
+
         url = str(self.config.get("banner_url") or "").strip()
         if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
@@ -127,12 +128,23 @@ class HikkariConfigMod(loader.Module):
                 url = str(p)
         if not url:
             return {}
-        kw = {}
-        if url.startswith(("http://", "https://")):
-            kw["photo"] = url
-        else:
-            kw["photo"] = url  # local path form supports
-        return kw
+
+        low = url.lower().split("?")[0]
+        video_ext = (".mp4", ".webm", ".mov", ".mkv", ".m4v", ".avi")
+        photo_ext = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+        is_video = low.endswith(video_ext)
+        is_photo = low.endswith(photo_ext)
+        # local file without clear extension: sniff by suffix of path
+        if not is_video and not is_photo and not url.startswith(("http://", "https://")):
+            try:
+                is_video = _P(url).suffix.lower() in video_ext
+                is_photo = _P(url).suffix.lower() in photo_ext
+            except Exception:
+                pass
+        # unknown http URL without extension → treat as photo (webpage/preview)
+        if is_video:
+            return {"video": url}
+        return {"photo": url}
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
@@ -1639,7 +1651,12 @@ class HikkariConfigMod(loader.Module):
 
         from .. import main as _main
         _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        if "photo" not in form_kwargs and _cfg_banner and Path(_cfg_banner).is_file():
+        if (
+            "photo" not in form_kwargs
+            and "video" not in form_kwargs
+            and _cfg_banner
+            and Path(_cfg_banner).is_file()
+        ):
             form_kwargs["photo"] = str(_cfg_banner)
         await self._cfg_form(
             draft.text,
