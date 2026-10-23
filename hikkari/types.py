@@ -116,6 +116,18 @@ class StringLoader(SourceLoader):
         return self.data
 
 
+
+class _OwnerChat(int):
+    """Legacy module compat: int peer id that also has `.id` (Hikka-style)."""
+
+    @property
+    def id(self) -> int:
+        return int(self)
+
+    def __repr__(self) -> str:
+        return f"<OwnerChat id={int(self)}>"
+
+
 class Module:
     strings = {"name": "Unknown"}
 
@@ -142,9 +154,9 @@ class Module:
         self.allclients = self.allmodules.allclients
         self.tg_id: int = self._client.tg_id
         self._tg_id: int = self._client.tg_id
-        # Legacy modules (Hikka/Heroku) often use self.chat_id / self.chat for owner PM
+        # Legacy modules: self.chat_id is int; self.chat is int-like with `.id`
         self.chat_id: int = self._client.tg_id
-        self.chat: int = self._client.tg_id
+        self.chat = _OwnerChat(self._client.tg_id)
 
     async def inline_ready(self):
         """Called when inline bot becomes ready (Heroku 2.2 parity)."""
@@ -719,7 +731,7 @@ class Library:
         self.tg_id = self._client.tg_id
         self._tg_id = self._client.tg_id
         self.chat_id = self._client.tg_id
-        self.chat = self._client.tg_id
+        self.chat = _OwnerChat(self._client.tg_id)
         me = getattr(self._client, "hikkari_me", None) or getattr(
             self._client, "hikka_me", None
         )
