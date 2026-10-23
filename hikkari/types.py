@@ -142,6 +142,8 @@ class Module:
         self.allclients = self.allmodules.allclients
         self.tg_id: int = self._client.tg_id
         self._tg_id: int = self._client.tg_id
+        # Legacy modules (Hikka/Heroku) often use self.chat_id for owner PM id
+        self.chat_id: int = self._client.tg_id
 
     async def inline_ready(self):
         """Called when inline bot becomes ready (Heroku 2.2 parity)."""
@@ -715,6 +717,7 @@ class Library:
         self._client = self.allmodules.client
         self.tg_id = self._client.tg_id
         self._tg_id = self._client.tg_id
+        self.chat_id = self._client.tg_id
         me = getattr(self._client, "hikkari_me", None) or getattr(
             self._client, "hikka_me", None
         )
