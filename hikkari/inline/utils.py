@@ -387,7 +387,7 @@ class Utils(InlineUnit):
     async def _close_unit_handler(
         self: "InlineManager", call: InlineCall, unit_id: str | None = None
     ):
-        """Close form. Via/inline messages cannot be deleted — only edited away."""
+        """Close form by deleting the message in chat (via forms included)."""
         with contextlib.suppress(Exception):
             await call.answer()
 
@@ -421,35 +421,31 @@ class Utils(InlineUnit):
                 chat = chat or utils.get_chat_id(msg)
                 msg_id = msg_id or getattr(msg, "id", None) or getattr(msg, "message_id", None)
 
-        via = bool(getattr(call, "via_inline", False) or imid)
         token = getattr(self, "_token", None)
         done = False
 
-        # Via forms: ONLY edit (Telegram forbids deleteMessage on inline messages)
-        if via and token and imid is not None:
-            with contextlib.suppress(Exception):
-                import aiohttp
-                payload = {
-                    "inline_message_id": str(imid),
-                    "text": "✖️",
-                    "reply_markup": {"inline_keyboard": []},
-                }
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"https://api.telegram.org/bot{token}/editMessageText",
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=8),
-                    ) as resp:
-                        data = await resp.json(content_type=None)
-                        if data.get("ok"):
-                            done = True
-            if not done:
-                with contextlib.suppress(Exception):
-                    if hasattr(call, "edit"):
-                        await call.edit("✖️", reply_markup=None)
-                        done = True
+        try:
+            chat_i = int(chat) if chat is not None else None
+            mid_i = int(msg_id) if msg_id is not None else None
+        except Exception:
+            chat_i, mid_i = None, None
 
-        # Normal bot messages in chat: delete
+        async def _user_delete() -> bool:
+            if chat_i is None or mid_i is None:
+                return False
+            try:
+                res = await self._client.delete_messages(chat_i, [mid_i], revoke=True)
+                return bool(res)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await self._client.delete_messages(chat_i, [mid_i])
+                    return True
+                return False
+
+        # 1) Prefer real delete via user client (via@ messages live in the chat)
+        done = await _user_delete()
+
+        # 2) InlineCall.delete / unit helper
         if not done:
             with contextlib.suppress(Exception):
                 if hasattr(call, "delete") and await call.delete():
@@ -457,25 +453,43 @@ class Utils(InlineUnit):
         if not done and unit_id:
             with contextlib.suppress(Exception):
                 if await self._delete_unit_message(
-                    call, unit_id=unit_id, chat_id=chat, message_id=msg_id
+                    call, unit_id=unit_id, chat_id=chat_i, message_id=mid_i
                 ):
                     done = True
-        if not done and chat is not None and msg_id is not None:
+
+        # 3) Bot API deleteMessage
+        if not done and token and chat_i is not None and mid_i is not None:
             with contextlib.suppress(Exception):
-                await self._client.delete_messages(int(chat), [int(msg_id)])
-                done = True
-            if not done and token:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"https://api.telegram.org/bot{token}/deleteMessage",
+                        json={"chat_id": chat_i, "message_id": mid_i},
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp:
+                        data = await resp.json(content_type=None)
+                        if data.get("ok"):
+                            done = True
+
+        # 4) Still there: strip keyboard, then delete again (no permanent emoji)
+        if not done:
+            with contextlib.suppress(Exception):
+                if hasattr(call, "edit"):
+                    await call.edit("​", reply_markup=None)
+            if not done and token and imid is not None:
                 with contextlib.suppress(Exception):
                     import aiohttp
                     async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            f"https://api.telegram.org/bot{token}/deleteMessage",
-                            json={"chat_id": int(chat), "message_id": int(msg_id)},
+                        await session.post(
+                            f"https://api.telegram.org/bot{token}/editMessageText",
+                            json={
+                                "inline_message_id": str(imid),
+                                "text": "​",
+                                "reply_markup": {"inline_keyboard": []},
+                            },
                             timeout=aiohttp.ClientTimeout(total=8),
-                        ) as resp:
-                            data = await resp.json(content_type=None)
-                            if data.get("ok"):
-                                done = True
+                        )
+            done = await _user_delete() or done
 
         if unit_id and isinstance(units, dict):
             with contextlib.suppress(Exception):
