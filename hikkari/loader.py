@@ -1519,22 +1519,29 @@ class Modules:
     async def send_ready(self):
         """Send all data to all modules (parallel, per-module timeout)."""
         import os as _os
-        _to = 2.5 if _os.environ.get("HIKKARI_FAST_START") else 6.0
+        _fast = bool(_os.environ.get("HIKKARI_FAST_START"))
+        _default = 2.5 if _fast else 8.0
+        _long = {
+            "UpdaterMod": 45.0 if not _fast else 20.0,
+            "Updater": 45.0 if not _fast else 20.0,
+        }
         async def _one(mod: Module):
+            name = getattr(mod, "__class__", type(mod)).__name__
+            to = _long.get(name, _default)
             try:
                 await asyncio.wait_for(
                     self.send_ready_one_wrapper(mod),
-                    timeout=_to,
+                    timeout=to,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
                     "client_ready timeout for %s — continuing boot",
-                    getattr(mod, "__class__", type(mod)).__name__,
+                    name,
                 )
             except Exception:
                 logger.exception(
                     "client_ready error for %s",
-                    getattr(mod, "__class__", type(mod)).__name__,
+                    name,
                 )
 
         await asyncio.gather(
