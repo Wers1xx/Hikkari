@@ -168,10 +168,7 @@ class Utils(InlineUnit):
                 try:
                     # Heroku-compatible: plain text + optional style + icon (document_id)
                     btn_kwargs = {"text": str(button.get("text") or "•")}
-                    if style := self._get_button_style(button):
-                        btn_kwargs["style"] = style
-                    if emoji_id := self._get_button_emoji_id(button):
-                        btn_kwargs["icon"] = int(emoji_id)
+                    # style/icon disabled: Telegram ReplyMarkupInvalid on bot PM (LoaderRestrictor/Backup)
 
                     match True:
                         case _ if "url" in button:

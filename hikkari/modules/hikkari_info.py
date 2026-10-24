@@ -1,3 +1,4 @@
+import re
 import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
@@ -34,7 +35,25 @@ from .. import version
 import platform as lib_platform
 import getpass
 
+
 logger = logging.getLogger(__name__)
+
+
+def _format_info_template(template: str, data: dict) -> str:
+    """Fill {placeholders}; ignore empty {} and unknown keys (Heroku-safe)."""
+    if not template:
+        return ""
+    text = str(template).replace("{}", "")
+    # Normalize double-braces leftovers
+    safe = {str(k): str(v) for k, v in (data or {}).items()}
+
+    def repl(m):
+        key = m.group(1)
+        return safe.get(key, "")
+
+    text = re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", repl, text)
+    return text.strip()
+
 
 
 @loader.tds
@@ -359,12 +378,7 @@ class HikkariInfoMod(loader.Module):
                             "<p><b>Uptime</b>: {uptime}</p>"
                             "<p><b>Ping</b>: {ping}</p>"
                         )
-                    try:
-                        html = html.format_map(safe)
-                    except Exception:
-                        pass
-                    # drop leftover empty {} from legacy templates
-                    html = html.replace("{}", "").strip()
+                    html = _format_info_template(html, data)
                     banner = self.config.get("banner_url")
                     if isinstance(banner, list) and banner:
                         import random as _r
@@ -415,11 +429,7 @@ class HikkariInfoMod(loader.Module):
                 "<b>OS</b>: {os}\n"
                 "<b>Python</b>: {python_ver}"
             )
-        try:
-            text = text.format_map(safe)
-        except Exception:
-            logger.exception("info_message format failed")
-        text = text.replace("{}", "").strip()
+        text = _format_info_template(text, data)
 
         banner = self.config.get("banner_url")
         media = utils.resolve_banner_media(banner) if banner else None
