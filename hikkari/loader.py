@@ -271,10 +271,13 @@ def patched_import(name: str, *args, **kwargs):
                     return native_import(name, *args, **kwargs)
             case s if s.startswith("hikkaritl"):
                 return native_import(name, *args, **kwargs)
+            case s if s.startswith("hikkari"):
+                # already Hikkari package — do not rewrite (avoids hikkariri)
+                return native_import(name, *args, **kwargs)
             case s if s.startswith("hikkalls"):
                 return native_import(name, *args, **kwargs)
-            case s if s.startswith("hikka") and not s.startswith("hikkaritl"):
-                # hikka.* → hikkari.*  (NOT hikkaritl)
+            case s if s.startswith("hikka"):
+                # hikka.* → hikkari.*  (legacy modules)
                 return native_import("hikkari" + name[5:], *args, **kwargs)
 
         return native_import(name, *args, **kwargs)
