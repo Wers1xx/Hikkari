@@ -1940,8 +1940,16 @@ class LoaderMod(loader.Module):
                     save_fs=save_fs,
                 )
             except ImportError as e:
+                # Background/boot: do not block on pip (Heroku does not freeze boot)
+                if message is None and not did_requirements:
+                    logger.warning(
+                        "Module %s missing dependency %s — skip install (non-interactive)",
+                        module_label,
+                        e.name,
+                    )
+                    return False
                 logger.info(
-                    "Module loading failed, attemping dependency installation (%s)",
+                    "Module loading failed, attempting dependency installation (%s)",
                     e.name,
                 )
                 requirements = [loader.IMPORT_PIP_ALIASES.get(e.name.lower(), e.name)]

@@ -982,13 +982,17 @@ class Modules:
 
                     exc_name = (getattr(e, "name", None) or "").lower()
 
-                    requirements.extend(
-                        [IMPORT_PIP_ALIASES.get(exc_name, exc_name or e.name or "")]
-                    )
-
-                    result = await self.lookup("LoaderMod").install_requirements(
-                        requirements
-                    )
+                    # Only install declared requires + known aliases — not random import names
+                    alias = IMPORT_PIP_ALIASES.get(exc_name, "")
+                    if alias and alias not in requirements:
+                        requirements.append(alias)
+                    requirements = [r for r in requirements if r and r[0] not in "-_."]
+                    if not requirements:
+                        raise
+                    loader_mod = self.lookup("LoaderMod")
+                    if loader_mod is None:
+                        raise
+                    result = await loader_mod.install_requirements(requirements)
 
                     importlib.invalidate_caches()
 
@@ -1528,37 +1532,13 @@ class Modules:
         )
 
     async def send_ready(self):
-        """Send all data to all modules (parallel, per-module timeout)."""
-        import os as _os
-        _fast = bool(_os.environ.get("HIKKARI_FAST_START"))
-        _default = 2.5 if _fast else 8.0
-        _long = {
-            "UpdaterMod": 45.0 if not _fast else 20.0,
-            "Updater": 45.0 if not _fast else 20.0,
-        }
-        async def _one(mod: Module):
-            name = getattr(mod, "__class__", type(mod)).__name__
-            to = _long.get(name, _default)
-            try:
-                await asyncio.wait_for(
-                    self.send_ready_one_wrapper(mod),
-                    timeout=to,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "client_ready timeout for %s — continuing boot",
-                    name,
-                )
-            except Exception:
-                logger.exception(
-                    "client_ready error for %s",
-                    name,
-                )
-
+        """Send all data to all modules (Heroku-style: parallel, no per-module timeout)."""
         await asyncio.gather(
-            *[_one(mod) for mod in list(self.modules)],
+            *[self.send_ready_one_wrapper(mod) for mod in list(self.modules)],
             return_exceptions=True,
         )
+        self._ready_sent = True
+
 
     async def send_ready_one(
         self,
