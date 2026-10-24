@@ -202,27 +202,76 @@ class Quickstart(loader.Module):
             3,
         )
 
+    async def inline_ready(self):
+        """Heroku-style: send welcome + buttons only when inline bot is ready."""
         if self.get("no_msg"):
             return
+        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
+            return
+        if not callable(getattr(self, "mark", None)):
+            return
 
+        text = self.text() if callable(getattr(self, "text", None)) else self.strings.get("base", "Hikkari installed")
         markup = None
         with contextlib.suppress(Exception):
             markup = self.inline.generate_markup(self.mark())
+
         try:
             await self.inline.bot.send_message(
                 self._client.tg_id,
-                self.text(),
+                text,
                 reply_markup=markup,
                 link_preview=False,
             )
         except Exception as e:
-            logger.warning("quickstart bot message failed (%s), retry without markup", e)
-            with contextlib.suppress(Exception):
+            logger.warning("quickstart send with markup failed: %s", e)
+            # Bot API fallback with raw inline_keyboard
+            try:
+                rows = []
+                for row in self.mark():
+                    line = []
+                    for btn in row:
+                        if "url" in btn:
+                            line.append({"text": btn["text"], "url": btn["url"]})
+                        elif "data" in btn:
+                            line.append({"text": btn["text"], "callback_data": btn["data"]})
+                    if line:
+                        rows.append(line)
+                from hikkaritl.tl.types import (
+                    ReplyInlineMarkup,
+                    KeyboardButtonUrl,
+                    KeyboardButtonCallback,
+                    KeyboardButtonRow,
+                )
+                tl_rows = []
+                for row in self.mark():
+                    btns = []
+                    for btn in row:
+                        if "url" in btn:
+                            btns.append(KeyboardButtonUrl(btn["text"], btn["url"]))
+                        elif "data" in btn:
+                            btns.append(
+                                KeyboardButtonCallback(
+                                    btn["text"], btn["data"].encode()
+                                )
+                            )
+                    if btns:
+                        tl_rows.append(KeyboardButtonRow(btns))
+                markup2 = ReplyInlineMarkup(tl_rows) if tl_rows else None
                 await self.inline.bot.send_message(
                     self._client.tg_id,
-                    self.text(),
+                    text,
+                    reply_markup=markup2,
                     link_preview=False,
                 )
+            except Exception as e2:
+                logger.warning("quickstart fallback markup failed: %s", e2)
+                with contextlib.suppress(Exception):
+                    await self.inline.bot.send_message(
+                        self._client.tg_id,
+                        text,
+                        link_preview=False,
+                    )
 
         self.set("no_msg", True)
 
@@ -237,4 +286,8 @@ class Quickstart(loader.Module):
         await self.allmodules.reload_translations()
 
         await self.inline.bot(call.answer(self.strings["language_saved"]))
-        await call.edit(text=self.text(), reply_markup=self.mark())
+        mk = self.mark() if callable(getattr(self, "mark", None)) else None
+        with contextlib.suppress(Exception):
+            mk = self.inline.generate_markup(mk) if mk else None
+        await call.edit(text=self.text(), reply_markup=mk)
+
