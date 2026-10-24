@@ -359,20 +359,73 @@ class UpdaterMod(loader.Module):
             except Exception:
                 pass
 
+    def _markup(self):
+        """Update / Ignore buttons (Heroku-style)."""
+        buttons = [
+            {
+                "text": self.strings.get("update", "🔄 Update"),
+                "data": "hikkari/update",
+                "style": "primary",
+            },
+            {
+                "text": self.strings.get("ignore", "🚫 Ignore"),
+                "data": "hikkari/ignore_upd",
+                "style": "danger",
+            },
+        ]
+        try:
+            return self.inline.generate_markup(buttons)
+        except Exception:
+            return buttons
+
+    def _markup_rows(self) -> list:
+        """Raw rows for Bot API inline_keyboard."""
+        return [
+            [
+                {
+                    "text": self.strings.get("update", "🔄 Update"),
+                    "callback_data": "hikkari/update",
+                },
+                {
+                    "text": self.strings.get("ignore", "🚫 Ignore"),
+                    "callback_data": "hikkari/ignore_upd",
+                },
+            ]
+        ]
+
     async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
-        """Notify owner via Bot API HTTP → bot PM; fallback to Telethon bot client."""
+        """Notify owner in bot PM with buttons (Heroku-style)."""
         import re as _re
 
-        def _plain_html(s: str) -> str:
+        def _to_bot_html(s: str) -> str:
             s = str(s or "")
-            # Bot API HTML does not support <tg-emoji>
-            s = _re.sub(r"<tg-emoji[^>]*>", "", s)
-            s = s.replace("</tg-emoji>", "")
-            s = _re.sub(r"<emoji[^>]*>", "", s)
-            s = s.replace("</emoji>", "")
+            # <emoji document_id=ID>X</emoji> → <tg-emoji emoji-id="ID">X</tg-emoji>
+            s = _re.sub(
+                r'<emoji\s+document_id=["\']?(\d+)["\']?\s*>(.*?)</emoji>',
+                r'<tg-emoji emoji-id="\1">\2</tg-emoji>',
+                s,
+                flags=_re.I | _re.S,
+            )
+            # already tg-emoji — keep
             return s[:4090]
 
-        text = _plain_html(text)
+        text = _to_bot_html(text)
+        chat_id = int(self.tg_id)
+
+        # Prefer Telethon bot client + generate_markup (working callbacks)
+        bot = getattr(self.inline, "bot", None)
+        if bot is not None:
+            kwargs = {"parse_mode": "HTML", "link_preview": False}
+            mk = reply_markup
+            if mk is None:
+                with contextlib.suppress(Exception):
+                    mk = self._markup()
+            if mk is not None:
+                kwargs["reply_markup"] = mk
+            with contextlib.suppress(Exception):
+                return await bot.send_message(chat_id, text, **kwargs)
+
+        # Bot API HTTP fallback with explicit inline_keyboard
         token = None
         with contextlib.suppress(Exception):
             token = getattr(self.inline, "_token", None) or getattr(
@@ -380,101 +433,44 @@ class UpdaterMod(loader.Module):
             )
         if not token:
             with contextlib.suppress(Exception):
-                if hasattr(self.inline, "ensure_inline_ready"):
-                    await self.inline.ensure_inline_ready()
-                token = getattr(self.inline, "_token", None)
-        if not token:
-            with contextlib.suppress(Exception):
                 token = self._db.get("hikkari.inline", "bot_token", None) or self._db.get(
                     "hikka.inline", "bot_token", None
                 )
+        if not token:
+            logger.warning("update notify skipped: no bot token/client")
+            return None
 
-        chat_id = int(self.tg_id)
-        ikb = None
-        if reply_markup:
-            with contextlib.suppress(Exception):
-                rows_out = []
-                for row in reply_markup:
-                    if not isinstance(row, (list, tuple)):
-                        row = [row]
-                    r = []
-                    for btn in row:
-                        if not isinstance(btn, dict):
-                            continue
-                        t = str(btn.get("text") or "•")[:64]
-                        item = {"text": t}
-                        if btn.get("url"):
-                            item["url"] = str(btn["url"])
-                        else:
-                            data = (
-                                btn.get("data")
-                                or btn.get("_callback_data")
-                                or (
-                                    "hikkari/update"
-                                    if "update" in t.lower() or "обнов" in t.lower()
-                                    else "hikkari/ignore_upd"
-                                    if "ignore" in t.lower() or "игнор" in t.lower()
-                                    else "noop"
-                                )
-                            )
-                            item["callback_data"] = str(data)[:64]
-                        r.append(item)
-                    if r:
-                        rows_out.append(r)
-                if rows_out:
-                    ikb = {"inline_keyboard": rows_out}
-
-        # 1) Bot API HTTP
-        if token:
-            payload = {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-            if ikb:
-                payload["reply_markup"] = ikb
-            try:
-                timeout = aiohttp.ClientTimeout(total=20)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json=payload,
-                    ) as resp:
-                        data = await resp.json(content_type=None)
-                if data.get("ok"):
-                    class _Msg:
-                        pass
-                    m = _Msg()
-                    res = data.get("result") or {}
-                    m.message_id = res.get("message_id")
-                    m.id = m.message_id
-                    return m
-                logger.warning("Bot API update notify failed: %s", data)
-            except Exception:
-                logger.warning("Bot API update notify request failed", exc_info=True)
-
-        # 2) Telethon bot client (still bot PM, not Saved Messages)
-        with contextlib.suppress(Exception):
-            bot = getattr(self.inline, "bot", None)
-            if bot is not None:
-                kwargs = {"parse_mode": "HTML", "link_preview": False}
-                if reply_markup is not None:
-                    with contextlib.suppress(Exception):
-                        kwargs["reply_markup"] = (
-                            self._markup() if callable(getattr(self, "_markup", None)) else reply_markup
-                        )
-                # prefer generate via inline
-                with contextlib.suppress(Exception):
-                    if reply_markup is not None and hasattr(self.inline, "generate_markup"):
-                        kwargs["reply_markup"] = self.inline.generate_markup(reply_markup)
-                return await bot.send_message(chat_id, text, **kwargs)
-
-        logger.warning("update notify skipped: no bot token/client")
+        ikb = {"inline_keyboard": self._markup_rows()}
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "reply_markup": ikb,
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json=payload,
+                ) as resp:
+                    data = await resp.json(content_type=None)
+            if data.get("ok"):
+                class _Msg:
+                    pass
+                m = _Msg()
+                res = data.get("result") or {}
+                m.message_id = res.get("message_id")
+                m.id = m.message_id
+                return m
+            logger.warning("Bot API update notify failed: %s", data)
+        except Exception:
+            logger.warning("Bot API update notify request failed", exc_info=True)
         return None
 
 
-    @loader.loop(interval=90, autostart=True)
+
     async def poller(self):
         """Check origin for new commits and notify owner in bot PM."""
         if NO_GIT:
@@ -539,11 +535,7 @@ class UpdaterMod(loader.Module):
             )
             markup = None
             with contextlib.suppress(Exception):
-                markup = (
-                    self._markup()
-                    if callable(getattr(self, "_markup", None))
-                    else None
-                )
+                markup = self._markup()
             m = await self._send_owner_notice(text, reply_markup=markup)
             if m is None:
                 logger.warning("update notice not delivered — will retry next poll")
