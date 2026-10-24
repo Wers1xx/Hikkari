@@ -107,13 +107,22 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """form() with config banner when available."""
+        """form() with config banner; InlineCall → edit (Heroku-style)."""
         kw = dict(kwargs)
         kw.update(self._cfg_banner_kwargs())
         if reply_markup is not None:
             kw["reply_markup"] = reply_markup
-        # silent form avoids ✨ hang
         kw.setdefault("silent", True)
+        # Navigation callbacks pass InlineCall — edit unit, do not open new form
+        try:
+            from ..inline.types import InlineCall, InlineMessage, BotInlineCall
+            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+                try:
+                    return await message.edit(text, reply_markup=kw.get("reply_markup"))
+                except Exception:
+                    pass
+        except Exception:
+            pass
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:

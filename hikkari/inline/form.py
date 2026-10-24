@@ -229,9 +229,43 @@ class Form(InlineUnit):
             )
             return False
 
+        # Heroku-style: callback → edit existing unit, never require Message
+        try:
+            from .types import InlineCall, InlineMessage, BotInlineCall
+        except Exception:
+            InlineCall = InlineMessage = BotInlineCall = ()  # type: ignore
+
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            try:
+                return await message.edit(
+                    text,
+                    reply_markup=reply_markup,
+                    **{
+                        k: v
+                        for k, v in {
+                            "photo": photo,
+                            "gif": gif,
+                            "file": file,
+                            "video": locals().get("video"),
+                            "silent": silent,
+                        }.items()
+                        if v is not None and k in ("photo", "gif", "file", "video")
+                    },
+                )
+            except TypeError:
+                # edit() may not accept media kwargs
+                try:
+                    return await message.edit(text, reply_markup=reply_markup)
+                except Exception:
+                    logger.exception("InlineCall.edit failed")
+                    return False
+            except Exception:
+                logger.exception("InlineCall.edit failed")
+                return False
+
         if not isinstance(message, (Message, int)):
             logger.error(
-                "Invalid type for `message`. Expected `Message` or `int`, got `%s`",
+                "Invalid type for `message`. Expected `Message`, `int` or InlineCall, got `%s`",
                 type(message),
             )
             return False

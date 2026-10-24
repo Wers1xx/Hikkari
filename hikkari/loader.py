@@ -1338,17 +1338,6 @@ class Modules:
             )
             instance._me = me
             instance.me = me
-        # Always ensure chat_id/chat exist (external modules rely on them)
-        tid = getattr(self.client, "tg_id", None)
-        if tid is not None:
-            if not hasattr(instance, "tg_id") or getattr(instance, "tg_id", None) is None:
-                instance.tg_id = tid
-                instance._tg_id = tid
-            if not hasattr(instance, "chat_id"):
-                instance.chat_id = tid
-            if not hasattr(instance, "chat"):
-                from .types import _OwnerChat
-                instance.chat = _OwnerChat(tid)
 
         for module in self.modules:
             if module.__class__.__name__ == instance.__class__.__name__:

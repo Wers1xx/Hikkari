@@ -622,13 +622,12 @@ class CommandDispatcher:
         except Exception as e:
             logger.warning("command_exc reply failed: %s", e)
             # Never dump errors into Saved Messages — try inline bot PM, else owner id
+            # Heroku-style: only bot PM — never user client to self (Saved Messages)
             with contextlib.suppress(Exception):
                 bot = getattr(getattr(message.client, "inline", None), "bot", None)
                 uid = getattr(message.client, "tg_id", None)
                 if bot is not None and uid:
                     await bot.send_message(int(uid), txt)
-                elif uid:
-                    await message.client.send_message(int(uid), txt)
 
     async def watcher_exc(self, *_):
         logger.exception("Error running watcher", extra={"stack": inspect.stack()})

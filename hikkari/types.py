@@ -154,21 +154,6 @@ class Module:
         self.allclients = self.allmodules.allclients
         self.tg_id: int = self._client.tg_id
         self._tg_id: int = self._client.tg_id
-        # Legacy modules: self.chat_id is int; self.chat is int-like with `.id`
-        self.chat_id: int = self._client.tg_id
-        self.chat = _OwnerChat(self._client.tg_id)
-
-    def __getattr__(self, name: str):
-        # Fallback for modules that skip internal_init or wipe attrs
-        if name in ("chat_id", "chat", "tg_id", "_tg_id"):
-            client = object.__getattribute__(self, "__dict__").get("_client") or object.__getattribute__(self, "__dict__").get("client")
-            tid = getattr(client, "tg_id", None) if client is not None else None
-            if name in ("tg_id", "_tg_id", "chat_id"):
-                return tid
-            if name == "chat" and tid is not None:
-                return _OwnerChat(tid)
-            return None
-        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     async def inline_ready(self):
         """Called when inline bot becomes ready (Heroku 2.2 parity)."""
@@ -742,8 +727,6 @@ class Library:
         self._client = self.allmodules.client
         self.tg_id = self._client.tg_id
         self._tg_id = self._client.tg_id
-        self.chat_id = self._client.tg_id
-        self.chat = _OwnerChat(self._client.tg_id)
         me = getattr(self._client, "hikkari_me", None) or getattr(
             self._client, "hikka_me", None
         )
