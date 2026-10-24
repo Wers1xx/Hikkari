@@ -1186,7 +1186,6 @@ class Form(InlineUnit):
                                             form.get("uid") or inline_query.query
                                         ),
                                         mime_type="video/mp4",
-                                        buttons=self.generate_markup(form["uid"]),
                                     )
                                 ],
                                 cache_time=0,
