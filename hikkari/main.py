@@ -68,55 +68,6 @@ from .tl_cache import CustomTelegramClient
 from .translations import Translator
 from .version import __version__
 
-# Soft-handle garbage TL constructor ids (desync noise: 0/1/2); re-raise real misses
-try:
-    import logging as _log
-    from hikkaritl.extensions import binaryreader as _br
-    from hikkaritl.errors import TypeNotFoundError as _TNF
-
-    _orig_tgread = _br.BinaryReader.tgread_object
-
-    def _soft_tgread_object(self):
-        try:
-            return _orig_tgread(self)
-        except _TNF as e:
-            cid = getattr(e, "request_constructor", None) or getattr(e, "constructor_id", None)
-            try:
-                # TypeNotFoundError args often (constructor_id, remaining)
-                if e.args and isinstance(e.args[0], int):
-                    cid = e.args[0]
-            except Exception:
-                pass
-            if cid in (0, 1, 2, 0x00000000, 0x00000001, 0x00000002):
-                _log.getLogger("hikkaritl.tl").debug("TL desync skip constructor %s", cid)
-                return None
-            raise
-
-    _br.BinaryReader.tgread_object = _soft_tgread_object
-except Exception:
-    pass
-
-try:
-    class _BinaryNoiseFilter(logging.Filter):
-        def filter(self, record):
-            try:
-                msg = record.getMessage()
-            except Exception:
-                return True
-            # drop raw TL dumps / binary noise
-            if "\\x00" in msg or msg.count("\\x") > 8:
-                return False
-            if "TypeNotFoundError" in msg and len(msg) > 500:
-                record.msg = "TypeNotFoundError (binary dump suppressed)"
-                record.args = ()
-                return True
-            return True
-    for _n in ("hikkaritl", "hikkaritl.network", "hikkaritl.tl"):
-        logging.getLogger(_n).addFilter(_BinaryNoiseFilter())
-except Exception:
-    pass
-
-
 
 BASE_DIR = (
     "/data"
@@ -1378,22 +1329,24 @@ class Hikkari:
         if first and not os.environ.get("HIKKARI_FAST_START"):
             await self._badge(client)
 
-        # Stay alive across MTProto drops (Heroku-style reconnect loop).
-        # Without this, any disconnect ends the process → supervisor restart storm.
+        # Stay alive across MTProto drops with backoff (no tight reconnect spin).
+        _backoff = 5
         while True:
             try:
                 if not client.is_connected():
                     logging.warning("Client offline, connecting…")
                     await client.connect()
                 await client.run_until_disconnected()
+                _backoff = 5
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logging.exception("Client session error")
             logging.warning(
-                "Disconnected — reconnect in 5s (pid will stay up)"
+                "Disconnected — reconnect in %ss (process stays up)", _backoff
             )
-            await asyncio.sleep(5)
+            await asyncio.sleep(_backoff)
+            _backoff = min(_backoff * 2, 60)
 
     async def _main(self):
         """Main entrypoint"""
