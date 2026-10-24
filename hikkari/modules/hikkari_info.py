@@ -423,10 +423,13 @@ class HikkariInfoMod(loader.Module):
 
         banner = self.config.get("banner_url")
         media = utils.resolve_banner_media(banner) if banner else None
-        kwargs = {}
-        if media:
-            kwargs.update(media)
-        await utils.answer(message, text, **kwargs)
+        # resolve_banner_media returns path / URL / InputMediaWebPage — not a dict
+        if media is None:
+            await utils.answer(message, text)
+        elif isinstance(media, str) and media.startswith("audio_ref:"):
+            await utils.answer(message, text)
+        else:
+            await utils.answer(message, text, file=media)
 
 
     async def ubinfo(self, message: Message):

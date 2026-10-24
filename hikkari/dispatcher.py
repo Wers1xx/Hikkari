@@ -452,9 +452,11 @@ class CommandDispatcher:
                     return False
             elif tag[1].lower() not in self._cached_usernames:
                 return False
+        elif event.out or initiator == self._client.tg_id:
+            # Own outgoing messages always handled (groups, channels, pm)
+            pass
         elif (
-            event.out
-            or event.mentioned
+            event.mentioned
             and event.message is not None
             and event.message.message is not None
             and not any(
