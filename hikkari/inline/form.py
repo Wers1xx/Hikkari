@@ -1182,6 +1182,9 @@ class Form(InlineUnit):
                                         id=utils.rand(20),
                                         text=form_text,
                                         parse_mode="HTML",
+                                        buttons=self.generate_markup(
+                                            form.get("uid") or inline_query.query
+                                        ),
                                         mime_type="video/mp4",
                                         buttons=self.generate_markup(form["uid"]),
                                     )

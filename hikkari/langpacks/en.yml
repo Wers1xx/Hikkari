@@ -678,6 +678,7 @@ help:
   show_preview_in_help: 'Show # meta banner in help preview [module]'
 hikkari_info:
   info_message: "{}\n<blockquote><b>Component</b>\t\t<b>Current release</b>\n────────────────────\n<code>Owner</code>\t\t{me}\n<code>Version</code>\t\t{version}\n<code>Prefix</code>\t\t{prefix}\n<code>Uptime</code>\t\t{uptime}\n<code>Branch</code>\t\t{branch}\n<code>CPU</code>\t\t{cpu_usage}\n<code>RAM</code>\t\t{ram_usage}\n<code>Ping</code>\t\t{ping}\n<code>Update</code>\t\t{upd}\n<code>Host</code>\t\t{platform}\n<code>OS</code>\t\t{os}\n<code>Python</code>\t\t{python_ver}</blockquote>"
+  rich_info_message: "{}\n<blockquote><b>Component</b>\t\t<b>Current release</b>\n────────────────────\n<code>Owner</code>\t\t{me}\n<code>Version</code>\t\t{version}\n<code>Prefix</code>\t\t{prefix}\n<code>Uptime</code>\t\t{uptime}\n<code>Branch</code>\t\t{branch}\n<code>CPU</code>\t\t{cpu_usage}\n<code>RAM</code>\t\t{ram_usage}\n<code>Ping</code>\t\t{ping}\n<code>Update</code>\t\t{upd}\n<code>Host</code>\t\t{platform}\n<code>OS</code>\t\t{os}\n<code>Python</code>\t\t{python_ver}</blockquote>"
   non_detectable: "<tg-emoji emoji-id=5210952531676504517>❌</tg-emoji> <b>This component cannot be detected on your server!</b>"
   ping_emoji: "emoji for ping in your info"
   send_info: "Send userbot info"

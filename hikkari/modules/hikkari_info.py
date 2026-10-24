@@ -330,7 +330,14 @@ class HikkariInfoMod(loader.Module):
                 # Prefer langpack-style template if present in strings
                 tmpl = None
                 with contextlib.suppress(Exception):
-                    tmpl = self.strings.get("rich_info_message")
+                    raw = self.strings.get("rich_info_message")
+                    if raw and not str(raw).startswith("Unknown strings"):
+                        tmpl = raw
+                if not tmpl:
+                    with contextlib.suppress(Exception):
+                        raw = self.strings.get("info_message")
+                        if raw and not str(raw).startswith("Unknown strings"):
+                            tmpl = raw
                 custom = self.config.get("custom_message")
                 if custom and str(custom).strip() and ("<details" in str(custom) or "<table" in str(custom) or "<figure" in str(custom)):
                     html = str(custom)

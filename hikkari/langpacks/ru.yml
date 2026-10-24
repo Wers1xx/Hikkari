@@ -648,6 +648,7 @@ help:
   name: Help
 hikkari_info:
   info_message: "{}\n<blockquote><b>Компонент</b>\t\t<b>Значение</b>\n────────────────────\n<code>Владелец</code>\t\t{me}\n<code>Версия</code>\t\t{version}\n<code>Префикс</code>\t\t{prefix}\n<code>Аптайм</code>\t\t{uptime}\n<code>Ветка</code>\t\t{branch}\n<code>CPU</code>\t\t{cpu_usage}\n<code>RAM</code>\t\t{ram_usage}\n<code>Пинг</code>\t\t{ping}\n<code>Обновление</code>\t\t{upd}\n<code>Хост</code>\t\t{platform}\n<code>ОС</code>\t\t{os}\n<code>Python</code>\t\t{python_ver}</blockquote>"
+  rich_info_message: "{}\n<blockquote><b>Компонент</b>\t\t<b>Значение</b>\n────────────────────\n<code>Владелец</code>\t\t{me}\n<code>Версия</code>\t\t{version}\n<code>Префикс</code>\t\t{prefix}\n<code>Аптайм</code>\t\t{uptime}\n<code>Ветка</code>\t\t{branch}\n<code>CPU</code>\t\t{cpu_usage}\n<code>RAM</code>\t\t{ram_usage}\n<code>Пинг</code>\t\t{ping}\n<code>Обновление</code>\t\t{upd}\n<code>Хост</code>\t\t{platform}\n<code>ОС</code>\t\t{os}\n<code>Python</code>\t\t{python_ver}</blockquote>"
   non_detectable: "<tg-emoji emoji-id=5210952531676504517>❌</tg-emoji> <b>Этот компонент невозможно обнаружить на вашем сервере!</b>"
   ping_emoji: "Эмодзи для пинга в инфо"
   send_info: "Отправить информацию о юзерботе"
