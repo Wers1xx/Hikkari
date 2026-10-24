@@ -47,8 +47,8 @@ class HikkariInfoMod(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "rich_mode",
-                True,
-                lambda: "Show .info as Rich message (Premium)",
+                False,
+                lambda: "Show .info as Rich message (Premium) — off by default (classic Heroku-style)",
                 validator=loader.validators.Boolean(),
             ),
 
@@ -320,253 +320,114 @@ class HikkariInfoMod(loader.Module):
             return False
 
     async def infocmd(self, message: Message):
-        """Show userbot info — Heroku 2.2 Rich when rich_mode is on"""
+        """Show userbot info. Classic by default; Rich only if rich_mode is on."""
         start = time.perf_counter_ns()
-        from .. import main as _main
-        from .._internal import normalize_rich_html
-        if self.config.get("rich_mode", True):
+        data = await self._info_placeholders(start)
+
+        class _Safe(dict):
+            def __missing__(self, key):
+                return ""
+
+        safe = _Safe({k: str(v) for k, v in data.items()})
+
+        # --- Rich path (explicit opt-in only) ---
+        if self.config.get("rich_mode", False):
             try:
-                data = await self._info_placeholders(start)
-                # Prefer langpack-style template if present in strings
-                tmpl = None
-                with contextlib.suppress(Exception):
-                    raw = self.strings.get("rich_info_message")
-                    if raw and not str(raw).startswith("Unknown strings"):
-                        tmpl = raw
-                if not tmpl:
-                    with contextlib.suppress(Exception):
-                        raw = self.strings.get("info_message")
-                        if raw and not str(raw).startswith("Unknown strings"):
-                            tmpl = raw
-                custom = self.config.get("custom_message")
-                if custom and str(custom).strip() and ("<details" in str(custom) or "<table" in str(custom) or "<figure" in str(custom)):
-                    html = str(custom)
-                elif tmpl:
-                    html = str(tmpl)
-                else:
-                    html = (
-                        "<details><summary>Overview</summary>"
-                        "<p><b>Owner</b>: {me}</p>"
-                        "<p><b>Version</b>: {version}</p>"
-                        "<p><b>Prefix</b>: {prefix}</p>"
-                        "<p><b>Uptime</b>: {uptime}</p>"
-                        "<p><b>Branch</b>: {branch}</p>"
-                        "</details>"
-                        "<details><summary>Status</summary>"
-                        "<p><b>Updates</b>: {upd}</p>"
-                        "<p><b>CPU</b>: {cpu_usage}</p>"
-                        "<p><b>RAM</b>: {ram_usage}</p>"
-                        "<p><b>Ping</b>: {ping}</p>"
-                        "</details>"
-                        "<details><summary>Environment</summary>"
-                        "<p><b>Host</b>: {platform}</p>"
-                        "<p><b>OS</b>: {os}</p>"
-                        "<p><b>Python</b>: {python_ver}</p>"
-                        "</details>"
-                    )
-                class _Safe(dict):
-                    def __missing__(self, k):
-                        return "{" + k + "}"
-                try:
-                    html = html.format_map(_Safe(**{k: str(v) for k, v in data.items()}))
-                except Exception:
-                    pass
-                banner = self.config.get("banner_url")
-                if isinstance(banner, list) and banner:
-                    import random as _r
-                    banner = _r.choice(banner)
-                banner = str(banner or "").strip()
-                if banner.startswith("local:"):
-                    banner = (
-                        "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
-                        + banner[6:].lstrip("/")
-                    )
-                if not banner.startswith(("http://", "https://")):
-                    banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg"
-                if "<figure" not in html.lower() and not banner.lower().endswith(
-                    (".mp4", ".webm", ".gif", ".mov")
-                ):
-                    html = f'<figure><img src="{banner}"/></figure>' + html
-                html = normalize_rich_html(html)
-                await utils.answer_with_media_fallback(message, rich_message=html)
-                return
-            except Exception:
-                logger.exception("Heroku-style rich info failed, fallback")
+                from .._internal import normalize_rich_html
+                from ..utils.rich import can_use_rich
 
-        banner = self.config["banner_url"]
-        media = utils.resolve_banner_media(banner)
-
-        # Rich via @bot (Premium + rich_mode) — custom_message keeps full Rich HTML
-        try:
-            from ..utils.rich import can_use_rich
-            from ..utils.rich_api import (
-                build_info_html,
-                pick_banner_url,
-                inject_banner_html,
-                ensure_audio_figcaptions,
-                to_rich_compatible,
-                parse_rich_url_buttons,
-                try_send_rich,
-            )
-            from ..utils.other import is_audio_banner as _is_audio_b
-            if (
-                not _is_audio_b(self.config.get("banner_url"))
-                and can_use_rich(self._client, getattr(self, "_db", None))
-            ):
-                banner_url = pick_banner_url(self.config.get("banner_url"))
-                custom = self.config.get("custom_message")
-                if custom and str(custom).strip():
-                    data = await self._info_placeholders(start)
-                    # Safe format: missing keys → empty
-                    class _Safe(dict):
-                        def __missing__(self, key):
-                            return "{" + key + "}"
-                    try:
-                        html = apply_placeholders(str(custom), data)
-                    except Exception:
-                        logger.exception("custom_message format failed")
+                if can_use_rich(self._client, getattr(self, "_db", None)):
+                    tmpl = None
+                    for key in ("rich_info_message", "info_message"):
+                        with contextlib.suppress(Exception):
+                            raw = self.strings.get(key)
+                            if raw and not str(raw).startswith("Unknown strings"):
+                                tmpl = raw
+                                break
+                    custom = self.config.get("custom_message")
+                    if custom and str(custom).strip() and any(
+                        x in str(custom) for x in ("<details", "<table", "<figure")
+                    ):
                         html = str(custom)
-                    html = to_rich_compatible(html)
-                    html = ensure_audio_figcaptions(html)
-                    # force=False: never eat audio/slideshow figures from custom_message
-                    html = inject_banner_html(html, banner_url, force=False)
-                else:
-                    rows = [
-                        (
-                            "Owner",
-                            utils.escape_html(
-                                get_display_name(self._client.hikkari_me)
-                            ),
-                        ),
-                        ("Version", ".".join(map(str, version.__version__))),
-                        (
-                            "Build",
-                            str(utils.get_commit_url())
-                            if hasattr(utils, "get_commit_url")
-                            else "—",
-                        ),
-                        (
-                            "Hikkari TL",
-                            str(getattr(hikkaritl, "__version__", "?")),
-                        ),
-                        ("Prefix", utils.escape_html(self.get_prefix())),
-                        ("Uptime", utils.formatted_uptime()),
-                        (
-                            "Ping",
-                            f"{round((time.perf_counter_ns() - start) / 10**6, 3)} ms",
-                        ),
-                        (
-                            "Platform",
-                            str(utils.get_named_platform())
-                            if hasattr(utils, "get_named_platform")
-                            else "—",
-                        ),
-                        ("Python", lib_platform.python_version()),
-                        ("Developers", "@Wers1xx"),
-                    ]
-                    html = build_info_html(
-                        title="Hikkari Userbot",
-                        rows=rows,
-                        footer="You are a happy owner of Hikkari!",
-                        banner_url=banner_url,
-                    )
-                    html = to_rich_compatible(html)
-                    html = inject_banner_html(html, banner_url, force=True)
-                    btn_html = parse_rich_url_buttons(
-                        str(self.config.get("rich_buttons") or "")
-                    )
-                    if btn_html:
-                        html = html + "\n" + btn_html
-
-                logger.info("info rich html length=%s", len(html))
-                m = None
-                if self._bot_ready_for_rich():
-                    m = await self.inline.rich(
-                        message,
-                        html,
-                        title="Hikkari Info",
-                        description="Rich info",
-                        thumbnail_url=banner_url,
-                        silent=True,
-                    )
-                    if not m and banner_url:
-                        # Heavy video banner often kills Rich — text-only retry
-                        html2 = html
-                        if (
-                            html2.lower().startswith("<figure")
-                            or "<figure" in html2.lower()[:200]
-                        ):
-                            html2 = re.sub(
-                                r"<figure\b[^>]*>.*?</figure>\s*",
-                                "",
-                                html2,
-                                count=1,
-                                flags=re.I | re.S,
-                            )
-                        m = await self.inline.rich(
-                            message,
-                            html2,
-                            title="Hikkari Info",
-                            description="Rich info",
-                            thumbnail_url=None,
-                            silent=True,
+                    elif tmpl:
+                        html = str(tmpl)
+                    else:
+                        html = (
+                            "<p><b>Owner</b>: {me}</p>"
+                            "<p><b>Version</b>: {version}</p>"
+                            "<p><b>Prefix</b>: {prefix}</p>"
+                            "<p><b>Uptime</b>: {uptime}</p>"
+                            "<p><b>Ping</b>: {ping}</p>"
                         )
-                    if m:
-                        return
-                # Bot API sendRichMessage — keeps <table> and <tg-button>
-                chat = utils.get_chat_id(message)
-                if chat and await try_send_rich(self._client, chat, html):
-                    with contextlib.suppress(Exception):
-                        if message.out:
-                            await message.delete()
+                    try:
+                        html = html.format_map(safe)
+                    except Exception:
+                        pass
+                    # drop leftover empty {} from legacy templates
+                    html = html.replace("{}", "").strip()
+                    banner = self.config.get("banner_url")
+                    if isinstance(banner, list) and banner:
+                        import random as _r
+                        banner = _r.choice(banner)
+                    banner = str(banner or "").strip()
+                    if banner.startswith("local:"):
+                        banner = (
+                            "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
+                            + banner[6:].lstrip("/")
+                        )
+                    if not banner.startswith(("http://", "https://")):
+                        banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg"
+                    if "<figure" not in html.lower() and not banner.lower().endswith(
+                        (".mp4", ".webm", ".gif", ".mov")
+                    ):
+                        html = f'<figure><img src="{banner}"/></figure>' + html
+                    html = normalize_rich_html(html)
+                    await utils.answer_with_media_fallback(message, rich_message=html)
                     return
-                logger.warning(
-                    "info rich failed (inline + sendRichMessage) → classic; "
-                    "check Premium, rich_mode, bot token"
-                )
-        except Exception:
-            logger.warning("rich via inline failed", exc_info=True)
+            except Exception:
+                logger.exception("rich info failed, classic fallback")
 
-
+        # --- Classic single message (Heroku-style default) ---
+        tmpl = None
+        with contextlib.suppress(Exception):
+            raw = self.strings.get("info_message")
+            if raw and not str(raw).startswith("Unknown strings"):
+                tmpl = raw
+        custom = self.config.get("custom_message")
+        if custom and str(custom).strip() and not any(
+            x in str(custom) for x in ("<details", "<table", "<figure")
+        ):
+            text = str(custom)
+        elif tmpl:
+            text = str(tmpl)
+        else:
+            text = (
+                "<b>Owner</b>: {me}\n"
+                "<b>Version</b>: {version}\n"
+                "<b>Prefix</b>: {prefix}\n"
+                "<b>Uptime</b>: {uptime}\n"
+                "<b>Branch</b>: {branch}\n"
+                "<b>CPU</b>: {cpu_usage}\n"
+                "<b>RAM</b>: {ram_usage}\n"
+                "<b>Ping</b>: {ping}\n"
+                "<b>Update</b>: {upd}\n"
+                "<b>Host</b>: {platform}\n"
+                "<b>OS</b>: {os}\n"
+                "<b>Python</b>: {python_ver}"
+            )
         try:
-            from ..utils.other import is_audio_banner, audio_banner_send_kwargs
-            _akw = (
-                audio_banner_send_kwargs(self.config.get("banner_url"))
-                if is_audio_banner(self.config.get("banner_url"))
-                else {}
-            )
-            if _akw:
-                media = None  # use document ref kwargs instead
-            match True:
-                case _ if self.config["custom_message"] is None:
-                    await utils.answer(
-                        message,
-                        await self._render_info(start),
-                        file=media,
-                        reply_to=getattr(message, "reply_to_msg_id", None),
-                        invert_media=self.config["invert_media"] if not _akw else False,
-                        **_akw,
-                    )
-                case _:
-                    if "{ping}" in (self.config["custom_message"] or "") and not _akw:
-                        message = await utils.answer(message, self.config["ping_emoji"])
-                    await utils.answer(
-                        message,
-                        await self._render_info(start),
-                        file=media,
-                        reply_to=getattr(message, "reply_to_msg_id", None),
-                        invert_media=self.config["invert_media"] if not _akw else False,
-                        **_akw,
-                    )
-        except WebpageMediaEmptyError:
-            await utils.answer(
-                message,
-                self.strings["no_banner"].format(
-                    link=self.config["banner_url"],
-                ),
-                reply_to=getattr(message, "reply_to_msg_id", None),
-            )
+            text = text.format_map(safe)
+        except Exception:
+            logger.exception("info_message format failed")
+        text = text.replace("{}", "").strip()
 
-    @loader.command()
+        banner = self.config.get("banner_url")
+        media = utils.resolve_banner_media(banner) if banner else None
+        kwargs = {}
+        if media:
+            kwargs.update(media)
+        await utils.answer(message, text, **kwargs)
+
+
     async def ubinfo(self, message: Message):
         await utils.answer(message, self.strings["desc"])
