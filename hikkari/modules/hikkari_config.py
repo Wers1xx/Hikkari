@@ -117,7 +117,7 @@ class HikkariConfigMod(loader.Module):
         return await self.inline.form(text, message=message, **kw)
 
     def _cfg_banner_kwargs(self) -> dict:
-        """photo or video for config forms from banner_url."""
+        """photo / video / gif for config forms from banner_url."""
         from pathlib import Path as _P
         from ..utils.other import ensure_builtin_asset
 
@@ -129,22 +129,40 @@ class HikkariConfigMod(loader.Module):
         if not url:
             return {}
 
+        # local: path exists
+        if not url.startswith(("http://", "https://")):
+            path = _P(url)
+            if path.is_file():
+                url = str(path.resolve())
+            else:
+                # try assets by name
+                local = ensure_builtin_asset(path.name)
+                if local and _P(local).is_file():
+                    url = str(local)
+
         low = url.lower().split("?")[0]
         video_ext = (".mp4", ".webm", ".mov", ".mkv", ".m4v", ".avi")
-        photo_ext = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
-        is_video = low.endswith(video_ext)
-        is_photo = low.endswith(photo_ext)
-        # local file without clear extension: sniff by suffix of path
-        if not is_video and not is_photo and not url.startswith(("http://", "https://")):
+        gif_ext = (".gif",)
+        photo_ext = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+        # also detect /video/ or mime-ish paths
+        is_video = low.endswith(video_ext) or any(
+            x in low for x in ("/video/", ".mp4/", "format=mp4")
+        )
+        is_gif = low.endswith(gif_ext)
+        if not is_video and not is_gif and not url.startswith(("http://", "https://")):
             try:
-                is_video = _P(url).suffix.lower() in video_ext
-                is_photo = _P(url).suffix.lower() in photo_ext
+                suf = _P(url).suffix.lower()
+                is_video = suf in video_ext
+                is_gif = suf in gif_ext
             except Exception:
                 pass
-        # unknown http URL without extension → treat as photo (webpage/preview)
         if is_video:
             return {"video": url}
+        if is_gif:
+            # form supports gif= ; photo also accepts gif URLs as fallback
+            return {"gif": url}
         return {"photo": url}
+
 
     @staticmethod
     def prep_value(value: typing.Any) -> typing.Any:
@@ -1590,12 +1608,9 @@ class HikkariConfigMod(loader.Module):
             for folder_name in sorted(all_folders.keys())
         ]
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        await utils.answer(
-            call,
+        await self._cfg_form(
             self.strings["choose_core"],
-            photo=str(_cfg_banner) if _cfg_banner and Path(_cfg_banner).is_file() else None,
+            call,
             reply_markup=[
                 [
                     {
@@ -1649,15 +1664,9 @@ class HikkariConfigMod(loader.Module):
         form_kwargs = dict(draft.kwargs)
         form_kwargs.pop("inline_message_id", None)
 
-        from .. import main as _main
-        _cfg_banner = utils.ensure_builtin_asset("hikkari-config.jpg")
-        if (
-            "photo" not in form_kwargs
-            and "video" not in form_kwargs
-            and _cfg_banner
-            and Path(_cfg_banner).is_file()
-        ):
-            form_kwargs["photo"] = str(_cfg_banner)
+        # User banner (photo/video) wins; default only if nothing set
+        for k, v in self._cfg_banner_kwargs().items():
+            form_kwargs.setdefault(k, v)
         await self._cfg_form(
             draft.text,
             message=message,
