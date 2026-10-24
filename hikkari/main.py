@@ -96,6 +96,26 @@ try:
 except Exception:
     pass
 
+try:
+    class _BinaryNoiseFilter(logging.Filter):
+        def filter(self, record):
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return True
+            # drop raw TL dumps / binary noise
+            if "\\x00" in msg or msg.count("\\x") > 8:
+                return False
+            if "TypeNotFoundError" in msg and len(msg) > 500:
+                record.msg = "TypeNotFoundError (binary dump suppressed)"
+                record.args = ()
+                return True
+            return True
+    for _n in ("hikkaritl", "hikkaritl.network", "hikkaritl.tl"):
+        logging.getLogger(_n).addFilter(_BinaryNoiseFilter())
+except Exception:
+    pass
+
 
 
 BASE_DIR = (

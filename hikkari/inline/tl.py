@@ -450,21 +450,47 @@ class TelethonBot:
         disable_notification: bool | None = None,
         **kwargs,
     ):
-        return self._with_message_id_alias(
-            await self.client.send_message(
-                chat_id,
-                text,
-                parse_mode="HTML",
-                buttons=self._build_reply_markup(reply_markup),
-                silent=(
-                    disable_notification
-                    if disable_notification is not None
-                    else kwargs.get("disable_notification")
-                ),
-                link_preview=not kwargs.get("disable_web_page_preview", False),
-                **self._thread_kwargs(message_thread_id),
-            )
+        """Send bot PM message. On ReplyMarkupInvalidError — retry without buttons."""
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        buttons = self._build_reply_markup(reply_markup) if reply_markup is not None else None
+        send_kw = dict(
+            parse_mode="HTML",
+            silent=(
+                disable_notification
+                if disable_notification is not None
+                else kwargs.get("disable_notification")
+            ),
+            link_preview=not kwargs.get("disable_web_page_preview", False),
+            **self._thread_kwargs(message_thread_id),
         )
+        # strip kwargs already handled
+        for k in (
+            "disable_notification",
+            "disable_web_page_preview",
+            "link_preview",
+            "parse_mode",
+            "buttons",
+            "reply_markup",
+        ):
+            kwargs.pop(k, None)
+        try:
+            return self._with_message_id_alias(
+                await self.client.send_message(
+                    chat_id, text, buttons=buttons, **send_kw, **kwargs
+                )
+            )
+        except Exception as e:
+            en = type(e).__name__
+            if "ReplyMarkupInvalid" in en or "REPLY_MARKUP" in str(e).upper():
+                _log.warning("bot send_message invalid markup, retry plain: %s", e)
+                return self._with_message_id_alias(
+                    await self.client.send_message(
+                        chat_id, text, buttons=None, **send_kw, **kwargs
+                    )
+                )
+            raise
+
 
     async def send_document(
         self,
