@@ -1378,7 +1378,22 @@ class Hikkari:
         if first and not os.environ.get("HIKKARI_FAST_START"):
             await self._badge(client)
 
-        await client.run_until_disconnected()
+        # Stay alive across MTProto drops (Heroku-style reconnect loop).
+        # Without this, any disconnect ends the process → supervisor restart storm.
+        while True:
+            try:
+                if not client.is_connected():
+                    logging.warning("Client offline, connecting…")
+                    await client.connect()
+                await client.run_until_disconnected()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("Client session error")
+            logging.warning(
+                "Disconnected — reconnect in 5s (pid will stay up)"
+            )
+            await asyncio.sleep(5)
 
     async def _main(self):
         """Main entrypoint"""
