@@ -723,43 +723,27 @@ def make_button(
     web_app: str | dict | None = None,
     copy_text: str | None = None,
 ):
-    # Heroku-compatible: Button.* passes style/icon into KeyboardButtonStyle
-    if icon is not None:
-        try:
-            icon = int(str(icon).strip())
-        except (TypeError, ValueError):
-            icon = None
-
+    # Plain buttons only — style/icon → ReplyMarkupInvalid on bot PM with hikkaritl
     if url is not None:
-        return Button.url(text, url, style=style, icon=icon)
-
+        return Button.url(text, url)
     if data is not None:
-        return Button.inline(text, data, style=style, icon=icon)
-
+        return Button.inline(text, data)
     if switch_inline_query_current_chat is not None:
         return Button.switch_inline(
-            text,
-            switch_inline_query_current_chat,
-            same_peer=True,
-            style=style,
-            icon=icon,
+            text, switch_inline_query_current_chat, same_peer=True
         )
-
     if switch_inline_query is not None:
-        return Button.switch_inline(
-            text,
-            switch_inline_query,
-            same_peer=False,
-            style=style,
-            icon=icon,
-        )
-
+        return Button.switch_inline(text, switch_inline_query)
     if web_app is not None:
-        app_url = web_app if isinstance(web_app, str) else web_app["url"]
-        return types.KeyboardButtonWebView(text, app_url)
-
+        try:
+            return Button.web_view(text, web_app if isinstance(web_app, str) else web_app)
+        except Exception:
+            return Button.inline(text, b"webapp")
     if copy_text is not None:
-        return types.KeyboardButtonCopy(text, copy_text)
+        try:
+            return Button.copy(text, copy_text)
+        except Exception:
+            return Button.inline(text, b"copy")
+    return Button.inline(text, b"noop")
 
-    return Button.inline(text, text, style=style, icon=icon)
 

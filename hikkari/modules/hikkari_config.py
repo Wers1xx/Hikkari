@@ -131,6 +131,8 @@ class HikkariConfigMod(loader.Module):
         from ..utils.other import ensure_builtin_asset
 
         url = str(self.config.get("banner_url") or "").strip()
+        if url and utils.is_bad_media(url):
+            url = ""
         if not url:
             p = ensure_builtin_asset("hikkari-config.jpg")
             if p and _P(p).is_file():
