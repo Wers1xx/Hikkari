@@ -68,6 +68,36 @@ from .tl_cache import CustomTelegramClient
 from .translations import Translator
 from .version import __version__
 
+# Soft-handle garbage TL constructor ids (desync noise: 0/1/2); re-raise real misses
+try:
+    import logging as _log
+    from hikkaritl.extensions import binaryreader as _br
+    from hikkaritl.errors import TypeNotFoundError as _TNF
+
+    _orig_tgread = _br.BinaryReader.tgread_object
+
+    def _soft_tgread_object(self):
+        try:
+            return _orig_tgread(self)
+        except _TNF as e:
+            cid = getattr(e, "request_constructor", None) or getattr(e, "constructor_id", None)
+            try:
+                # TypeNotFoundError args often (constructor_id, remaining)
+                if e.args and isinstance(e.args[0], int):
+                    cid = e.args[0]
+            except Exception:
+                pass
+            if cid in (0, 1, 2, 0x00000000, 0x00000001, 0x00000002):
+                _log.getLogger("hikkaritl.tl").debug("TL desync skip constructor %s", cid)
+                return None
+            raise
+
+    _br.BinaryReader.tgread_object = _soft_tgread_object
+except Exception:
+    pass
+
+
+
 BASE_DIR = (
     "/data"
     if "DOCKER" in os.environ

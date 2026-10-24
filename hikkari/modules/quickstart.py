@@ -1,3 +1,4 @@
+import contextlib
 # ©️ Dan Gazizullin (hikariatama), 2021-2023
 # This file is a part of Hikka Userbot
 # 🌐 https://github.com/hikariatama/Hikka
@@ -204,12 +205,24 @@ class Quickstart(loader.Module):
         if self.get("no_msg"):
             return
 
-        await self.inline.bot.send_message(
-            self._client.tg_id,
-            self.text(),
-            reply_markup=self.inline.generate_markup(self.mark()),
-            disable_web_page_preview=True,
-        )
+        markup = None
+        with contextlib.suppress(Exception):
+            markup = self.inline.generate_markup(self.mark())
+        try:
+            await self.inline.bot.send_message(
+                self._client.tg_id,
+                self.text(),
+                reply_markup=markup,
+                link_preview=False,
+            )
+        except Exception as e:
+            logger.warning("quickstart bot message failed (%s), retry without markup", e)
+            with contextlib.suppress(Exception):
+                await self.inline.bot.send_message(
+                    self._client.tg_id,
+                    self.text(),
+                    link_preview=False,
+                )
 
         self.set("no_msg", True)
 
