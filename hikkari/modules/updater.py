@@ -65,7 +65,7 @@ class UpdaterMod(loader.Module):
 
     strings = {"name": "Updater"}
     # `git fetch` over the network; poller() itself still runs every 60s locally
-    _GIT_FETCH_INTERVAL = 300
+    _GIT_FETCH_INTERVAL = 120
     _EMFILE_FETCH_BACKOFF = 900
 
     def __init__(self):
@@ -284,10 +284,7 @@ class UpdaterMod(loader.Module):
             now = time.monotonic()
             if now >= self._git_fetch_backoff_until:
                 # First poll always fetches; then every _GIT_FETCH_INTERVAL seconds
-                if os.environ.get("HIKKARI_FAST_START") and self._last_git_fetch == 0.0:
-                    # Skip blocking fetch right after restart
-                    self._last_git_fetch = now
-                elif (
+                if (
                     self._last_git_fetch == 0.0
                     or now - self._last_git_fetch >= self._GIT_FETCH_INTERVAL
                 ):
@@ -477,8 +474,9 @@ class UpdaterMod(loader.Module):
         return None
 
 
+    @loader.loop(interval=90, autostart=True)
     async def poller(self):
-
+        """Check origin for new commits and notify owner in bot PM."""
         if NO_GIT:
             return
         # git/GitPython calls block → run them in a worker thread, otherwise the
@@ -1677,9 +1675,21 @@ class UpdaterMod(loader.Module):
             self._notified = self.get("last_notified") or None
 
         async def _boot_poll():
-            # First update check soon after ready (was 20s — felt like slow boot)
-            await asyncio.sleep(3)
+            # Wait for inline bot so Bot API notify works
+            for _ in range(30):
+                tok = None
+                with contextlib.suppress(Exception):
+                    tok = getattr(self.inline, "_token", None) or getattr(
+                        self.inline, "token", None
+                    )
+                if tok:
+                    break
+                await asyncio.sleep(1)
+            else:
+                await asyncio.sleep(5)
             with contextlib.suppress(Exception):
+                # Force a fetch on first check after boot
+                self._last_git_fetch = 0.0
                 await self.poller()
 
         asyncio.ensure_future(_boot_poll())
