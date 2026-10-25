@@ -597,16 +597,17 @@ class CoreMod(loader.Module):
                 "extra_prefixes",
                 prefixes[1:] if len(prefixes) > 1 else [],
             )
-            try:
-                text = self.strings["prefix_set"].format(
-                    "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji>",
-                    utils.escape_html(" ".join(prefixes)),
-                    utils.escape_html(str(old)),
-                )
-            except Exception:
-                text = (
-                    f"✅ Prefix: <code>{utils.escape_html(' '.join(prefixes))}</code>"
-                )
+            text = (
+                "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Prefix set!</b>"
+                + chr(10)
+                + "<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> <b>New:</b> <code>"
+                + utils.escape_html(" ".join(prefixes))
+                + "</code>"
+                + chr(10)
+                + "<tg-emoji emoji-id=5877318991141220933>🔁</tg-emoji> <b>Old:</b> <code>"
+                + utils.escape_html(str(old))
+                + "</code>"
+            )
             await utils.answer(message, text)
             return
 
