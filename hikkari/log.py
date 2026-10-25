@@ -334,8 +334,14 @@ class TelegramLogsHandler(logging.Handler):
     async def get_logs_topic_id_by_client(self, client_id: int) -> int | None:
         """Get logs topic ID from database"""
         allmods = self._mods[client_id]
-        topic_id = await utils.get_topic_id(allmods.db, "Logs")
+        topic_id = utils.get_topic_id(allmods.db, "Logs")
         if not topic_id:
+            if not getattr(allmods, "logchat", None):
+                logging.debug(
+                    "No logs topic and no logchat for client %s — skip create",
+                    client_id,
+                )
+                return None
             logging.debug(
                 f"No logs topic found for client {client_id}. Creating new one."
             )

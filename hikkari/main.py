@@ -1165,6 +1165,13 @@ class Hikkari:
                     .handlers[0]
                     .get_logs_topic_id_by_client(client.tg_id)
                 )
+                if not log_chat_id or int(log_chat_id) > 0:
+                    logging.debug(
+                        "badge skipped: logchat=%s (need group topic, not LS)",
+                        log_chat_id,
+                    )
+                    raise RuntimeError("skip_badge_private")
+
 
                 from .utils.other import ensure_builtin_asset as _eba
                 started_banner = _eba("hikkari-started.jpg")
@@ -1201,7 +1208,8 @@ class Hikkari:
                         parse_mode="HTML",
                     )
             except Exception as badge_error:
-                logging.debug(f"Failed to send badge photo: {badge_error}")
+                if str(badge_error) != "skip_badge_private":
+                    logging.debug(f"Failed to send badge photo: {badge_error}")
             logging.debug(
                 "· Started for %s · Prefix: «%s» ·",
                 client.tg_id,
