@@ -297,15 +297,56 @@ class Database(dict):
                     )
                     continue
 
+
+        # orjson: all keys must be str
+        for key in list(db.keys()):
+            if not isinstance(key, str):
+                val = db.pop(key)
+                sk = str(key)
+                if sk in db and isinstance(db[sk], dict) and isinstance(val, dict):
+                    db[sk].update(val)
+                else:
+                    db[sk] = val
+                logger.debug("DbAutoFix: stringified top key %r -> %s", key, sk)
+            elif isinstance(db.get(key), dict):
+                sub = db[key]
+                for subkey in list(sub.keys()):
+                    if not isinstance(subkey, str):
+                        sval = sub.pop(subkey)
+                        ssk = str(subkey)
+                        if ssk in sub and isinstance(sub[ssk], dict) and isinstance(sval, dict):
+                            sub[ssk].update(sval)
+                        else:
+                            sub[ssk] = sval
+                        logger.debug(
+                            "DbAutoFix: stringified subkey %r of %s", subkey, key
+                        )
+
         return True
+
+    @staticmethod
+    def _stringify_keys(obj):
+        """orjson requires str dict keys — convert int/other keys recursively."""
+        if isinstance(obj, dict):
+            out = {}
+            for k, v in obj.items():
+                nk = k if isinstance(k, str) else str(k)
+                out[nk] = Database._stringify_keys(v)
+            return out
+        if isinstance(obj, list):
+            return [Database._stringify_keys(x) for x in obj]
+        if isinstance(obj, tuple):
+            return [Database._stringify_keys(x) for x in obj]
+        return obj
 
     @staticmethod
     def _fast_dumps(obj, compact: bool = False) -> str:
         """Serialize DB; prefer orjson on weak hosts (UserLand)."""
+        safe = Database._stringify_keys(obj)
         if _orjson is not None:
             opt = 0 if compact else _orjson.OPT_INDENT_2
-            return _orjson.dumps(obj, option=opt).decode()
-        return json.dumps(obj, ensure_ascii=not compact, indent=None if compact else 4)
+            return _orjson.dumps(safe, option=opt).decode()
+        return json.dumps(safe, ensure_ascii=not compact, indent=None if compact else 4)
 
     @staticmethod
     def _fast_loads(data):

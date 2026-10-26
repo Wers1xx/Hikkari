@@ -1157,56 +1157,89 @@ class Hikkari:
                 self.omit_log = True
 
             try:
-                log_chat_id = (
-                    logging.getLogger().handlers[0].get_logid_by_client(client.tg_id)
-                )
-                message_thread_id = (
-                    await logging.getLogger()
-                    .handlers[0]
-                    .get_logs_topic_id_by_client(client.tg_id)
-                )
-                # Heroku-style: always try to notify. Prefer forum topic when available.
+                handler = logging.getLogger().handlers[0]
+                log_chat_id = None
+                message_thread_id = None
+                with contextlib.suppress(Exception):
+                    log_chat_id = handler.get_logid_by_client(client.tg_id)
+                with contextlib.suppress(Exception):
+                    message_thread_id = await handler.get_logs_topic_id_by_client(
+                        client.tg_id
+                    )
+                # Fallback: forums content channel from DB (Heroku-compatible path)
                 if not log_chat_id:
-                    logging.debug("badge skipped: no logchat")
+                    with contextlib.suppress(Exception):
+                        ch = client.hikkari_db.get("hikkari.forums", "channel_id", None)
+                        if ch:
+                            ch = int(ch)
+                            log_chat_id = int(f"-100{ch}") if ch > 0 else ch
+                    with contextlib.suppress(Exception):
+                        from . import utils as _u
+                        if not message_thread_id:
+                            message_thread_id = _u.get_topic_id(
+                                client.hikkari_db, "Logs"
+                            )
+                if not log_chat_id:
+                    logging.warning("badge skipped: no logchat / content channel yet")
                     raise RuntimeError("skip_badge_no_logchat")
 
-                from .utils.other import ensure_builtin_asset as _eba
-                started_banner = _eba("hikkari-started.jpg")
                 caption = (
-                        "{} <b>{} started!</b>\n\n<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> <b>GitHub commit SHA: <a"
-                        ' href="https://github.com/Wers1xx/Hikkari/commit/{}">{}</a></b>\n<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji>'
-                        " <b>Update status: {}</b>\n<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> <b>Prefix:</b> <code>{}</code>"
-                    ).format(
-                        (
-                            utils.get_platform_emoji()
-                            if client.hikkari_me.premium is True
-                            else "✨ Hikkari"
-                        ),
-                        ".".join(list(map(str, list(__version__)))),
-                        build,
-                        build[:7],
-                        upd,
-                        "." if pref is None else pref,
-                    )
-                if started_banner and Path(started_banner).is_file():
-                    await client.hikkari_inline.bot.send_photo(
-                        log_chat_id,
-                        str(started_banner),
-                        caption=caption,
-                        message_thread_id=message_thread_id,
-                        parse_mode="HTML",
-                    )
-                else:
-                    await client.hikkari_inline.bot.send_message(
+                    "{} <b>{} started!</b>
+
+"
+                    "<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> "
+                    "<b>GitHub commit SHA: <a href=\"https://github.com/Wers1xx/Hikkari/commit/{}\">{}</a></b>
+"
+                    "<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji> "
+                    "<b>Update status: {}</b>
+"
+                    "<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> "
+                    "<b>Prefix:</b> <code>{}</code>"
+                ).format(
+                    (
+                        utils.get_platform_emoji()
+                        if client.hikkari_me.premium is True
+                        else "✨ Hikkari"
+                    ),
+                    ".".join(list(map(str, list(__version__)))),
+                    build,
+                    build[:7],
+                    upd,
+                    "." if pref is None else pref,
+                )
+                bot = client.hikkari_inline.bot
+                # Prefer local asset, then URL (Heroku-style), then text-only
+                sent = False
+                with contextlib.suppress(Exception):
+                    from .utils.other import ensure_builtin_asset as _eba
+                    started_banner = _eba("hikkari-started.jpg")
+                    if started_banner and Path(started_banner).is_file():
+                        await bot.send_photo(
+                            log_chat_id,
+                            str(started_banner),
+                            caption=caption,
+                            message_thread_id=message_thread_id,
+                        )
+                        sent = True
+                if not sent:
+                    with contextlib.suppress(Exception):
+                        await bot.send_photo(
+                            log_chat_id,
+                            "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-started.jpg",
+                            caption=caption,
+                            message_thread_id=message_thread_id,
+                        )
+                        sent = True
+                if not sent:
+                    await bot.send_message(
                         log_chat_id,
                         caption,
                         message_thread_id=message_thread_id,
                         disable_web_page_preview=True,
-                        parse_mode="HTML",
                     )
             except Exception as badge_error:
-                if str(badge_error) != "skip_badge_private":
-                    logging.debug(f"Failed to send badge photo: {badge_error}")
+                if "skip_badge" not in str(badge_error):
+                    logging.warning("Failed to send started badge: %s", badge_error)
             logging.debug(
                 "· Started for %s · Prefix: «%s» ·",
                 client.tg_id,
@@ -1331,8 +1364,21 @@ class Hikkari:
             lambda t: t.exception() if not t.cancelled() and t.exception() else None
         )
 
-        if first and not os.environ.get("HIKKARI_FAST_START"):
-            await self._badge(client)
+        # Heroku-style: always send started badge to logs topic (not only first boot)
+        if not os.environ.get("HIKKARI_FAST_START"):
+            # give test/client_ready a moment to install logchat
+            for _ in range(8):
+                try:
+                    _lg = logging.getLogger().handlers[0]
+                    if getattr(_lg, "get_logid_by_client", None) and _lg.get_logid_by_client(
+                        client.tg_id
+                    ):
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(0.4)
+            with contextlib.suppress(Exception):
+                await self._badge(client)
 
         # Stay alive across MTProto drops with backoff (no tight reconnect spin).
         _backoff = 5
