@@ -529,7 +529,7 @@ class TelethonBot:
             raise
 
 
-    async def send_document(
+        async def send_document(
         self,
         chat_id,
         document,
@@ -539,6 +539,7 @@ class TelethonBot:
         message_thread_id: int | None = None,
         **kwargs,
     ):
+        message_thread_id = await self._coerce_reply_target(message_thread_id)
         return self._with_message_id_alias(
             await self.client.send_file(
                 chat_id,
@@ -548,12 +549,11 @@ class TelethonBot:
                 force_document=True,
                 buttons=self._build_reply_markup(reply_markup),
                 silent=kwargs.get("disable_notification"),
-                message_thread_id = await self._coerce_reply_target(message_thread_id)
                 **self._thread_kwargs(message_thread_id),
             )
         )
 
-    async def send_photo(
+        async def send_photo(
         self,
         chat_id,
         photo,
@@ -563,6 +563,7 @@ class TelethonBot:
         message_thread_id: int | None = None,
         **kwargs,
     ):
+        message_thread_id = await self._coerce_reply_target(message_thread_id)
         return self._with_message_id_alias(
             await self.client.send_file(
                 chat_id,
