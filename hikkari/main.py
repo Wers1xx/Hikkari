@@ -1184,15 +1184,11 @@ class Hikkari:
                     raise RuntimeError("skip_badge_no_logchat")
 
                 caption = (
-                    "{} <b>{} started!</b>
-
-"
+                    "{} <b>{} started!</b>\n\n"
                     "<tg-emoji emoji-id=5231065262228250587>⚙</tg-emoji> "
-                    "<b>GitHub commit SHA: <a href=\"https://github.com/Wers1xx/Hikkari/commit/{}\">{}</a></b>
-"
+                    '<b>GitHub commit SHA: <a href="https://github.com/Wers1xx/Hikkari/commit/{}">{}</a></b>\n'
                     "<tg-emoji emoji-id=5873225338984599714>🔎</tg-emoji> "
-                    "<b>Update status: {}</b>
-"
+                    "<b>Update status: {}</b>\n"
                     "<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> "
                     "<b>Prefix:</b> <code>{}</code>"
                 ).format(
