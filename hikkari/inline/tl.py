@@ -92,7 +92,7 @@ class TelethonBot:
         except Exception:
             return None
 
-    def _thread_kwargs(message_thread_id: int | None) -> dict:
+    def _thread_kwargs(self, message_thread_id: int | None) -> dict:
         return {"reply_to": message_thread_id} if message_thread_id else {}
 
     @staticmethod
@@ -548,6 +548,7 @@ class TelethonBot:
                 force_document=True,
                 buttons=self._build_reply_markup(reply_markup),
                 silent=kwargs.get("disable_notification"),
+                message_thread_id = await self._coerce_reply_target(message_thread_id)
                 **self._thread_kwargs(message_thread_id),
             )
         )

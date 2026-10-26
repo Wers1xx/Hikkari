@@ -96,7 +96,7 @@ def get_topic(message: Message) -> int | None:
     :return: int or None if not present
     """
     return (
-        (message.reply_to.reply_to_top_id or message.reply_to.reply_to_msg_id)
+        (getattr(message.reply_to, "reply_to_top_id", None) or getattr(message.reply_to, "reply_to_msg_id", None))
         if (
             isinstance(message, Message)
             and message.reply_to
