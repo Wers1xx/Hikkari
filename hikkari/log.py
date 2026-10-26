@@ -454,16 +454,18 @@ class TelegramLogsHandler(logging.Handler):
 
                 while self._queue[client_id]:
                     if chunk := self._queue[client_id].pop(0):
-                        asyncio.ensure_future(
-                            self._mods[client_id].inline.bot.send_message(
-                                self._mods[client_id].logchat,
-                                f"<code>{chunk}</code>",
-                                disable_notification=True,
-                                message_thread_id=await self.get_logs_topic_id_by_client(
-                                    client_id
-                                ),
-                            )
-                        )
+                        _tid = await self.get_logs_topic_id_by_client(client_id)
+                        async def _safe_log_send(_cid=client_id, _chunk=chunk, _tid=_tid):
+                            try:
+                                await self._mods[_cid].inline.bot.send_message(
+                                    self._mods[_cid].logchat,
+                                    f"<code>{_chunk}</code>",
+                                    disable_notification=True,
+                                    message_thread_id=_tid,
+                                )
+                            except Exception:
+                                logging.debug("log send failed", exc_info=True)
+                        asyncio.ensure_future(_safe_log_send())
 
     async def _exc_sender(self, *funcs: typing.Callable[..., Coroutine]):
         for func in funcs:

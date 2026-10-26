@@ -65,6 +65,33 @@ class TelethonBot:
         return file
 
     @staticmethod
+
+    @staticmethod
+    async def _coerce_reply_target(value):
+        """Normalize reply_to / message_thread_id: await coroutines, int ids only."""
+        import inspect
+        if value is None or value is False:
+            return None
+        if inspect.isawaitable(value):
+            try:
+                value = await value
+            except Exception:
+                return None
+        if value is None or value is False:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value != 0 else None
+        mid = getattr(value, "id", None) or getattr(value, "message_id", None)
+        if isinstance(mid, int) and mid != 0:
+            return mid
+        try:
+            iv = int(value)
+            return iv if iv != 0 else None
+        except Exception:
+            return None
+
     def _thread_kwargs(message_thread_id: int | None) -> dict:
         return {"reply_to": message_thread_id} if message_thread_id else {}
 
@@ -454,6 +481,15 @@ class TelethonBot:
         import logging as _logging
         _log = _logging.getLogger(__name__)
         buttons = self._build_reply_markup(reply_markup) if reply_markup is not None else None
+        message_thread_id = await self._coerce_reply_target(message_thread_id)
+        if "reply_to" in kwargs:
+            kwargs["reply_to"] = await self._coerce_reply_target(kwargs.get("reply_to"))
+            if kwargs["reply_to"] is None:
+                kwargs.pop("reply_to", None)
+        import inspect as _inspect
+        for _k in list(kwargs.keys()):
+            if _inspect.isawaitable(kwargs[_k]):
+                kwargs.pop(_k, None)
         send_kw = dict(
             parse_mode="HTML",
             silent=(
@@ -472,6 +508,7 @@ class TelethonBot:
             "parse_mode",
             "buttons",
             "reply_markup",
+            "message_thread_id",
         ):
             kwargs.pop(k, None)
         try:
