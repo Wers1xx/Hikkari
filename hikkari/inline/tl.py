@@ -529,7 +529,7 @@ class TelethonBot:
             raise
 
 
-        async def send_document(
+    async def send_document(
         self,
         chat_id,
         document,
@@ -553,7 +553,7 @@ class TelethonBot:
             )
         )
 
-        async def send_photo(
+    async def send_photo(
         self,
         chat_id,
         photo,
