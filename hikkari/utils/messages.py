@@ -100,7 +100,7 @@ def get_topic(message: Message) -> int | None:
         if (
             isinstance(message, Message)
             and message.reply_to
-            and message.reply_to.forum_topic
+            and getattr(message.reply_to, "forum_topic", False)
         )
         else (
             message.form["top_msg_id"]
