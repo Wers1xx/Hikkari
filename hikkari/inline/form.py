@@ -297,8 +297,8 @@ class Form(InlineUnit):
         except Exception:
             ext = None
 
-        if photo is not None and ext in {".gif", ".mp4", ".webm", ".mov"}:
-            if ext in {".mp4", ".webm", ".mov"}:
+        if photo is not None and ext in {".gif", ".mp4", ".webm", ".mov", ".mkv", ".m4v"}:
+            if ext in {".mp4", ".webm", ".mov", ".mkv", ".m4v"}:
                 video = copy.copy(photo)
             else:
                 gif = copy.copy(photo)
@@ -367,6 +367,10 @@ class Form(InlineUnit):
             return False
 
         if [
+        if video:
+            photo = None
+        if gif:
+            photo = None
             photo is not None,
             gif is not None,
             file is not None,
@@ -1092,7 +1096,7 @@ class Form(InlineUnit):
                             ],
                             cache_time=0,
                         )
-                case _ if "photo" in form:
+                case _ if "photo" in form and "video" not in form and "gif" not in form:
                     try:
                         await inline_query.answer(
                             [
@@ -1223,6 +1227,15 @@ class Form(InlineUnit):
                                     or "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-config.jpg"
                                 )
                                 result = {
+                                    "type": "mpeg4_gif",
+                                    "id": utils.rand(16),
+                                    "mpeg4_url": video_url,
+                                    "thumbnail_url": thumb,
+                                    "title": "Hikkari",
+                                    "caption": (form_text or "✨")[:1024],
+                                    "parse_mode": "HTML",
+                                }
+                                result_video = {
                                     "type": "video",
                                     "id": utils.rand(16),
                                     "video_url": video_url,
@@ -1231,6 +1244,8 @@ class Form(InlineUnit):
                                     "title": "Hikkari",
                                     "caption": (form_text or "✨")[:1024],
                                     "parse_mode": "HTML",
+                                    "video_width": 720,
+                                    "video_height": 720,
                                 }
                                 if keyboard:
                                     result["reply_markup"] = {
@@ -1250,10 +1265,28 @@ class Form(InlineUnit):
                                         data = await resp.json(content_type=None)
                                         answered = bool(data.get("ok"))
                                         if not answered:
-                                            logger.warning(
-                                                "BotAPI video answer failed: %s",
-                                                data,
-                                            )
+                                            if keyboard:
+                                                result_video["reply_markup"] = {
+                                                    "inline_keyboard": keyboard
+                                                }
+                                            async with session.post(
+                                                f"https://api.telegram.org/bot{token}/answerInlineQuery",
+                                                json={
+                                                    "inline_query_id": str(qid),
+                                                    "results": [result_video],
+                                                    "cache_time": 0,
+                                                    "is_personal": True,
+                                                },
+                                                timeout=aiohttp.ClientTimeout(total=15),
+                                            ) as resp2:
+                                                data2 = await resp2.json(content_type=None)
+                                                answered = bool(data2.get("ok"))
+                                                if not answered:
+                                                    logger.warning(
+                                                        "BotAPI video answer failed: %s / %s",
+                                                        data,
+                                                        data2,
+                                                    )
                         except Exception:
                             logger.debug(
                                 "BotAPI video form failed", exc_info=True
