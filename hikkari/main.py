@@ -1165,13 +1165,10 @@ class Hikkari:
                     .handlers[0]
                     .get_logs_topic_id_by_client(client.tg_id)
                 )
-                if not log_chat_id or int(log_chat_id) > 0:
-                    logging.debug(
-                        "badge skipped: logchat=%s (need group topic, not LS)",
-                        log_chat_id,
-                    )
-                    raise RuntimeError("skip_badge_private")
-
+                # Heroku-style: always try to notify. Prefer forum topic when available.
+                if not log_chat_id:
+                    logging.debug("badge skipped: no logchat")
+                    raise RuntimeError("skip_badge_no_logchat")
 
                 from .utils.other import ensure_builtin_asset as _eba
                 started_banner = _eba("hikkari-started.jpg")

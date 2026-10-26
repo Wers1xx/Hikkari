@@ -335,7 +335,7 @@ settings:
   unblacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Чат {} удален из черного списка юзербота</b>"
   user_blacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Пользователь {} добавлен в черный список юзербота</b>"
   user_unblacklisted: "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Пользователь {} удален из черного списка юзербота</b>"
-  what_prefix: "<tg-emoji emoji-id=5382187118216879236>❓</tg-emoji> <b>А какой префикс ставить то?</b>"
+  what_prefix: "<tg-emoji emoji-id=5870609858520158157>ℹ</tg-emoji> <b>Укажи префиксы через пробел.</b>\n<code>setprefix ! .</code>\n<code>setprefix ! . @user</code>\n<code>setprefix --user ID ! .</code>"
   prefix_incorrect: "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> <b>Префикс должен состоять только из одного символа</b>"
   prefix_set: "{} <b>Префикс команд обновлен. Используй следующую команду, чтобы изменить его обратно:</b>\n<pre><code class=\"language-hikkari\">{newprefix}setprefix {oldprefix}</code></pre>"
   entity_prefix_set: "{} <b>Префикс команды обновлен для {entity_name}. Используйте следующую команду, чтобы вернуть его обратно:</b>\n<pre><code class=\"language-hikkari\">{newprefix}setprefix {oldprefix} {entity_id}</code></pre>"

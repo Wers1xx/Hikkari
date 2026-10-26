@@ -591,24 +591,35 @@ class CoreMod(loader.Module):
 
         if entity.id == self.tg_id:
             old = self.get_prefix()
+            # support list or single prefix
+            if isinstance(old, (list, tuple)):
+                oldprefixes = list(old)
+            else:
+                oldprefixes = [str(old)] if old is not None else ["."]
             self._db.set(_main.__name__, "command_prefix", prefixes[0])
             self._db.set(
                 _main.__name__,
                 "extra_prefixes",
                 prefixes[1:] if len(prefixes) > 1 else [],
             )
-            text = (
-                "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji> <b>Prefix set!</b>"
-                + chr(10)
-                + "<tg-emoji emoji-id=5870903672937911120>🕶</tg-emoji> <b>New:</b> <code>"
-                + utils.escape_html(" ".join(prefixes))
-                + "</code>"
-                + chr(10)
-                + "<tg-emoji emoji-id=5877318991141220933>🔁</tg-emoji> <b>Old:</b> <code>"
-                + utils.escape_html(str(old))
-                + "</code>"
+            new_fmt = (
+                prefixes[0]
+                if len(prefixes) == 1
+                else "[" + ", ".join(prefixes) + "]"
             )
-            await utils.answer(message, text)
+            old_fmt = (
+                oldprefixes[0]
+                if len(oldprefixes) == 1
+                else "[" + ", ".join(str(x) for x in oldprefixes) + "]"
+            )
+            await utils.answer(
+                message,
+                self.strings["prefix_set"].format(
+                    "<tg-emoji emoji-id=5197474765387864959>👍</tg-emoji>",
+                    newprefix=utils.escape_html(new_fmt),
+                    oldprefix=utils.escape_html(old_fmt),
+                ),
+            )
             return
 
         security = self._client.dispatcher.security

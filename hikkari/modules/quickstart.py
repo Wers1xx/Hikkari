@@ -32,11 +32,11 @@ class Quickstart(loader.Module):
     strings = {"name": "Quickstart"}
 
     async def client_ready(self):
-        if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
-            return
+        # Build welcome text/mark even if inline bot is not ready yet
+        # (inline_ready will send the message when bot is up — like Heroku)
         self.text = lambda: self.strings["base"].format(
             utils.get_platform_emoji()
-            if self.client.hikkari_me.premium is True
+            if getattr(getattr(self.client, "hikkari_me", None), "premium", False) is True
             else "Hikkari"
         )
 
@@ -194,10 +194,10 @@ class Quickstart(loader.Module):
         ] + utils.chunks(
             [
                 {
-                    "text": self.strings.get("language", lang),
-                    "data": f"hikkari/lang/{lang}",
+                    "text": title,
+                    "data": f"hikkari/lang/{code}",
                 }
-                for lang in translations.SUPPORTED_LANGUAGES
+                for code, title in translations.SUPPORTED_LANGUAGES.items()
             ],
             3,
         )
@@ -208,8 +208,31 @@ class Quickstart(loader.Module):
             return
         if not getattr(self, "inline", None) or not getattr(self.inline, "bot", None):
             return
+        # Ensure mark/text exist (client_ready may have run before bot was up)
+        if not callable(getattr(self, "text", None)):
+            self.text = lambda: self.strings["base"].format(
+                utils.get_platform_emoji()
+                if getattr(getattr(self.client, "hikkari_me", None), "premium", False) is True
+                else "Hikkari"
+            )
         if not callable(getattr(self, "mark", None)):
-            return
+            self.mark = lambda: [
+                [
+                    {
+                        "text": self.strings.get("btn_support", "Support"),
+                        "url": "https://t.me/Hikkari_talks",
+                    }
+                ],
+            ] + utils.chunks(
+                [
+                    {
+                        "text": title,
+                        "data": f"hikkari/lang/{code}",
+                    }
+                    for code, title in translations.SUPPORTED_LANGUAGES.items()
+                ],
+                3,
+            )
 
         text = self.text() if callable(getattr(self, "text", None)) else self.strings.get("base", "Hikkari installed")
         markup = None
