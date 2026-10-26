@@ -157,7 +157,7 @@ class HikkariConfigMod(loader.Module):
         photo_ext = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
         # also detect /video/ or mime-ish paths
         is_video = low.endswith(video_ext) or any(
-            x in low for x in ("/video/", ".mp4/", "format=mp4")
+            x in low for x in ("/video/", ".mp4", ".webm", ".mov", "format=mp4", "mime=video", "type=video")
         )
         is_gif = low.endswith(gif_ext)
         if not is_video and not is_gif and not url.startswith(("http://", "https://")):

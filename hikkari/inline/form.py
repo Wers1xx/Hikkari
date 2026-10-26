@@ -366,11 +366,12 @@ class Form(InlineUnit):
             )
             return False
 
-        if [
         if video:
             photo = None
         if gif:
             photo = None
+
+        if [
             photo is not None,
             gif is not None,
             file is not None,
