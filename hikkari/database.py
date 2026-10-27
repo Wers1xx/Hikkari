@@ -299,6 +299,7 @@ class Database(dict):
 
 
         # orjson: all keys must be str
+        # IMPORTANT: Database.get(mod, key) is NOT dict.get — use [] / dict.get
         for key in list(db.keys()):
             if not isinstance(key, str):
                 val = db.pop(key)
@@ -308,19 +309,24 @@ class Database(dict):
                 else:
                     db[sk] = val
                 logger.debug("DbAutoFix: stringified top key %r -> %s", key, sk)
-            elif isinstance(db.get(key), dict):
+                key = sk
+            try:
                 sub = db[key]
-                for subkey in list(sub.keys()):
-                    if not isinstance(subkey, str):
-                        sval = sub.pop(subkey)
-                        ssk = str(subkey)
-                        if ssk in sub and isinstance(sub[ssk], dict) and isinstance(sval, dict):
-                            sub[ssk].update(sval)
-                        else:
-                            sub[ssk] = sval
-                        logger.debug(
-                            "DbAutoFix: stringified subkey %r of %s", subkey, key
-                        )
+            except Exception:
+                continue
+            if not isinstance(sub, dict):
+                continue
+            for subkey in list(sub.keys()):
+                if not isinstance(subkey, str):
+                    sval = sub.pop(subkey)
+                    ssk = str(subkey)
+                    if ssk in sub and isinstance(sub[ssk], dict) and isinstance(sval, dict):
+                        sub[ssk].update(sval)
+                    else:
+                        sub[ssk] = sval
+                    logger.debug(
+                        "DbAutoFix: stringified subkey %r of %s", subkey, key
+                    )
 
         return True
 

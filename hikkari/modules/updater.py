@@ -302,10 +302,26 @@ class UpdaterMod(loader.Module):
                 )
 
             current = repo.head.commit.hexsha
-            latest = next(
-                repo.iter_commits(f"origin/{self._current_branch()}", max_count=1)
-            ).hexsha
-            commits = [*repo.iter_commits(f"HEAD..origin/{self._current_branch()}")]
+            branch = self._current_branch()
+            # If no local commits ahead of origin tracking, force one fetch (stale origin common on hosts)
+            try:
+                commits = [*repo.iter_commits(f"HEAD..origin/{branch}")]
+            except Exception:
+                commits = []
+            if not commits:
+                with contextlib.suppress(Exception):
+                    origin.fetch(
+                        refspec=f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+                    )
+                    self._last_git_fetch = time.monotonic()
+                with contextlib.suppress(Exception):
+                    commits = [*repo.iter_commits(f"HEAD..origin/{branch}")]
+            try:
+                latest = next(
+                    repo.iter_commits(f"origin/{branch}", max_count=1)
+                ).hexsha
+            except Exception:
+                latest = current
 
             return (
                 current,
@@ -498,11 +514,13 @@ class UpdaterMod(loader.Module):
         ) or not changelog:
             return
 
-        if (
-            self.get("ignore_permanent", False)
-            and self.get("ignore_permanent") == self._pending
-        ):
+        # Ignore only exact SHA; if origin moved further, notify again
+        ign = self.get("ignore_permanent", False)
+        if ign and ign == self._pending:
             return
+        if ign and self._pending and ign != self._pending:
+            with contextlib.suppress(Exception):
+                self.set("ignore_permanent", False)
 
         # Restore notified SHA from DB (survives restart — no spam to Saved Messages)
         if not self._notified:
