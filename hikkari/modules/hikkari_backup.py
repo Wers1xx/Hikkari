@@ -39,6 +39,88 @@ from ..inline.types import BotInlineCall, InlineCall
 
 logger = logging.getLogger(__name__)
 
+_REQUIRES_RE = re.compile(
+    r"(?im)^(?:\s*#\s*(?:meta\s+)?requires\s*:\s*|\s*#\s*requires\s*:\s*)(.+)$"
+)
+
+
+def _collect_requires_from_text(text: str) -> set:
+    found = set()
+    for m in _REQUIRES_RE.finditer(text or ""):
+        for part in re.split(r"[,;\s]+", m.group(1).strip()):
+            part = part.strip().strip("'\"")
+            if part and not part.startswith("http") and "/" not in part:
+                found.add(part)
+    return found
+
+
+def _collect_requires_from_paths(paths) -> list:
+    found = set()
+    for p in paths:
+        try:
+            text = Path(p).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        found |= _collect_requires_from_text(text)
+    return sorted(found)
+
+
+async def _pip_install_requirements(req_text: str) -> str:
+    req_text = (req_text or "").strip()
+    if not req_text:
+        return ""
+    import sys
+    import tempfile
+
+    lines = [
+        ln.strip()
+        for ln in req_text.splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    if not lines:
+        return ""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as tf:
+        tf.write(chr(10).join(lines) + chr(10))
+        req_path = tf.name
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-q",
+            "-r",
+            req_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+        text = (out or b"").decode(errors="replace")[-800:]
+        return "pip exit=%s\n%s" % (proc.returncode, text)
+    except Exception as e:
+        return "pip failed: %s" % e
+    finally:
+        with contextlib.suppress(Exception):
+            Path(req_path).unlink()
+
+
+def _write_requirements_into_zip(zipf, tg_id: int) -> None:
+    try:
+        mod_paths = []
+        for root, _, files in os.walk(loader.LOADED_MODULES_DIR):
+            for file in files:
+                if file.endswith("%s.py" % tg_id):
+                    mod_paths.append(os.path.join(root, file))
+        reqs = _collect_requires_from_paths(mod_paths)
+        if reqs:
+            body = "# auto-collected from loaded modules" + chr(10) + chr(10).join(reqs) + chr(10)
+            zipf.writestr("requirements.txt", body)
+    except Exception:
+        logger.debug("requirements collect failed", exc_info=True)
+
 
 @loader.tds
 class HikkariBackupMod(loader.Module):
@@ -247,7 +329,7 @@ class HikkariBackupMod(loader.Module):
             )[0].download_media(bytes)
 
             with zipfile.ZipFile(io.BytesIO(file)) as zf:
-                db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
+                db_data, db_mods, mod_files, req_text = self._extract_db_and_mods_from_zip(zf)
 
             with contextlib.suppress(Exception):
                 if isinstance(db_data.get("hikkari.inline"), dict):
@@ -266,6 +348,12 @@ class HikkariBackupMod(loader.Module):
 
             for name, content in mod_files.items():
                 (loader.LOADED_MODULES_PATH / name).write_bytes(content)
+
+            with contextlib.suppress(Exception):
+                if req_text:
+                    log = await _pip_install_requirements(req_text)
+                    if log:
+                        logger.info("backup restore pip: %s", log)
 
             await self.inline.bot(
                 call.answer(self.strings["all_restored_bot"], show_alert=True)
@@ -447,6 +535,7 @@ class HikkariBackupMod(loader.Module):
                             mods_quantity += 1
 
             zipf.writestr("db_mods.json", db_mods)
+            _write_requirements_into_zip(zipf, self.tg_id)
 
         archive = io.BytesIO(result.getvalue())
         archive.name = f"mods-{datetime.datetime.now():%d-%m-%Y-%H-%M}.zip"
@@ -520,14 +609,21 @@ class HikkariBackupMod(loader.Module):
                             self.lookup("LoaderMod").set("loaded_modules", db_mods)
 
                     for name in zf.namelist():
-                        if name == "db_mods.json" or not Path(name).name.endswith(
+                        base = Path(name).name
+                        if base in {"db_mods.json", "requirements.txt"} or not base.endswith(
                             ".py"
                         ):
                             continue
 
-                        path = loader.LOADED_MODULES_PATH / Path(name).name
+                        path = loader.LOADED_MODULES_PATH / base
                         with zf.open(name, "r") as module:
                             path.write_bytes(module.read())
+                    if "requirements.txt" in zf.namelist():
+                        with contextlib.suppress(Exception):
+                            req_body = zf.read("requirements.txt").decode(errors="replace")
+                            log = await _pip_install_requirements(req_body)
+                            if log:
+                                logger.info("restoremods pip: %s", log)
             except Exception:
                 logger.exception("Unable to restore modules")
                 await utils.answer(message, self.strings["reply_to_file"])
@@ -565,6 +661,7 @@ class HikkariBackupMod(loader.Module):
                     option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS,
                 ),
             )
+            _write_requirements_into_zip(zipf, self.tg_id)
 
         mods.seek(0)
         mods.name = "mods.zip"
@@ -762,22 +859,28 @@ class HikkariBackupMod(loader.Module):
         mod_files = {}  # name -> bytes
         db_mods = None
 
+        req_text = ""
         if "mods.zip" in names:
             with zipfile.ZipFile(io.BytesIO(zf.read("mods.zip"))) as modzip:
                 for name in modzip.namelist():
-                    if name == "db_mods.json":
+                    base = Path(name).name
+                    if base == "db_mods.json":
                         db_mods = orjson.loads(modzip.read(name).decode())
-                    elif Path(name).name.endswith(".py"):
-                        mod_files[Path(name).name] = modzip.read(name)
+                    elif base == "requirements.txt":
+                        req_text = modzip.read(name).decode(errors="replace")
+                    elif base.endswith(".py"):
+                        mod_files[base] = modzip.read(name)
         else:
             for name in names:
                 base = Path(name).name
                 if base == "db_mods.json":
                     db_mods = orjson.loads(zf.read(name).decode())
+                elif base == "requirements.txt":
+                    req_text = zf.read(name).decode(errors="replace")
                 elif base.endswith(".py"):
                     mod_files[base] = zf.read(name)
 
-        return db_data, db_mods, mod_files
+        return db_data, db_mods, mod_files, req_text
 
     @loader.command()
     async def restoreall(self, message: Message):
@@ -813,7 +916,7 @@ class HikkariBackupMod(loader.Module):
 
             zipfile_bytes = io.BytesIO(file)
             with zipfile.ZipFile(zipfile_bytes) as zf:
-                db_data, db_mods, mod_files = self._extract_db_and_mods_from_zip(zf)
+                db_data, db_mods, mod_files, req_text = self._extract_db_and_mods_from_zip(zf)
 
             with contextlib.suppress(Exception):
                 if isinstance(db_data.get("hikkari.inline"), dict):
