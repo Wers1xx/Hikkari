@@ -121,11 +121,12 @@ class Utils(InlineUnit):
 
                 if "callback" not in button:
                     if button.get("action") == "close":
+                        # Heroku-style: only owner/co-owners can close (no disable_security)
                         button["callback"] = self._close_unit_handler
-                        button["disable_security"] = True
                         button["force_me"] = True
+                        button.pop("disable_security", None)
+                        button.pop("allow_public", None)
                         button.setdefault("args", ())
-                        # Unique data per form — shared "hcfg|close" broke multi-form close
                         if not button.get("_callback_data"):
                             button["_callback_data"] = f"close/{utils.rand(20)}"
                         self._custom_map[button["_callback_data"]] = {
@@ -134,7 +135,7 @@ class Utils(InlineUnit):
                             "args": (),
                             "kwargs": {},
                             "force_me": True,
-                            "disable_security": True,
+                            "disable_security": False,
                             "message": True,
                         }
 

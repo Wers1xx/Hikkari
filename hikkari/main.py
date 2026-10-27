@@ -1235,7 +1235,7 @@ class Hikkari:
                     )
             except Exception as badge_error:
                 if "skip_badge" not in str(badge_error):
-                    logging.warning("Failed to send started badge: %s", badge_error)
+                    logging.warning("Failed to send started badge: %s", badge_error, exc_info=True)
             logging.debug(
                 "· Started for %s · Prefix: «%s» ·",
                 client.tg_id,
@@ -1360,21 +1360,32 @@ class Hikkari:
             lambda t: t.exception() if not t.cancelled() and t.exception() else None
         )
 
-        # Heroku-style: always send started badge to logs topic (not only first boot)
+        # Heroku-style: always send started badge into Logs topic
         if not os.environ.get("HIKKARI_FAST_START"):
-            # give test/client_ready a moment to install logchat
-            for _ in range(8):
-                try:
-                    _lg = logging.getLogger().handlers[0]
-                    if getattr(_lg, "get_logid_by_client", None) and _lg.get_logid_by_client(
-                        client.tg_id
-                    ):
+            async def _delayed_badge(_client=client):
+                # Wait until logchat/topic exist (test.client_ready + channel)
+                for attempt in range(20):
+                    log_id = None
+                    with contextlib.suppress(Exception):
+                        h = logging.getLogger().handlers[0]
+                        log_id = h.get_logid_by_client(_client.tg_id)
+                    if not log_id:
+                        with contextlib.suppress(Exception):
+                            ch = _client.hikkari_db.get(
+                                "hikkari.forums", "channel_id", None
+                            )
+                            if ch:
+                                ch = int(ch)
+                                log_id = int(f"-100{ch}") if ch > 0 else ch
+                    if log_id:
                         break
+                    await asyncio.sleep(0.5)
+                try:
+                    await self._badge(_client)
                 except Exception:
-                    pass
-                await asyncio.sleep(0.4)
-            with contextlib.suppress(Exception):
-                await self._badge(client)
+                    logging.exception("started badge failed")
+
+            asyncio.ensure_future(_delayed_badge())
 
         # Stay alive across MTProto drops with backoff (no tight reconnect spin).
         _backoff = 5

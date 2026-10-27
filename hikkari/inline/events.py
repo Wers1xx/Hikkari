@@ -349,6 +349,20 @@ class Events(InlineUnit):
         """Only account owner and co-owners may use inline forms/buttons by default."""
         if user_id is None:
             return False
+        try:
+            uid = int(user_id)
+        except Exception:
+            return False
+        # force_me / close always owner-only (even if someone set disable_security)
+        force_me = False
+        if button and button.get("force_me") is True:
+            force_me = True
+        if unit and unit.get("force_me") is True:
+            force_me = True
+        if button and button.get("action") == "close":
+            force_me = True
+        if force_me:
+            return uid in self._inline_allowed_users(unit, button)
         if button and (
             button.get("allow_public") is True
             or button.get("disable_security") is True
@@ -359,10 +373,6 @@ class Events(InlineUnit):
             or unit.get("disable_security") is True
         ):
             return True
-        try:
-            uid = int(user_id)
-        except Exception:
-            return False
         return uid in self._inline_allowed_users(unit, button)
 
 
@@ -503,6 +513,11 @@ class Events(InlineUnit):
         # --- Hikkari Config Rich buttons (Bot API sendRichMessage + tg-button) ---
         if isinstance(call_data, str) and call_data.startswith("cfg|"):
             try:
+                # Owner / co-owners only — close & nav must not be public
+                if not self._inline_user_allowed(user_id):
+                    with contextlib.suppress(Exception):
+                        await call.answer("⛔", show_alert=True)
+                    return
                 with contextlib.suppress(Exception):
                     await call.answer()
                 action = call_data.split("|", 1)[1] if "|" in call_data else ""
@@ -616,13 +631,23 @@ class Events(InlineUnit):
             with contextlib.suppress(Exception):
                 owners |= {int(x) for x in (self._client.dispatcher.security._owner or [])}
 
-            allowed = self._inline_user_allowed(user_id, entry if isinstance(entry, dict) else None)
-            if entry.get("allow_public") is True or entry.get("disable_security") is True:
-                allowed = True
+            # force_me entries (e.g. close) — never public via disable_security
+            if entry.get("force_me") is True:
+                allowed = self._inline_user_allowed(
+                    user_id, entry if isinstance(entry, dict) else None
+                )
+            else:
+                allowed = self._inline_user_allowed(
+                    user_id, entry if isinstance(entry, dict) else None
+                )
+                if entry.get("allow_public") is True or entry.get("disable_security") is True:
+                    allowed = True
             if not allowed and user_id in (entry.get("always_allow") or []):
                 allowed = True
-            if not allowed and entry.get("force_me", False) and user_id == self._me:
-                allowed = True
+            if not allowed and entry.get("force_me", False):
+                allowed = user_id in self._inline_allowed_users(
+                    entry if isinstance(entry, dict) else None
+                )
             if not allowed and user_id == self._me:
                 allowed = True
             if not allowed:
