@@ -2278,6 +2278,10 @@ class HikkariConfigMod(loader.Module):
         """Open interactive configurator"""
         await self._configcmd_impl(message)
 
+    async def cfgcmd(self, message: Message):
+        """Alias of config (registered as .cfg)"""
+        await self._configcmd_impl(message)
+
     @loader.command()
     async def catcmd(self, message: Message):
         """<module> <option> — show config value (or .txt if too long)"""
