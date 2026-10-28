@@ -2216,11 +2216,9 @@ class HikkariConfigMod(loader.Module):
 
         await self.inline__choose_category(message)
 
+    @loader.command(aliases=["cfg", "fcfg"])
     async def configcmd(self, message: Message):
-        await self._configcmd_impl(message)
-
-    @loader.command(alias="fcfg")
-    async def cfgcmd(self, message: Message):
+        """Open interactive configurator"""
         await self._configcmd_impl(message)
 
     @loader.command()
@@ -2314,5 +2312,113 @@ class HikkariConfigMod(loader.Module):
             message,
             header + f"<i>Value is too long ({len(text)} chars) — sent as file.</i>",
             file=file,
+        )
+
+
+    @loader.command()
+    async def uploadcfgcmd(self, message: Message):
+        """Export all module configs as JSON file"""
+        import io
+        import orjson
+
+        data = {}
+        for mod in self.allmodules.modules:
+            cfg = getattr(mod, "config", None)
+            if cfg is None:
+                continue
+            try:
+                name = getattr(mod, "name", None) or mod.__class__.__name__
+                bucket = {}
+                for key in list(cfg):
+                    try:
+                        val = cfg[key]
+                        # keep only JSON-serializable-ish values
+                        orjson.dumps(val, option=orjson.OPT_NON_STR_KEYS)
+                        bucket[str(key)] = val
+                    except Exception:
+                        try:
+                            bucket[str(key)] = str(cfg[key])
+                        except Exception:
+                            continue
+                if bucket:
+                    data[str(name)] = bucket
+            except Exception:
+                logger.debug("uploadcfg skip %s", mod, exc_info=True)
+
+        raw = orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS)
+        file = io.BytesIO(raw)
+        file.name = "hikkari-config.json"
+        await utils.answer(
+            message,
+            (
+                "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> "
+                f"<b>Config export</b> — <code>{len(data)}</code> modules"
+            ),
+            file=file,
+        )
+
+    @loader.command()
+    async def loadcfgcmd(self, message: Message):
+        """Reply to hikkari-config.json to import module configs"""
+        import orjson
+
+        reply = await message.get_reply_message()
+        if not reply or not reply.media:
+            await utils.answer(
+                message,
+                (
+                    "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                    "<b>Reply to a</b> <code>.json</code> <b>config export</b>"
+                ),
+            )
+            return
+        try:
+            blob = await reply.download_media(bytes)
+            data = orjson.loads(blob)
+        except Exception as e:
+            await utils.answer(
+                message,
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> Invalid JSON: <code>{utils.escape_html(str(e))}</code>",
+            )
+            return
+        if not isinstance(data, dict):
+            await utils.answer(message, "❌ Root must be an object {module: {option: value}}")
+            return
+
+        applied = 0
+        for mod_name, options in data.items():
+            if not isinstance(options, dict):
+                continue
+            mod = self.lookup(str(mod_name))
+            if not mod:
+                # fuzzy class name
+                for m in self.allmodules.modules:
+                    names = {
+                        getattr(m, "name", "") or "",
+                        m.__class__.__name__,
+                        m.__class__.__name__.replace("Mod", ""),
+                    }
+                    if str(mod_name).lower() in {n.lower() for n in names if n}:
+                        mod = m
+                        break
+            if not mod or not getattr(mod, "config", None):
+                continue
+            for key, val in options.items():
+                try:
+                    if key in mod.config:
+                        mod.config[key] = val
+                        applied += 1
+                except Exception:
+                    logger.debug("loadcfg set %s.%s failed", mod_name, key, exc_info=True)
+
+        with contextlib.suppress(Exception):
+            self._db.save()
+        await utils.answer(
+            message,
+            (
+                "<tg-emoji emoji-id=5427009714745517609>✅</tg-emoji> "
+                f"<b>Config imported</b> — applied <code>{applied}</code> option(s). "
+                "Restart if something looks stale."
+            ),
         )
 

@@ -552,6 +552,7 @@ class TestMod(loader.Module):
         )
 
 
+    @loader.command()
     async def usinfo(self, message: Message):
         """Detailed host / process resource usage"""
         import os
