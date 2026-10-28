@@ -42,7 +42,7 @@ from ..types import HikkariReplyMarkup
 
 
 ROW_SIZE = 3
-NUM_ROWS = 12
+NUM_ROWS = 5
 
 
 class _InlineFormDraft:
@@ -1747,33 +1747,56 @@ class HikkariConfigMod(loader.Module):
             ],
         )
 
+    def _module_config_names(self, obj_type: bool | str = False) -> list[str]:
+        """Names of configurable modules/libraries for the given category."""
+        names: list[str] = []
+        if isinstance(obj_type, bool):
+            for mod in self.allmodules.modules:
+                if not hasattr(mod, "config") or mod.config is None:
+                    continue
+                is_core = str(getattr(mod, "__origin__", "")).startswith("<core")
+                if obj_type and not is_core:
+                    continue
+                if (not obj_type) and is_core:
+                    continue
+                name = None
+                with contextlib.suppress(Exception):
+                    if callable(getattr(mod, "strings", None)):
+                        name = mod.strings("name")
+                if not name:
+                    name = getattr(mod, "name", None) or mod.__class__.__name__
+                names.append(str(name))
+        else:
+            for lib in self.allmodules.libraries or []:
+                if hasattr(lib, "config") and getattr(lib, "config", None) is not None:
+                    names.append(str(getattr(lib, "name", lib.__class__.__name__)))
+        seen = set()
+        uniq = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                uniq.append(n)
+        uniq.sort(key=lambda x: x.lower())
+        return uniq
+
     async def inline__global_config(
         self,
         call: InlineCall,
         page: int = 0,
         obj_type: bool | str = False,
     ):
-        if isinstance(obj_type, bool):
-            to_config = [
-                mod.strings("name")
-                for mod in self.allmodules.modules
-                if hasattr(mod, "config")
-                and callable(mod.strings)
-                and (mod.__origin__.startswith("<core") or not obj_type)
-                and (not mod.__origin__.startswith("<core") or obj_type)
-            ]
-        else:
-            to_config = [
-                lib.name for lib in self.allmodules.libraries if hasattr(lib, "config")
-            ]
-
-        to_config.sort()
+        to_config = self._module_config_names(obj_type)
+        per_page = max(1, NUM_ROWS * ROW_SIZE)
+        total_pages = max(1, ceil(len(to_config) / per_page) if to_config else 1)
+        try:
+            page = int(page)
+        except Exception:
+            page = 0
+        page = max(0, min(page, total_pages - 1))
 
         kb = []
-        for mod_row in utils.chunks(
-            to_config[page * NUM_ROWS * ROW_SIZE : (page + 1) * NUM_ROWS * ROW_SIZE],
-            3,
-        ):
+        slice_ = to_config[page * per_page : (page + 1) * per_page]
+        for mod_row in utils.chunks(slice_, ROW_SIZE):
             row = [
                 {
                     "text": btn,
@@ -1785,14 +1808,42 @@ class HikkariConfigMod(loader.Module):
             ]
             kb += [row]
 
-        if len(to_config) > NUM_ROWS * ROW_SIZE:
-            kb += self.inline.build_pagination(
-                callback=functools.partial(
-                    self.inline__global_config, obj_type=obj_type
-                ),
-                total_pages=ceil(len(to_config) / (NUM_ROWS * ROW_SIZE)),
-                current_page=page + 1,
-            )
+        if total_pages > 1:
+            try:
+                kb += self.inline.build_pagination(
+                    callback=functools.partial(
+                        self.inline__global_config, obj_type=obj_type
+                    ),
+                    total_pages=total_pages,
+                    current_page=page + 1,
+                )
+            except Exception:
+                logger.debug("build_pagination failed", exc_info=True)
+                nav = []
+                if page > 0:
+                    nav.append(
+                        {
+                            "text": "◀️",
+                            "callback": self.inline__global_config,
+                            "kwargs": {"page": page - 1, "obj_type": obj_type},
+                        }
+                    )
+                nav.append(
+                    {
+                        "text": f"{page + 1}/{total_pages}",
+                        "callback": self.inline__global_config,
+                        "kwargs": {"page": page, "obj_type": obj_type},
+                    }
+                )
+                if page < total_pages - 1:
+                    nav.append(
+                        {
+                            "text": "▶️",
+                            "callback": self.inline__global_config,
+                            "kwargs": {"page": page + 1, "obj_type": obj_type},
+                        }
+                    )
+                kb += [nav]
 
         kb += [
             [
@@ -1809,12 +1860,18 @@ class HikkariConfigMod(loader.Module):
             ]
         ]
 
-        await call.edit(
-            self.strings[
-                "configure" if isinstance(obj_type, bool) else "configure_lib"
-            ],
-            reply_markup=kb,
+        title = self.strings[
+            "configure" if isinstance(obj_type, bool) else "configure_lib"
+        ]
+        title = "%s\n<i>%s modules · page %s/%s</i>" % (
+            title,
+            len(to_config),
+            page + 1,
+            total_pages,
         )
+
+        await call.edit(title, reply_markup=kb)
+
 
     @staticmethod
     def _get_config_obj_type(instance: typing.Any) -> bool | str:
@@ -2314,52 +2371,74 @@ class HikkariConfigMod(loader.Module):
             file=file,
         )
 
-
     @loader.command()
     async def uploadcfgcmd(self, message: Message):
-        """Export all module configs as JSON file"""
+        """<module> — export config of one module as JSON"""
         import io
         import orjson
 
-        data = {}
-        for mod in self.allmodules.modules:
-            cfg = getattr(mod, "config", None)
-            if cfg is None:
-                continue
-            try:
-                name = getattr(mod, "name", None) or mod.__class__.__name__
-                bucket = {}
-                for key in list(cfg):
-                    try:
-                        val = cfg[key]
-                        # keep only JSON-serializable-ish values
-                        orjson.dumps(val, option=orjson.OPT_NON_STR_KEYS)
-                        bucket[str(key)] = val
-                    except Exception:
-                        try:
-                            bucket[str(key)] = str(cfg[key])
-                        except Exception:
-                            continue
-                if bucket:
-                    data[str(name)] = bucket
-            except Exception:
-                logger.debug("uploadcfg skip %s", mod, exc_info=True)
+        args = (utils.get_args_raw(message) or "").strip()
+        if not args:
+            await utils.answer(
+                message,
+                (
+                    "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                    "<b>Usage:</b> <code>.uploadcfg &lt;module&gt;</code>"
+                ),
+            )
+            return
 
-        raw = orjson.dumps(data, option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS)
+        mod_name, instance, _obj = self._resolve_configurable(args)
+        if not instance or not getattr(instance, "config", None):
+            await utils.answer(
+                message,
+                (
+                    "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
+                    f"Module <code>{utils.escape_html(args)}</code> not found or has no config"
+                ),
+            )
+            return
+
+        display = (
+            mod_name
+            or getattr(instance, "name", None)
+            or instance.__class__.__name__
+        )
+        bucket = {}
+        for key in list(instance.config):
+            try:
+                val = instance.config[key]
+                orjson.dumps(val, option=orjson.OPT_NON_STR_KEYS)
+                bucket[str(key)] = val
+            except Exception:
+                with contextlib.suppress(Exception):
+                    bucket[str(key)] = str(instance.config[key])
+
+        payload = {
+            "format": "hikkari-modcfg-v1",
+            "module": str(display),
+            "class": instance.__class__.__name__,
+            "config": bucket,
+        }
+        raw = orjson.dumps(
+            payload, option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS
+        )
         file = io.BytesIO(raw)
-        file.name = "hikkari-config.json"
+        safe = re.sub(r"[^\w.-]+", "_", str(display))[:40]
+        file.name = f"cfg-{safe}.json"
         await utils.answer(
             message,
             (
                 "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji> "
-                f"<b>Config export</b> — <code>{len(data)}</code> modules"
+                f"<b>Config of</b> <code>{utils.escape_html(str(display))}</code> "
+                f"— <code>{len(bucket)}</code> option(s)"
             ),
             file=file,
         )
 
     @loader.command()
     async def loadcfgcmd(self, message: Message):
-        """Reply to hikkari-config.json to import module configs"""
+        """Reply to module cfg JSON — apply only if that module is installed"""
         import orjson
 
         reply = await message.get_reply_message()
@@ -2368,7 +2447,7 @@ class HikkariConfigMod(loader.Module):
                 message,
                 (
                     "<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> "
-                    "<b>Reply to a</b> <code>.json</code> <b>config export</b>"
+                    "<b>Reply to a</b> <code>.json</code> <b>from</b> <code>.uploadcfg</code>"
                 ),
             )
             return
@@ -2378,47 +2457,92 @@ class HikkariConfigMod(loader.Module):
         except Exception as e:
             await utils.answer(
                 message,
-                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> Invalid JSON: <code>{utils.escape_html(str(e))}</code>",
+                f"<tg-emoji emoji-id=5210952531676504517>🚫</tg-emoji> Invalid JSON: "
+                f"<code>{utils.escape_html(str(e))}</code>",
             )
             return
-        if not isinstance(data, dict):
-            await utils.answer(message, "❌ Root must be an object {module: {option: value}}")
+
+        targets = []
+        if isinstance(data, dict) and data.get("format") == "hikkari-modcfg-v1":
+            cfg = data.get("config")
+            if not isinstance(cfg, dict):
+                await utils.answer(message, "❌ Invalid modcfg: missing config object")
+                return
+            targets.append(
+                (
+                    str(data.get("module") or ""),
+                    str(data.get("class") or "") or None,
+                    cfg,
+                )
+            )
+        elif (
+            isinstance(data, dict)
+            and isinstance(data.get("config"), dict)
+            and data.get("module")
+        ):
+            targets.append((str(data["module"]), data.get("class"), data["config"]))
+        elif isinstance(data, dict):
+            for mod_name, options in data.items():
+                if mod_name in {"format", "module", "class", "config"}:
+                    continue
+                if isinstance(options, dict):
+                    targets.append((str(mod_name), None, options))
+        else:
+            await utils.answer(message, "❌ Unsupported config file")
             return
 
-        applied = 0
-        for mod_name, options in data.items():
-            if not isinstance(options, dict):
-                continue
-            mod = self.lookup(str(mod_name))
-            if not mod:
-                # fuzzy class name
+        if not targets:
+            await utils.answer(message, "❌ No module config found in file")
+            return
+
+        reports = []
+        applied_total = 0
+        for mod_name, class_name, options in targets:
+            instance = None
+            resolved = None
+            if mod_name:
+                resolved, instance, _ = self._resolve_configurable(mod_name)
+            if instance is None and class_name:
                 for m in self.allmodules.modules:
-                    names = {
-                        getattr(m, "name", "") or "",
-                        m.__class__.__name__,
-                        m.__class__.__name__.replace("Mod", ""),
-                    }
-                    if str(mod_name).lower() in {n.lower() for n in names if n}:
-                        mod = m
+                    if m.__class__.__name__ == class_name and getattr(
+                        m, "config", None
+                    ):
+                        instance = m
+                        resolved = getattr(m, "name", None) or class_name
                         break
-            if not mod or not getattr(mod, "config", None):
+            if instance is None or not getattr(instance, "config", None):
+                label = mod_name or class_name or "?"
+                reports.append(
+                    f"❌ <code>{utils.escape_html(str(label))}</code> — "
+                    f"module not installed, can't apply this config"
+                )
                 continue
+
+            applied = 0
             for key, val in options.items():
                 try:
-                    if key in mod.config:
-                        mod.config[key] = val
+                    if key in instance.config:
+                        instance.config[key] = val
                         applied += 1
                 except Exception:
-                    logger.debug("loadcfg set %s.%s failed", mod_name, key, exc_info=True)
+                    logger.debug(
+                        "loadcfg set %s.%s failed", resolved, key, exc_info=True
+                    )
+            applied_total += applied
+            reports.append(
+                f"✅ <code>{utils.escape_html(str(resolved or mod_name))}</code> — "
+                f"<code>{applied}</code> option(s)"
+            )
 
         with contextlib.suppress(Exception):
             self._db.save()
+
+        body = chr(10).join(reports)
         await utils.answer(
             message,
             (
                 "<tg-emoji emoji-id=5427009714745517609>✅</tg-emoji> "
-                f"<b>Config imported</b> — applied <code>{applied}</code> option(s). "
-                "Restart if something looks stale."
+                f"<b>loadcfg</b> (applied {applied_total})" + chr(10) + body
             ),
         )
 
