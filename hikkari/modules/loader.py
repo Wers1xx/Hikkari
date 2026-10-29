@@ -1168,12 +1168,31 @@ class LoaderMod(loader.Module):
                             live = True
                             break
                         cls = getattr(mod, "__class__", None)
-                        if cls and module_name.lower() in (
-                            cls.__name__.lower(),
-                            str(getattr(mod, "name", "")).lower(),
-                        ):
-                            live = True
-                            break
+                        if cls:
+                            cname = cls.__name__.lower()
+                            mname = str(getattr(mod, "name", "") or "").lower()
+                            needle = str(module_name or "").lower()
+                            stem = needle.rsplit("/", 1)[-1].replace(".py", "")
+                            if (
+                                needle in (cname, mname)
+                                or stem
+                                and (
+                                    stem in cname
+                                    or stem in mname
+                                    or cname in stem
+                                    or mname == stem
+                                )
+                            ):
+                                live = True
+                                break
+                if getattr(self, "_last_load_pending_safety", False):
+                    self._last_load_pending_safety = False
+                    # Safety form is on screen — wait for user confirm, not an error
+                    logger.info(
+                        "Module %s awaiting safety confirmation",
+                        module_name,
+                    )
+                    return MODULE_LOADING_SUCCESS
                 if not live:
                     raise ModuleInstallError(
                         f"Module {module_name} was not installed"
@@ -1675,6 +1694,7 @@ class LoaderMod(loader.Module):
         _safety_confirmed: bool = False,
         quiet: bool = False,
     ) -> bool:
+        self._last_load_pending_safety = False
         # Human-readable label for warnings (not "<string>")
         module_label = self._module_display_name(doc, name, origin, message)
 
@@ -1739,6 +1759,7 @@ class LoaderMod(loader.Module):
                         ],
                     ],
                 )
+                self._last_load_pending_safety = True
                 return False
 
         if any(
