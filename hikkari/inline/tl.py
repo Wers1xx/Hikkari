@@ -490,6 +490,13 @@ class TelethonBot:
         for _k in list(kwargs.keys()):
             if _inspect.isawaitable(kwargs[_k]):
                 kwargs.pop(_k, None)
+        # Default: no link preview. Honor explicit link_preview / disable_web_page_preview.
+        if "link_preview" in kwargs:
+            _lp = bool(kwargs.get("link_preview"))
+        elif "disable_web_page_preview" in kwargs:
+            _lp = not bool(kwargs.get("disable_web_page_preview"))
+        else:
+            _lp = False
         send_kw = dict(
             parse_mode="HTML",
             silent=(
@@ -497,7 +504,7 @@ class TelethonBot:
                 if disable_notification is not None
                 else kwargs.get("disable_notification")
             ),
-            link_preview=not kwargs.get("disable_web_page_preview", False),
+            link_preview=_lp,
             **self._thread_kwargs(message_thread_id),
         )
         # strip kwargs already handled

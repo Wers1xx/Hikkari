@@ -431,7 +431,11 @@ class UpdaterMod(loader.Module):
         # Prefer Telethon bot client + generate_markup (working callbacks)
         bot = getattr(self.inline, "bot", None)
         if bot is not None:
-            kwargs = {"parse_mode": "HTML", "link_preview": False}
+            kwargs = {
+                "parse_mode": "HTML",
+                "link_preview": False,
+                "disable_web_page_preview": True,
+            }
             mk = reply_markup
             if mk is None:
                 with contextlib.suppress(Exception):

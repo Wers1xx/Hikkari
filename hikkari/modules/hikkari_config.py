@@ -1789,6 +1789,9 @@ class HikkariConfigMod(loader.Module):
         per_page = max(1, NUM_ROWS * ROW_SIZE)
         total_pages = max(1, ceil(len(to_config) / per_page) if to_config else 1)
         try:
+            # callback may pass str / list from markup
+            if isinstance(page, (list, tuple)) and page:
+                page = page[0]
             page = int(page)
         except Exception:
             page = 0
@@ -1809,41 +1812,46 @@ class HikkariConfigMod(loader.Module):
             kb += [row]
 
         if total_pages > 1:
-            try:
-                kb += self.inline.build_pagination(
-                    callback=functools.partial(
-                        self.inline__global_config, obj_type=obj_type
-                    ),
-                    total_pages=total_pages,
-                    current_page=page + 1,
-                )
-            except Exception:
-                logger.debug("build_pagination failed", exc_info=True)
-                nav = []
-                if page > 0:
-                    nav.append(
-                        {
-                            "text": "◀️",
-                            "callback": self.inline__global_config,
-                            "kwargs": {"page": page - 1, "obj_type": obj_type},
-                        }
-                    )
+            # kwargs-only nav (no functools.partial) — first click works reliably
+            nav = []
+            if page > 0:
                 nav.append(
                     {
-                        "text": f"{page + 1}/{total_pages}",
+                        "text": "◀️",
                         "callback": self.inline__global_config,
-                        "kwargs": {"page": page, "obj_type": obj_type},
+                        "kwargs": {"page": int(page - 1), "obj_type": obj_type},
                     }
                 )
-                if page < total_pages - 1:
-                    nav.append(
+            nav.append(
+                {
+                    "text": f"· {page + 1}/{total_pages} ·",
+                    "callback": self.inline__global_config,
+                    "kwargs": {"page": int(page), "obj_type": obj_type},
+                }
+            )
+            if page < total_pages - 1:
+                nav.append(
+                    {
+                        "text": "▶️",
+                        "callback": self.inline__global_config,
+                        "kwargs": {"page": int(page + 1), "obj_type": obj_type},
+                    }
+                )
+            kb += [nav]
+            # number row for multi-page (still kwargs-only)
+            if total_pages <= 8:
+                nums = []
+                for n in range(total_pages):
+                    label = f"· {n + 1} ·" if n == page else str(n + 1)
+                    nums.append(
                         {
-                            "text": "▶️",
+                            "text": label,
                             "callback": self.inline__global_config,
-                            "kwargs": {"page": page + 1, "obj_type": obj_type},
+                            "kwargs": {"page": int(n), "obj_type": obj_type},
                         }
                     )
-                kb += [nav]
+                for chunk in utils.chunks(nums, 8):
+                    kb += [list(chunk)]
 
         kb += [
             [
