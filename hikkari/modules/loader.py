@@ -1301,16 +1301,55 @@ class LoaderMod(loader.Module):
         """
         Don't you dare call it externally
         """
-        await self._client(JoinChannelRequest(channel))
-        event.status = True
-        event.set()
+        title = utils.escape_html(getattr(channel, "title", None) or str(channel))
+        uname = getattr(channel, "username", None)
+        link = f"https://t.me/{uname}" if uname else ""
+        title_html = f'<a href="{link}">{title}</a>' if link else f"<b>{title}</b>"
 
-        await call.edit(
-            (
-                "<emoji document_id=5294430452344434288>😵‍💫</emoji> <b>Joined <a"
-                f' href="https://t.me/{channel.username}">{utils.escape_html(channel.title)}</a></b>'
-            ),
-        )
+        try:
+            await self._client(JoinChannelRequest(channel))
+            event.status = True
+            event.set()
+            await call.edit(
+                (
+                    "<emoji document_id=5294430452344434288>💫</emoji> "
+                    f"<b>Joined</b> {title_html}"
+                ),
+            )
+        except Exception as e:
+            # Join request sent to private channel — not a hard failure
+            ename = type(e).__name__
+            if ename in (
+                "InviteRequestSentError",
+                "UserAlreadyParticipantError",
+            ) or "InviteRequestSent" in ename or "UserAlreadyParticipant" in ename:
+                event.status = True
+                event.set()
+                if "InviteRequestSent" in ename:
+                    msg = (
+                        "<emoji document_id=5427009714745517609>✅</emoji> "
+                        f"<b>Join request sent</b> to {title_html}. "
+                        "Wait for admin approval."
+                    )
+                else:
+                    msg = (
+                        "<emoji document_id=5427009714745517609>✅</emoji> "
+                        f"<b>Already in</b> {title_html}"
+                    )
+                with contextlib.suppress(Exception):
+                    await call.edit(msg)
+                return
+            event.status = False
+            event.set()
+            with contextlib.suppress(Exception):
+                await call.edit(
+                    (
+                        "<emoji document_id=5210952531676504517>🚫</emoji> "
+                        f"<b>Can't join</b> {title_html}: "
+                        f"<code>{utils.escape_html(ename)}</code>"
+                    ),
+                )
+            logger.warning("approve_internal join failed: %s", e, exc_info=True)
 
     async def install_requirements(self, requirements: list):
         is_venv = hasattr(sys, "real_prefix") or sys.prefix != getattr(
