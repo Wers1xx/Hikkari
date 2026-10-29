@@ -485,10 +485,9 @@ class UpdaterMod(loader.Module):
             logger.warning("Bot API update notify request failed", exc_info=True)
         return None
 
-
-
+    @loader.loop(interval=60, autostart=True)
     async def poller(self):
-        """Check origin for new commits and notify owner in bot PM."""
+        """Check origin for new commits and notify owner in bot PM (every 60s)."""
         if NO_GIT:
             return
         # git/GitPython calls block → run them in a worker thread, otherwise the
