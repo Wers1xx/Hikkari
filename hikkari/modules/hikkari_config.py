@@ -1812,46 +1812,31 @@ class HikkariConfigMod(loader.Module):
             kb += [row]
 
         if total_pages > 1:
-            # kwargs-only nav (no functools.partial) — first click works reliably
-            nav = []
-            if page > 0:
-                nav.append(
-                    {
-                        "text": "◀️",
-                        "callback": self.inline__global_config,
-                        "kwargs": {"page": int(page - 1), "obj_type": obj_type},
-                    }
-                )
-            nav.append(
+            # One clean row only: ◀️  page/total  ▶️  (kwargs, no partial)
+            nav = [
                 {
-                    "text": f"· {page + 1}/{total_pages} ·",
+                    "text": "◀️" if page > 0 else " ",
+                    "callback": self.inline__global_config,
+                    "kwargs": {
+                        "page": int(max(0, page - 1)),
+                        "obj_type": obj_type,
+                    },
+                },
+                {
+                    "text": f"{page + 1}/{total_pages}",
                     "callback": self.inline__global_config,
                     "kwargs": {"page": int(page), "obj_type": obj_type},
-                }
-            )
-            if page < total_pages - 1:
-                nav.append(
-                    {
-                        "text": "▶️",
-                        "callback": self.inline__global_config,
-                        "kwargs": {"page": int(page + 1), "obj_type": obj_type},
-                    }
-                )
+                },
+                {
+                    "text": "▶️" if page < total_pages - 1 else " ",
+                    "callback": self.inline__global_config,
+                    "kwargs": {
+                        "page": int(min(total_pages - 1, page + 1)),
+                        "obj_type": obj_type,
+                    },
+                },
+            ]
             kb += [nav]
-            # number row for multi-page (still kwargs-only)
-            if total_pages <= 8:
-                nums = []
-                for n in range(total_pages):
-                    label = f"· {n + 1} ·" if n == page else str(n + 1)
-                    nums.append(
-                        {
-                            "text": label,
-                            "callback": self.inline__global_config,
-                            "kwargs": {"page": int(n), "obj_type": obj_type},
-                        }
-                    )
-                for chunk in utils.chunks(nums, 8):
-                    kb += [list(chunk)]
 
         kb += [
             [
