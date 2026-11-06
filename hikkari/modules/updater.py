@@ -53,6 +53,8 @@ from .._internal import restart
 from ..inline.types import BotInlineCall, InlineCall
 
 logger = logging.getLogger(__name__)
+_UPDATE_PROC_LOCK = threading.Lock()
+_UPDATE_IN_PROGRESS = False
 NO_GIT = os.environ.get("HEROKU_NO_GIT") == "1"
 
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
@@ -1015,6 +1017,23 @@ class UpdaterMod(loader.Module):
 
     async def download_common(self):
         """Fetch origin and hard-reset to origin/<branch>. Avoids merge conflicts / update loops."""
+        global _UPDATE_IN_PROGRESS
+        if not _UPDATE_PROC_LOCK.acquire(blocking=False):
+            raise GitCommandError(
+                ["git", "update"],
+                1,
+                b"",
+                b"update already in progress",
+            )
+        _UPDATE_IN_PROGRESS = True
+        try:
+            return await self._download_common_inner()
+        finally:
+            _UPDATE_IN_PROGRESS = False
+            with contextlib.suppress(Exception):
+                _UPDATE_PROC_LOCK.release()
+
+    async def _download_common_inner(self):
         self._save_pre_update_sha()
         branch = self._current_branch()
 
@@ -1241,6 +1260,15 @@ class UpdaterMod(loader.Module):
         msg_obj: InlineCall | Message,
         hard: bool = False,
     ):
+        global _UPDATE_IN_PROGRESS
+        if _UPDATE_IN_PROGRESS and not hard:
+            with contextlib.suppress(Exception):
+                await utils.answer(
+                    msg_obj,
+                    "⏳ <b>Update already running</b>, wait…",
+                    skip_rich=True,
+                )
+            return
         # We don't really care about asyncio at this point, as we are shutting down
         if hard:
             try:
@@ -1323,7 +1351,7 @@ class UpdaterMod(loader.Module):
             if not hard:
                 await self.inline_update(msg_obj, True)
                 return
-            logger.critical("Got update loop. Update manually via .terminal: %s", ge)
+            logger.error("Update failed after hard retry: %s", ge)
             with contextlib.suppress(Exception):
                 await utils.answer(
                     msg_obj,
