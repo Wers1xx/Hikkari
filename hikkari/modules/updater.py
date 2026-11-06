@@ -1014,36 +1014,53 @@ class UpdaterMod(loader.Module):
         restart()
 
     async def download_common(self):
+        """Fetch origin and hard-reset to origin/<branch>. Avoids merge conflicts / update loops."""
         self._save_pre_update_sha()
         branch = self._current_branch()
 
         def _sync():
+            base = os.path.dirname(utils.get_base_dir())
             try:
-                with Repo(os.path.dirname(utils.get_base_dir())) as repo:
+                with Repo(base) as repo:
                     origin = repo.remote("origin")
-                    logger.debug("Fetching updates from %s branch=%s", origin.url, branch)
+                    logger.debug(
+                        "Fetching updates from %s branch=%s", origin.url, branch
+                    )
+                    # Drop local modifications that block pull
+                    with contextlib.suppress(Exception):
+                        repo.git.reset("--hard", "HEAD")
+                    with contextlib.suppress(Exception):
+                        repo.git.clean("-fd", "hikkari/")
                     try:
                         origin.fetch(
                             refspec=f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
                         )
                     except Exception:
-                        origin.fetch()
+                        try:
+                            origin.fetch()
+                        except Exception as fe:
+                            logger.error("git fetch failed: %s", fe)
+                            raise
+                    old = repo.head.commit.hexsha
+                    remote_ref = f"origin/{branch}"
                     try:
                         if branch not in repo.heads:
-                            repo.create_head(branch, f"origin/{branch}")
+                            repo.create_head(branch, remote_ref)
                         repo.heads[branch].checkout(force=True)
                         with contextlib.suppress(Exception):
                             repo.heads[branch].set_tracking_branch(
                                 origin.refs[branch]
                             )
                     except Exception as ce:
-                        logger.debug("checkout %s before pull: %s", branch, ce)
-                    old = repo.head.commit.hexsha
+                        logger.debug("checkout %s: %s", branch, ce)
+                    # Prefer hard reset to remote tip (no merge, no local drift)
                     try:
-                        r = origin.pull(branch)
+                        repo.git.reset("--hard", remote_ref)
                     except Exception:
-                        repo.git.pull("origin", branch)
-                        r = []
+                        try:
+                            origin.pull(branch)
+                        except Exception:
+                            repo.git.pull("origin", branch)
                     new_commit = repo.head.commit
                     if new_commit.hexsha != old:
                         try:
@@ -1052,16 +1069,13 @@ class UpdaterMod(loader.Module):
                                     return True
                         except Exception:
                             pass
-                    for info in r or []:
-                        if getattr(info, "old_commit", None):
-                            for d in new_commit.diff(info.old_commit):
-                                if d.b_path == "requirements.txt":
-                                    return True
-                return False
+                    return False
             except git.exc.InvalidGitRepositoryError:
-                repo = Repo.init(os.path.dirname(utils.get_base_dir()))
+                repo = Repo.init(base)
                 with repo:
-                    origin = repo.create_remote("origin", self.config["GIT_ORIGIN_URL"])
+                    origin = repo.create_remote(
+                        "origin", self.config["GIT_ORIGIN_URL"]
+                    )
                     logger.debug("Fetching initial updates from %s", origin.url)
                     br = branch or "master"
                     try:
@@ -1229,7 +1243,23 @@ class UpdaterMod(loader.Module):
     ):
         # We don't really care about asyncio at this point, as we are shutting down
         if hard:
-            os.system(f"cd {utils.get_base_dir()} && cd .. && git reset --hard HEAD")
+            try:
+                base = os.path.dirname(utils.get_base_dir())
+                br = self._current_branch()
+                subprocess.run(
+                    ["git", "fetch", "origin", br],
+                    cwd=base,
+                    check=False,
+                    timeout=90,
+                )
+                subprocess.run(
+                    ["git", "reset", "--hard", f"origin/{br}"],
+                    cwd=base,
+                    check=False,
+                    timeout=60,
+                )
+            except Exception as e:
+                logger.error("hard git reset failed: %s", e)
 
         try:
             with contextlib.suppress(Exception):
@@ -1240,9 +1270,44 @@ class UpdaterMod(loader.Module):
             try:
                 req_update = await self.download_common()
                 if self._try_auto_rollback():
-                    raise RuntimeError("Hikkari update auto-rollback")
+                    logger.error(
+                        "Update rolled back due to broken boot files — "
+                        "not restarting into a broken tree"
+                    )
+                    with contextlib.suppress(Exception):
+                        await utils.answer(
+                            msg_obj,
+                            "🚫 <b>Update rolled back</b> (broken core). "
+                            "Try again later or update via terminal.",
+                            skip_rich=True,
+                        )
+                    return
             except TimeoutError:
                 logger.exception("Timed out while fetching updates from git remote")
+                with contextlib.suppress(Exception):
+                    await utils.answer(
+                        msg_obj,
+                        "⏱ <b>Git timeout</b>. Try <code>.update -f</code> again.",
+                        skip_rich=True,
+                    )
+                return
+            except GitCommandError as ge:
+                if not hard:
+                    logger.warning("git update failed, retrying hard: %s", ge)
+                    await self.inline_update(msg_obj, True)
+                    return
+                logger.critical(
+                    "Got update loop. Update manually via .terminal: %s", ge
+                )
+                with contextlib.suppress(Exception):
+                    await utils.answer(
+                        msg_obj,
+                        "🚫 <b>Update failed</b> (git). "
+                        "Use <code>.terminal</code>: "
+                        "<code>cd /root/Hikkari && git fetch && "
+                        "git reset --hard origin/$(git branch --show-current)</code>",
+                        skip_rich=True,
+                    )
                 return
 
             with contextlib.suppress(Exception):
@@ -1254,12 +1319,17 @@ class UpdaterMod(loader.Module):
                 self.req_common()
 
             await self.restart_common(msg_obj)
-        except GitCommandError:
+        except GitCommandError as ge:
             if not hard:
                 await self.inline_update(msg_obj, True)
                 return
-
-            logger.critical("Got update loop. Update manually via .terminal")
+            logger.critical("Got update loop. Update manually via .terminal: %s", ge)
+            with contextlib.suppress(Exception):
+                await utils.answer(
+                    msg_obj,
+                    "🚫 <b>Update failed</b>. Use terminal git reset --hard.",
+                    skip_rich=True,
+                )
 
     # Official beta access list on GitHub (master branch = source of truth)
     _BETA_LIST_URLS = (
