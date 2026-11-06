@@ -1016,14 +1016,13 @@ class UpdaterMod(loader.Module):
         restart()
 
     async def download_common(self):
-        """Fetch origin and hard-reset to origin/<branch>. Avoids merge conflicts / update loops."""
+        """Sync tree to origin/<branch>. Never uses merge/pull (avoids divergent-branch loop)."""
         global _UPDATE_IN_PROGRESS
         if not _UPDATE_PROC_LOCK.acquire(blocking=False):
             raise GitCommandError(
                 ["git", "update"],
                 1,
-                b"",
-                b"update already in progress",
+                stderr="update already in progress",
             )
         _UPDATE_IN_PROGRESS = True
         try:
@@ -1035,85 +1034,112 @@ class UpdaterMod(loader.Module):
 
     async def _download_common_inner(self):
         self._save_pre_update_sha()
-        branch = self._current_branch()
+        branch = self._current_branch() or "master"
+        base = os.path.dirname(utils.get_base_dir())
+
+        def _run(args, timeout=90):
+            return subprocess.run(
+                args,
+                cwd=base,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
 
         def _sync():
-            base = os.path.dirname(utils.get_base_dir())
-            try:
-                with Repo(base) as repo:
-                    origin = repo.remote("origin")
-                    logger.debug(
-                        "Fetching updates from %s branch=%s", origin.url, branch
-                    )
-                    # Drop local modifications that block pull
-                    with contextlib.suppress(Exception):
-                        repo.git.reset("--hard", "HEAD")
-                    with contextlib.suppress(Exception):
-                        repo.git.clean("-fd", "hikkari/")
-                    try:
-                        origin.fetch(
-                            refspec=f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
-                        )
-                    except Exception:
-                        try:
-                            origin.fetch()
-                        except Exception as fe:
-                            logger.error("git fetch failed: %s", fe)
-                            raise
-                    old = repo.head.commit.hexsha
-                    remote_ref = f"origin/{branch}"
-                    try:
-                        if branch not in repo.heads:
-                            repo.create_head(branch, remote_ref)
-                        repo.heads[branch].checkout(force=True)
-                        with contextlib.suppress(Exception):
-                            repo.heads[branch].set_tracking_branch(
-                                origin.refs[branch]
-                            )
-                    except Exception as ce:
-                        logger.debug("checkout %s: %s", branch, ce)
-                    # Prefer hard reset to remote tip (no merge, no local drift)
-                    try:
-                        repo.git.reset("--hard", remote_ref)
-                    except Exception:
-                        try:
-                            origin.pull(branch)
-                        except Exception:
-                            repo.git.pull("origin", branch)
-                    new_commit = repo.head.commit
-                    if new_commit.hexsha != old:
-                        try:
-                            for d in new_commit.diff(repo.commit(old)):
-                                if d.b_path == "requirements.txt":
-                                    return True
-                        except Exception:
-                            pass
-                    return False
-            except git.exc.InvalidGitRepositoryError:
-                repo = Repo.init(base)
-                with repo:
-                    origin = repo.create_remote(
-                        "origin", self.config["GIT_ORIGIN_URL"]
-                    )
-                    logger.debug("Fetching initial updates from %s", origin.url)
-                    br = branch or "master"
-                    try:
-                        origin.fetch(
-                            refspec=f"+refs/heads/{br}:refs/remotes/origin/{br}"
-                        )
-                    except Exception:
-                        origin.fetch()
-                    ref = getattr(origin.refs, br, None) or origin.refs.master
-                    if br not in repo.heads:
-                        repo.create_head(br, ref)
-                    repo.heads[br].set_tracking_branch(ref)
-                    repo.heads[br].checkout(True)
-                return False
+            # 1) ensure repo
+            if not (Path(base) / ".git").exists():
+                _run(["git", "init"])
+                _run(
+                    [
+                        "git",
+                        "remote",
+                        "add",
+                        "origin",
+                        self.config.get("GIT_ORIGIN_URL")
+                        or "https://github.com/Wers1xx/Hikkari",
+                    ]
+                )
 
-        return await asyncio.wait_for(
-            asyncio.to_thread(_sync),
-            timeout=120,
-        )
+            # 2) drop local dirt that blocks checkout
+            _run(["git", "reset", "--hard", "HEAD"])
+            _run(["git", "clean", "-fd", "hikkari/"])
+
+            # 3) fetch remote branch (unshallow if needed)
+            r = _run(
+                [
+                    "git",
+                    "fetch",
+                    "--prune",
+                    "origin",
+                    f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
+                ],
+                timeout=120,
+            )
+            if r.returncode != 0:
+                r2 = _run(["git", "fetch", "--prune", "origin"], timeout=120)
+                if r2.returncode != 0:
+                    # try deepen shallow clones
+                    _run(["git", "fetch", "--depth=200", "origin", branch], timeout=120)
+                    r2 = _run(["git", "fetch", "origin", branch], timeout=120)
+                    if r2.returncode != 0:
+                        err = (r.stderr or "") + "\n" + (r2.stderr or "")
+                        raise GitCommandError(["git", "fetch"], r2.returncode or 1, stderr=err)
+
+            # 4) resolve remote tip
+            tip = _run(["git", "rev-parse", f"origin/{branch}"])
+            if tip.returncode != 0 or not (tip.stdout or "").strip():
+                # fallback master/beta
+                for fb in ("master", "beta", "main"):
+                    tip = _run(["git", "rev-parse", f"origin/{fb}"])
+                    if tip.returncode == 0 and (tip.stdout or "").strip():
+                        branch_use = fb
+                        break
+                else:
+                    raise GitCommandError(
+                        ["git", "rev-parse"],
+                        1,
+                        stderr=f"origin/{branch} missing after fetch",
+                    )
+            else:
+                branch_use = branch
+
+            old = (_run(["git", "rev-parse", "HEAD"]).stdout or "").strip()
+
+            # 5) checkout branch (create from remote if needed)
+            co = _run(["git", "checkout", "-B", branch_use, f"origin/{branch_use}"])
+            if co.returncode != 0:
+                _run(["git", "checkout", "-f", branch_use])
+                _run(["git", "reset", "--hard", f"origin/{branch_use}"])
+
+            # 6) ALWAYS hard-reset to remote — kills divergent local commits
+            hard = _run(["git", "reset", "--hard", f"origin/{branch_use}"])
+            if hard.returncode != 0:
+                raise GitCommandError(
+                    ["git", "reset", "--hard", f"origin/{branch_use}"],
+                    hard.returncode,
+                    stderr=hard.stderr or hard.stdout or "reset failed",
+                )
+
+            new = (_run(["git", "rev-parse", "HEAD"]).stdout or "").strip()
+            logger.info(
+                "git update %s: %s -> %s",
+                branch_use,
+                (old or "?")[:7],
+                (new or "?")[:7],
+            )
+
+            # requirements changed?
+            if old and new and old != new:
+                diff = _run(["git", "diff", "--name-only", old, new])
+                names = (diff.stdout or "").splitlines()
+                if "requirements.txt" in names:
+                    return True
+            return False
+
+        return await asyncio.wait_for(asyncio.to_thread(_sync), timeout=180)
+
 
     @staticmethod
     def req_common():
@@ -1273,18 +1299,19 @@ class UpdaterMod(loader.Module):
         if hard:
             try:
                 base = os.path.dirname(utils.get_base_dir())
-                br = self._current_branch()
+                br = self._current_branch() or "master"
                 subprocess.run(
-                    ["git", "fetch", "origin", br],
-                    cwd=base,
-                    check=False,
-                    timeout=90,
+                    ["git", "fetch", "--prune", "origin",
+                     f"+refs/heads/{br}:refs/remotes/origin/{br}"],
+                    cwd=base, check=False, timeout=120,
+                )
+                subprocess.run(
+                    ["git", "checkout", "-B", br, f"origin/{br}"],
+                    cwd=base, check=False, timeout=60,
                 )
                 subprocess.run(
                     ["git", "reset", "--hard", f"origin/{br}"],
-                    cwd=base,
-                    check=False,
-                    timeout=60,
+                    cwd=base, check=False, timeout=60,
                 )
             except Exception as e:
                 logger.error("hard git reset failed: %s", e)
@@ -1324,9 +1351,7 @@ class UpdaterMod(loader.Module):
                     logger.warning("git update failed, retrying hard: %s", ge)
                     await self.inline_update(msg_obj, True)
                     return
-                logger.critical(
-                    "Got update loop. Update manually via .terminal: %s", ge
-                )
+                logger.error("Update failed after hard retry: %s", ge)
                 with contextlib.suppress(Exception):
                     await utils.answer(
                         msg_obj,
