@@ -66,6 +66,34 @@ class Placeholder:
 
 class Form(InlineUnit):
 
+    def _safe_inline_text(text, fallback: str = "\u2728") -> str:
+        """Never return empty / invalid UTF-8 text for SetInlineBotResultsRequest."""
+        if text is None:
+            return fallback
+        if not isinstance(text, str):
+            try:
+                text = str(text)
+            except Exception:
+                return fallback
+        text = text.replace(chr(0), "")
+        try:
+            text = text.encode("utf-8", "surrogatepass").decode("utf-8", "replace")
+        except Exception:
+            try:
+                text = text.encode("utf-8", "replace").decode("utf-8", "replace")
+            except Exception:
+                return fallback
+        text = text.strip()
+        if not text:
+            return fallback
+        plain = re.sub(r"<[^>]+>", "", text)
+        plain = re.sub(r"\s+", "", plain, flags=0)
+        if not plain:
+            return fallback
+        return text
+
+
+    @staticmethod
     def _inline_query_id(self, inline_query) -> str | int | None:
         """Resolve query_id from Telethon/hikkaritl InlineQuery event variants."""
         for attr in ("id", "query_id"):
@@ -665,8 +693,8 @@ class Form(InlineUnit):
             "type": "rich",
             "rich_html": html,
             "text": html,  # fallback if client ignores rich
-            "title": title,
-            "description": description,
+            "title": (str(title).strip() if title else None) or "Hikkari",
+            "description": (str(description).strip() if description else None) or "Hikkari",
             "buttons": markup or [],
             "pages": page_list,
             "page": cur if page_list else 0,
@@ -975,12 +1003,15 @@ class Form(InlineUnit):
                     )
                 return
 
-        form_text = form.get("text") or "✨"
+        form_text = self._safe_inline_text(form.get("text"), "✨")
         # Caption limits: media results → 1024, article → 4096
         _has_media = any(
             k in form for k in ("photo", "gif", "video", "file", "audio")
         )
-        form_text = self._clip_inline_text(form_text, has_media=_has_media) or "✨"
+        form_text = self._safe_inline_text(
+            self._clip_inline_text(form_text, has_media=_has_media),
+            "✨",
+        )
 
         try:
             match True:
@@ -1404,8 +1435,41 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
         except Exception as e:
-            # Caption over limit → hard-clip and retry once
+            # Caption over limit / empty message → hard-clip or safe text and retry once
             ename = type(e).__name__
+            if "MessageEmpty" in ename or "MESSAGE_EMPTY" in str(e).upper():
+                try:
+                    safe = self._safe_inline_text(form.get("text"), "✨ Hikkari")
+                    await inline_query.answer(
+                        [
+                            await inline_query.builder.article(
+                                title="Hikkari",
+                                text=safe,
+                                parse_mode="HTML",
+                                link_preview=False,
+                                buttons=self.generate_markup(
+                                    form.get("uid") or inline_query.query
+                                ),
+                                id=utils.rand(20),
+                            )
+                        ],
+                        cache_time=0,
+                    )
+                    return
+                except Exception as e2:
+                    e = e2
+                    with contextlib.suppress(Exception):
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    text="✨",
+                                    id=utils.rand(16),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                        return
             if "CaptionTooLong" in ename or "MEDIA_CAPTION_TOO_LONG" in str(e):
                 try:
                     form_text2 = self._clip_inline_text(
