@@ -766,7 +766,10 @@ class Help(loader.Module):
                 except Exception:
                     bu = None
                 if bu and str(bu).startswith(("http://", "https://")):
-                    if not str(bu).lower().endswith((".mp4", ".webm", ".mov", ".gif")):
+                    _ext = str(bu).split("?", 1)[0].lower()
+                    if _ext.endswith((".mp4", ".webm", ".mov")):
+                        banner_html = f'<figure><video src="{bu}"/></figure>'
+                    else:
                         banner_html = f'<figure><img src="{bu}"/></figure>'
 
                 icon = self.config.get("desc_icon") or ""

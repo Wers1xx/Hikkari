@@ -391,10 +391,12 @@ class HikkariInfoMod(loader.Module):
                         )
                     if not banner.startswith(("http://", "https://")):
                         banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg"
-                    if "<figure" not in html.lower() and not banner.lower().endswith(
-                        (".mp4", ".webm", ".gif", ".mov")
-                    ):
-                        html = f'<figure><img src="{banner}"/></figure>' + html
+                    if "<figure" not in html.lower() and "<video" not in html.lower():
+                        _be = banner.lower().split("?", 1)[0]
+                        if _be.endswith((".mp4", ".webm", ".mov")):
+                            html = f'<figure><video src="{banner}"/></figure>' + html
+                        else:
+                            html = f'<figure><img src="{banner}"/></figure>' + html
                     html = normalize_rich_html(html)
                     await utils.answer_with_media_fallback(message, rich_message=html)
                     return

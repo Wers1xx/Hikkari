@@ -111,7 +111,11 @@ def inject_banner_html(html: str, banner_url: str | None, *, force: bool = True)
             count=1,
             flags=re.I | re.S,
         ).lstrip()
-    fig = f'<figure><img src="{banner_url}"/></figure>\n'
+    _bu = str(banner_url).split("?", 1)[0].lower()
+    if _bu.endswith((".mp4", ".webm", ".mov")):
+        fig = f'<figure><video src="{banner_url}"/></figure>\n'
+    else:
+        fig = f'<figure><img src="{banner_url}"/></figure>\n'
     return fig + html
 
 def ensure_audio_figcaptions(html: str) -> str:
