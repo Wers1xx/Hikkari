@@ -66,7 +66,7 @@ class Placeholder:
 
 class Form(InlineUnit):
 
-    def _safe_inline_text(text, fallback: str = "\u2728") -> str:
+    def _safe_inline_text(self, text, fallback: str = "\u2728") -> str:
         """Never return empty / invalid UTF-8 text for SetInlineBotResultsRequest."""
         if text is None:
             return fallback
@@ -93,7 +93,6 @@ class Form(InlineUnit):
         return text
 
 
-    @staticmethod
     def _inline_query_id(self, inline_query) -> str | int | None:
         """Resolve query_id from Telethon/hikkaritl InlineQuery event variants."""
         for attr in ("id", "query_id"):
