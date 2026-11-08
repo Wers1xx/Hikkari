@@ -417,38 +417,49 @@ class Help(loader.Module):
         if getattr(module, "__origin__", "").startswith("<core"):
             dev_text = None
 
-        # Rich single-module help (commands in <details>)
+        # Rich single-module help (same card as loader)
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, pick_banner_url, inject_banner_html
+            from ..utils.rich_api import (
+                html_table,
+                pick_banner_url,
+                inject_banner_html,
+                to_rich_compatible,
+                try_send_rich,
+                markup_to_tg_rows,
+            )
             import html as html_mod
 
-            if can_use_rich(self._client, self._db) and getattr(
-                self.inline, "init_complete", False
-            ):
+            if can_use_rich(self._client, self._db):
                 undoc = self._plain_doc(self.strings.get("undoc"), "—")
                 rows = []
-                for name, fun in commands.items():
-                    doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
-                    rows.append(
-                        (
-                            html_mod.escape(
-                                self._cmd_label(name, with_prefix=True)
-                            ),
-                            html_mod.escape(doc),
-                        )
-                    )
-                if hasattr(module, "inline_handlers"):
-                    for name, fun in module.inline_handlers.items():
+                for name, fun in list(commands.items())[:80]:
+                    try:
                         doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                         rows.append(
                             (
                                 html_mod.escape(
-                                    f"@{self.inline.bot_username} {name}"
+                                    self._cmd_label(name, with_prefix=True)
                                 ),
                                 html_mod.escape(doc),
                             )
                         )
+                    except Exception:
+                        continue
+                if hasattr(module, "inline_handlers"):
+                    for name, fun in list(module.inline_handlers.items())[:40]:
+                        try:
+                            doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
+                            rows.append(
+                                (
+                                    html_mod.escape(
+                                        f"@{self.inline.bot_username} {name}"
+                                    ),
+                                    html_mod.escape(doc),
+                                )
+                            )
+                        except Exception:
+                            continue
                 parts = [f"<h2>{html_mod.escape(str(_name))}</h2>"]
                 if module.__doc__:
                     mdoc = self._plain_doc(inspect.getdoc(module), "")[:400]
@@ -467,65 +478,91 @@ class Help(loader.Module):
                     if ph:
                         parts.append(
                             f"<details><summary>Placeholders</summary>"
-                            f"<p>{html_mod.escape(ph)}</p></details>"
+                            f"<p>{html_mod.escape(ph[:500])}</p></details>"
                         )
                 if dev_text:
-                    # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>{self.strings.get('developer', '🧑‍💻 Developer: {}').format(self._linkify_dev(str(dev_text)))}</p>"
+                        f"<p>\u2764\ufe0f Developer: "
+                        f"{self._linkify_dev(str(dev_text))}</p>"
                     )
-                if getattr(module, "__origin__", "").startswith("<core"):
-                    core_n = self._plain_doc(
-                        self.strings.get("core_notice"),
-                        "Built-in module",
-                    )
-                    parts.append(f"<p>🛡 {html_mod.escape(core_n)}</p>")
+                html = "\n".join(parts)
+                with contextlib.suppress(Exception):
+                    html = to_rich_compatible(html)
 
-                # Meta banner of THIS module first, then Help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    src = getattr(module, "__source__", None) or ""
-                    if not src or "# meta banner" not in src.lower():
-                        # Fallback: read persisted / origin file
-                        for attr in ("__file__", "_file"):
-                            fp = getattr(module, attr, None)
-                            if fp and Path(str(fp)).is_file():
-                                src = Path(str(fp)).read_text(
-                                    encoding="utf-8", errors="ignore"
-                                )
-                                break
-                        if not src:
-                            origin = str(getattr(module, "__origin__", "") or "")
-                            if origin.endswith(".py") and Path(origin).is_file():
-                                src = Path(origin).read_text(
-                                    encoding="utf-8", errors="ignore"
-                                )
-                    meta_b = self._get_banner_url(src)
-                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
-                html = "\n".join(parts)
-                html = inject_banner_html(html, burl, force=True)
-                m = await self.inline.rich(
-                    message,
-                    html,
-                    title=str(_name)[:64],
-                    description=self._plain_doc(inspect.getdoc(module), "Module help")[
-                        :80
-                    ],
-                    thumbnail_url=burl,
-                    reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
-                    silent=True,
-                )
-                if m:
-                    return
-                # Fallback: Bot API sendRichMessage (works even with 1–2 commands)
+                    src = ""
+                    origin = getattr(module, "__origin__", "") or ""
+                    if origin and not str(origin).startswith("<"):
+                        from pathlib import Path as _P
+                        if _P(str(origin)).is_file():
+                            src = _P(str(origin)).read_text(
+                                encoding="utf-8", errors="ignore"
+                            )
+                    if hasattr(self, "_get_banner_url"):
+                        meta_b = self._get_banner_url(src) if src else None
+                    elif hasattr(module, "strings"):
+                        pass
+                # meta from module file via loader helper if present
                 with contextlib.suppress(Exception):
-                    from ..utils.rich_api import try_send_rich
+                    loader = self.lookup("Loader") or self.lookup("LoaderMod")
+                    if loader and hasattr(loader, "_get_banner_url"):
+                        origin = getattr(module, "__origin__", "") or ""
+                        if origin and not str(origin).startswith("<core"):
+                            from pathlib import Path as _P
+                            p = _P(str(origin))
+                            if p.is_file():
+                                meta_b = loader._get_banner_url(
+                                    p.read_text(encoding="utf-8", errors="ignore")
+                                )
+                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
+                if burl:
+                    html = inject_banner_html(html, burl, force=True)
+
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                with contextlib.suppress(Exception):
+                    btn = markup_to_tg_rows(close_mk, "")
+                    if btn:
+                        html = f"{html}\n{btn}"
+
+                # native
+                with contextlib.suppress(Exception):
                     chat = utils.get_chat_id(message)
                     if chat and await try_send_rich(self._client, chat, html):
                         with contextlib.suppress(Exception):
                             if getattr(message, "out", False):
                                 await message.delete()
                         return
+
+                if getattr(self.inline, "init_complete", False):
+                    try:
+                        m = await self.inline.rich(
+                            message,
+                            html,
+                            title=str(_name)[:64],
+                            description=self._plain_doc(
+                                inspect.getdoc(module), "Module help"
+                            )[:80],
+                            thumbnail_url=burl,
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        if m:
+                            return
+                    except Exception as e:
+                        logger.debug("help inline.rich failed: %s", e)
+                    try:
+                        m = await self.inline.form(
+                            text=str(_name)[:120] or "Help",
+                            message=message,
+                            rich_message=html,
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        if m:
+                            return
+                    except Exception as e:
+                        logger.debug("help form rich failed: %s", e)
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 

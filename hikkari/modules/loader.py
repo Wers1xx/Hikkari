@@ -398,27 +398,24 @@ class LoaderMod(loader.Module):
         meta_banner: str | None = None,
         version: str = "",
     ) -> bool:
-        """Module load card as real Telegram Rich Message.
-
-        Per Bot API 10.1+ / MTProto:
-          - Bots: sendRichMessage / answerInlineQuery(InputRichMessageContent)
-          - Users with Premium: messages.SendMessage(rich_message=...)
-        In a private chat with a friend the bot often cannot post → user
-        client path is required. Via@ classic article is last resort only.
-        """
+        """Same card shape as Help: banner + title + desc + Commands(details) + dev + Close."""
         try:
+            from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
                 html_table,
                 markup_to_tg_rows,
-                strip_external_media_for_inline,
                 try_send_rich,
                 to_rich_compatible,
                 inject_banner_html,
+                pick_banner_url,
             )
             import html as html_mod
 
+            if not can_use_rich(self._client, self._db):
+                return False
+
             name = self._plain_cmd_doc(modname, str(modname))[:64]
-            desc = self._plain_cmd_doc(mod_doc, "")[:300]
+            desc = self._plain_cmd_doc(mod_doc, "")[:400]
             dev_plain = self._plain_cmd_doc(developer, "")
             dev_plain = re.sub(r"\s+", " ", dev_plain).strip()
             for junk in (
@@ -428,173 +425,132 @@ class LoaderMod(loader.Module):
                 if dev_plain.lower().startswith(junk.lower()):
                     dev_plain = dev_plain[len(junk) :].strip()
 
-            origin_disp = ""
-            origin_url = ""
-            if origin and origin not in ("<string>", "<core>"):
-                o = str(origin).strip()
-                if o.startswith("http://") or o.startswith("https://"):
-                    origin_url = o
-                    origin_disp = o.rsplit("/", 1)[-1][:80] or o[:80]
-                elif not o.startswith("<"):
-                    origin_disp = o[:80]
-
             clean_rows = []
-            for cmd, doc in rows or []:
-                clean_rows.append(
-                    (
-                        html_mod.escape(self._plain_cmd_doc(cmd, str(cmd))[:64]),
-                        html_mod.escape(self._plain_cmd_doc(doc)[:100]),
-                    )
-                )
+            for item in rows or []:
+                try:
+                    if isinstance(item, (list, tuple)) and len(item) >= 1:
+                        c = self._plain_cmd_doc(item[0], str(item[0]))[:64]
+                        d = self._plain_cmd_doc(item[1] if len(item) > 1 else "", "")[:120]
+                        clean_rows.append(
+                            (html_mod.escape(c), html_mod.escape(d))
+                        )
+                    elif isinstance(item, str) and item.strip():
+                        clean_rows.append((html_mod.escape(item.strip()[:64]), ""))
+                except Exception:
+                    continue
 
             ver = f" (v{version})" if version else ""
-            # Official Rich HTML (Bot API 10.1 rich message formatting)
             parts = [
-                f'<h2><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> '
-                f"{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"
+                f"<h2>{html_mod.escape(name)}{html_mod.escape(ver)}</h2>"
             ]
             if desc:
                 parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
             if clean_rows:
-                parts.append(html_table(clean_rows, header=("Command", "Description")))
+                table = html_table(clean_rows, header=("Command", "Description"))
+                parts.append(
+                    "<details>"
+                    f"<summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
+                    f"{table}\n"
+                    "</details>"
+                )
             if dev_plain:
                 linked = self._linkify_developer(dev_plain[:120])
                 parts.append(f"<p>\u2764\ufe0f Developer: {linked}</p>")
-            if origin_url:
-                parts.append(
-                    f'<p>\U0001f310 <a href="{html_mod.escape(origin_url)}">'
-                    f"{html_mod.escape(origin_disp or origin_url)}</a></p>"
-                )
-            elif origin_disp:
-                parts.append(f"<p>Source: {html_mod.escape(origin_disp)}</p>")
 
             html = "\n".join(parts)
             with contextlib.suppress(Exception):
                 html = to_rich_compatible(html)
-            thumb = (
-                meta_banner
-                if meta_banner and str(meta_banner).startswith(("http://", "https://"))
-                else None
-            )
-            # Banner only for via@ path — external media breaks native often
-            html_native = html
-            html_banner = html
-            if thumb:
+
+            burl = None
+            if meta_banner:
+                burl = pick_banner_url(meta_banner) or (
+                    str(meta_banner)
+                    if str(meta_banner).startswith(("http://", "https://"))
+                    else None
+                )
+            if not burl:
                 with contextlib.suppress(Exception):
-                    html_banner = inject_banner_html(html, thumb, force=True)
+                    burl = pick_banner_url(
+                        getattr(self, "config", {}).get("banner_url")
+                        if hasattr(self, "config")
+                        else None
+                    )
+            if burl:
+                with contextlib.suppress(Exception):
+                    html = inject_banner_html(html, burl, force=True)
+
+            close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+            if subscribe_markup:
+                close_mk = list(subscribe_markup) + close_mk
+
+            with contextlib.suppress(Exception):
+                btn_html = markup_to_tg_rows(close_mk, "")
+                if btn_html:
+                    html = f"{html}\n{btn_html}"
 
             chat = None
             with contextlib.suppress(Exception):
                 chat = utils.get_chat_id(message)
 
-            me = getattr(self._client, "hikkari_me", None)
-            premium = bool(getattr(me, "premium", False)) if me else False
-
-            # Close button + optional subscribe always present
-            close_row = [
-                {
-                    "text": "🔻 Закрыть",
-                    "action": "close",
-                }
-            ]
-            markup = list(subscribe_markup) if subscribe_markup else []
-            markup.append(close_row)
-
-            # Embed tg-buttons into HTML (premium + close)
-            html_with_btns = html_banner
-            with contextlib.suppress(Exception):
-                btn_html = markup_to_tg_rows(markup, "")
-                if btn_html:
-                    html_with_btns = html_banner.rstrip() + "\n" + btn_html
-            html_native = html_with_btns
-            with contextlib.suppress(Exception):
-                html_native = to_rich_compatible(html_native)
-
-            # Prefer via@ / form WITH working close (native alone has no callback unit)
-            # ── via@ / form with close ─────────────────────────────────────
-            # ── via@ InputRichMessageContent ───────────────────────────────
-            html_via = strip_external_media_for_inline(html_with_btns)
-
-            if not getattr(self.inline, "init_complete", False) or not getattr(
-                self.inline, "bot_username", None
-            ):
+            # 1) Native user Premium rich (no via)
+            if chat:
                 with contextlib.suppress(Exception):
-                    if hasattr(self.inline, "ensure_inline_ready"):
-                        await self.inline.ensure_inline_ready()
-                    else:
-                        await self.inline.register_manager(ignore_token_checks=True)
+                    if await try_send_rich(self._client, chat, html):
+                        with contextlib.suppress(Exception):
+                            if getattr(message, "out", False):
+                                await message.delete()
+                        return True
 
-            if getattr(self.inline, "bot_username", None):
-                target = chat if chat is not None else message
+            # 2) inline.rich unit (Help-style)
+            if getattr(self.inline, "init_complete", False):
                 try:
                     m = await self.inline.rich(
-                        target,
-                        html_via,
-                        title=f"\u2713 {name}"[:64],
-                        description=(desc[:80] if desc else "Module loaded"),
+                        message,
+                        html,
+                        title=str(name)[:64],
+                        description=(desc or "Module loaded")[:80],
+                        thumbnail_url=burl,
+                        reply_markup=close_mk,
                         silent=True,
-                        reply_markup=markup,
-                        thumbnail_url=None,  # avoid EXTERNAL_MEDIA
                     )
                     if m:
-                        with contextlib.suppress(Exception):
-                            im = self.inline
-                            uid = getattr(m, "unit_id", None)
-                            if not uid and getattr(im, "_units", None):
-                                uid = next(reversed(im._units), None)
-                            if uid and uid in getattr(im, "_units", {}):
-                                for row in im._units[uid].get("buttons") or markup:
-                                    for btn in row:
-                                        if isinstance(btn, dict) and btn.get("action") == "close":
-                                            btn["callback"] = im._close_unit_handler
-                                            btn["_callback_data"] = "hcfg|close"
-                                            im._custom_map["hcfg|close"] = {
-                                                "handler": im._close_unit_handler,
-                                                "always_allow": [],
-                                                "args": (),
-                                                "kwargs": {},
-                                                "force_me": True,
-                                                "disable_security": True,
-                                                "message": True,
-                                            }
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False) and message != m:
-                                await message.delete()
-                        logger.info("loader: inline.rich OK")
                         return True
                 except Exception as e:
                     logger.warning("loader inline.rich failed: %s", e)
 
-                # form(rich_message=) — text must be real content (not single emoji)
+                # 3) form with rich_message only (no photo kwargs — avoids dual msg)
                 try:
-                    plain_fb = f"✅ Module {name} loaded"
+                    plain = f"✅ {name} loaded"
                     if desc:
-                        plain_fb = plain_fb + "\n" + desc[:200]
+                        plain = f"{plain}\n{desc[:180]}"
                     m = await self.inline.form(
-                        text=plain_fb,
-                        message=message if getattr(message, "out", False) else target,
-                        rich_message=html_via,
-                        reply_markup=markup,
+                        text=plain,
+                        message=message,
+                        rich_message=html,
+                        reply_markup=close_mk,
                         silent=True,
                     )
                     if m:
-                        logger.info("loader: form rich_message OK")
                         return True
                 except Exception as e:
-                    logger.warning("loader form rich_message failed: %s", e)
+                    logger.warning("loader form rich failed: %s", e)
 
-            # ── 4) Classic form ─────────────────────────────────────────────
+            # 4) Classic form (expandable commands) — still better than plain
             try:
                 text_parts = [
-                    f'<b><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> Module {html_mod.escape(name)} loaded</b>',
+                    f'<b><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> '
+                    f"{html_mod.escape(name)}{html_mod.escape(ver)} loaded</b>",
                 ]
                 if desc:
                     text_parts.append(f"<i>{html_mod.escape(desc)}</i>")
                 if clean_rows:
                     cmds = "\n".join(
-                        f"<code>{c}</code> — {d}" for c, d in clean_rows[:20]
+                        f"<code>{c}</code>" + (f" — {d}" if d else "")
+                        for c, d in clean_rows[:30]
                     )
-                    text_parts.append(f"<blockquote expandable>{cmds}</blockquote>")
+                    text_parts.append(
+                        f"<blockquote expandable>{cmds}</blockquote>"
+                    )
                 if dev_plain:
                     text_parts.append(
                         f"\u2764\ufe0f Developer: {self._linkify_developer(dev_plain[:120])}"
@@ -602,8 +558,8 @@ class LoaderMod(loader.Module):
                 if getattr(self.inline, "init_complete", False):
                     m = await self.inline.form(
                         "\n".join(text_parts),
-                        message=message if getattr(message, "out", False) else (chat or message),
-                        reply_markup=markup,
+                        message=message,
+                        reply_markup=close_mk,
                         silent=True,
                     )
                     if m:
@@ -614,6 +570,7 @@ class LoaderMod(loader.Module):
         except Exception:
             logger.exception("loader rich single failed")
         return False
+
 
     async def _announce_module_loaded(
         self,
