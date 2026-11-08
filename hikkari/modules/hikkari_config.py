@@ -107,86 +107,43 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """One form only. Rich mode → rich_message + HTML banner. Else classic + media."""
+        """Config UI: media banner + working callback keyboard.
+
+        Pure Rich (reply_markup=None) breaks multi-button navigation — after
+        opening a section buttons die and going back fails. Use classic form
+        with photo/video for ALL pages so kb always works.
+        """
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         banner_kw = self._cfg_banner_kwargs()
         markup = reply_markup
 
-        use_rich = False
-        try:
-            from ..utils.rich import can_use_rich
-            use_rich = bool(can_use_rich(self._client, self._db))
-        except Exception:
-            use_rich = False
-
-        # InlineCall / unit navigation → edit same unit (never open 2nd form)
+        # Navigation / unit edit — keep same unit + buttons + media
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
-            if use_rich:
-                try:
-                    from ..utils.rich_api import (
-                        to_rich_compatible,
-                        markup_to_tg_rows,
-                        inject_banner_html,
-                        pick_banner_url,
-                    )
-                    html = to_rich_compatible(str(text or "Config"))
-                    burl = pick_banner_url(self.config.get("banner_url"))
-                    if burl:
-                        html = inject_banner_html(html, burl, force=True)
-                    btn = markup_to_tg_rows(markup or [], "") or ""
-                    if btn:
-                        html = f"{html}\n{btn}"
-                    return await self.inline.form(
-                        text=str(text or "Config")[:180] or "Config",
-                        message=message,
-                        rich_message=html,
-                        reply_markup=markup,
-                        silent=True,
-                    )
-                except Exception:
-                    pass
+            edit_kw = {
+                k: v
+                for k, v in banner_kw.items()
+                if k in ("photo", "video", "gif", "file", "mime_type")
+            }
+            try:
+                return await message.edit(text, reply_markup=markup, **edit_kw)
+            except TypeError:
+                pass
+            except Exception:
+                pass
             try:
                 return await message.edit(text, reply_markup=markup)
             except Exception:
                 pass
-            # last resort: new form without rich media dual
             return await self.inline.form(
-                text, message=message, reply_markup=markup, silent=True, **banner_kw
+                text,
+                message=message,
+                reply_markup=markup,
+                silent=True,
+                **banner_kw,
             )
 
-        # Fresh open (.cfg)
-        if use_rich:
-            try:
-                from ..utils.rich_api import (
-                    to_rich_compatible,
-                    markup_to_tg_rows,
-                    inject_banner_html,
-                    pick_banner_url,
-                )
-                html = to_rich_compatible(str(text or "Config"))
-                burl = pick_banner_url(self.config.get("banner_url"))
-                if not burl:
-                    # fallback builtin
-                    burl = pick_banner_url("hikkari-config.jpg")
-                if burl:
-                    html = inject_banner_html(html, burl, force=True)
-                btn = markup_to_tg_rows(markup or [], "") or ""
-                if btn:
-                    html = f"{html}\n{btn}"
-                m = await self.inline.form(
-                    text=str(text or "Config")[:180] or "Config",
-                    message=message,
-                    rich_message=html,
-                    reply_markup=markup,
-                    silent=True,
-                )
-                if m:
-                    return m
-            except Exception:
-                logger.debug("cfg rich form failed", exc_info=True)
-
-        # Classic single form with media banner
+        # Fresh .cfg open — single classic form with banner
         return await self.inline.form(
             text,
             message=message,
