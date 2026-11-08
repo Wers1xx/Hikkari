@@ -479,12 +479,44 @@ class HikkariFindMod(loader.Module):
                 ok = False
                 err = f"{type(e).__name__}: {e}"
 
-        with contextlib.suppress(Exception):
-            if ok:
+        if ok:
+            info = getattr(loader_mod, "_last_loaded", None) or {}
+            modname = (info.get("name") if isinstance(info, dict) else None) or name
+            rows = (info.get("rows") if isinstance(info, dict) else None) or []
+            mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
+            with contextlib.suppress(Exception):
+                await call.delete()
+            rich_ok = False
+            if hasattr(loader_mod, "_rich_module_loaded"):
+                with contextlib.suppress(Exception):
+                    rich_ok = await loader_mod._rich_module_loaded(
+                        call,
+                        modname=str(modname),
+                        mod_doc=str(mod_doc or ""),
+                        rows=rows,
+                        subscribe_markup=None,
+                        origin=str(url or ""),
+                        developer="",
+                        meta_banner=None,
+                        version="",
+                    )
+            if rich_ok:
+                return
+            with contextlib.suppress(Exception):
                 await call.edit(
-                    self.strings["installed"].format(name=utils.escape_html(name))
+                    self.strings["installed"].format(name=utils.escape_html(str(modname)))
                 )
-            else:
+            if not rich_ok:
+                # last resort: bot PM
+                with contextlib.suppress(Exception):
+                    bot = getattr(self.inline, "bot", None)
+                    text = self.strings["installed"].format(
+                        name=utils.escape_html(str(modname))
+                    )
+                    if bot is not None:
+                        await bot.send_message(self.tg_id, text)
+        else:
+            with contextlib.suppress(Exception):
                 await call.edit(
                     self.strings["failed"].format(
                         name=utils.escape_html(name),

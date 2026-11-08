@@ -1658,6 +1658,37 @@ class LoaderMod(loader.Module):
         )
         if ok:
             rows = (info.get("rows") if isinstance(info, dict) else None) or []
+            mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
+            meta_b = None
+            with contextlib.suppress(Exception):
+                meta_b = self._get_banner_url(doc) if doc else None
+            ver = ""
+            with contextlib.suppress(Exception):
+                ver = self._module_version_str(
+                    self.lookup(str(modname)), doc or ""
+                ) if hasattr(self, "_module_version_str") else ""
+
+            # Drop confirm form, then same rich card as normal .dlm / .loadmod
+            with contextlib.suppress(Exception):
+                await call.delete()
+
+            rich_ok = False
+            with contextlib.suppress(Exception):
+                rich_ok = await self._rich_module_loaded(
+                    call,
+                    modname=str(modname),
+                    mod_doc=str(mod_doc or ""),
+                    rows=rows,
+                    subscribe_markup=None,
+                    origin=origin or "<string>",
+                    developer="",
+                    meta_banner=meta_b,
+                    version=str(ver or ""),
+                )
+            if rich_ok:
+                return
+
+            # Classic fallback (same text style as loader)
             lines = [
                 f"<emoji document_id=5262880537416054812>✅</emoji> <b>{utils.escape_html(str(modname))}</b>",
                 "<i>Модуль установлен</i>",
@@ -1668,19 +1699,12 @@ class LoaderMod(loader.Module):
                 elif isinstance(row, str) and row.strip():
                     lines.append(f"• <code>{utils.escape_html(row.strip())}</code>")
             text = "\n".join(lines)
-            edited = False
             with contextlib.suppress(Exception):
-                await call.edit(text)
-                edited = True
-            if not edited:
-                with contextlib.suppress(Exception):
-                    await call.delete()
-                with contextlib.suppress(Exception):
-                    bot = getattr(self.inline, "bot", None)
-                    if bot is not None:
-                        await bot.send_message(self.tg_id, text)
-                    else:
-                        await self._client.send_message(self.tg_id, text)
+                bot = getattr(self.inline, "bot", None)
+                if bot is not None:
+                    await bot.send_message(self.tg_id, text)
+                else:
+                    await self._client.send_message(self.tg_id, text)
         else:
             with contextlib.suppress(Exception):
                 await call.edit(self.strings.get("load_failed", "❌ Install failed"))
