@@ -1626,13 +1626,21 @@ class LoaderMod(loader.Module):
                 ) if hasattr(self, "_module_version_str") else ""
 
             # Drop confirm form, then same rich card as normal .dlm / .loadmod
+            target = None
+            with contextlib.suppress(Exception):
+                target = utils.get_chat_id(call)
+            if not target:
+                with contextlib.suppress(Exception):
+                    target = getattr(call, "chat_id", None) or getattr(call, "chat", None)
+            if not target:
+                target = self.tg_id
             with contextlib.suppress(Exception):
                 await call.delete()
 
             rich_ok = False
             with contextlib.suppress(Exception):
                 rich_ok = await self._rich_module_loaded(
-                    call,
+                    target,
                     modname=str(modname),
                     mod_doc=str(mod_doc or ""),
                     rows=rows,

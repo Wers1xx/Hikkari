@@ -484,13 +484,21 @@ class HikkariFindMod(loader.Module):
             modname = (info.get("name") if isinstance(info, dict) else None) or name
             rows = (info.get("rows") if isinstance(info, dict) else None) or []
             mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
+            target = None
+            with contextlib.suppress(Exception):
+                target = utils.get_chat_id(call)
+            if not target:
+                with contextlib.suppress(Exception):
+                    target = getattr(call, "chat_id", None)
+            if not target:
+                target = self.tg_id
             with contextlib.suppress(Exception):
                 await call.delete()
             rich_ok = False
             if hasattr(loader_mod, "_rich_module_loaded"):
                 with contextlib.suppress(Exception):
                     rich_ok = await loader_mod._rich_module_loaded(
-                        call,
+                        target,
                         modname=str(modname),
                         mod_doc=str(mod_doc or ""),
                         rows=rows,

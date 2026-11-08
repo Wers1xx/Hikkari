@@ -505,15 +505,15 @@ class Help(loader.Module):
                         pass
                 # meta from module file via loader helper if present
                 with contextlib.suppress(Exception):
-                    loader = self.lookup("Loader") or self.lookup("LoaderMod")
-                    if loader and hasattr(loader, "_get_banner_url"):
+                    loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                    if loader_mod and hasattr(loader_mod, "_get_banner_url"):
                         origin = getattr(module, "__origin__", "") or ""
                         if origin and not str(origin).startswith("<core"):
                             from pathlib import Path as _P
-                            p = _P(str(origin))
-                            if p.is_file():
-                                meta_b = loader._get_banner_url(
-                                    p.read_text(encoding="utf-8", errors="ignore")
+                            pth = _P(str(origin))
+                            if pth.is_file():
+                                meta_b = loader_mod._get_banner_url(
+                                    pth.read_text(encoding="utf-8", errors="ignore")
                                 )
                 burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 if burl:

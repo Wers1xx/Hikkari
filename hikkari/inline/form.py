@@ -264,24 +264,32 @@ class Form(InlineUnit):
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             try:
+                edit_kw = {
+                    k: v
+                    for k, v in {
+                        "photo": photo,
+                        "gif": gif,
+                        "file": file,
+                        "video": locals().get("video"),
+                        "silent": silent,
+                        "rich_message": rich_message,
+                    }.items()
+                    if v is not None
+                }
                 return await message.edit(
                     text,
                     reply_markup=reply_markup,
-                    **{
-                        k: v
-                        for k, v in {
-                            "photo": photo,
-                            "gif": gif,
-                            "file": file,
-                            "video": locals().get("video"),
-                            "silent": silent,
-                        }.items()
-                        if v is not None and k in ("photo", "gif", "file", "video")
-                    },
+                    **edit_kw,
                 )
             except TypeError:
-                # edit() may not accept media kwargs
+                # edit() may not accept media/rich kwargs on older path
                 try:
+                    if rich_message is not None:
+                        return await message.edit(
+                            text,
+                            reply_markup=reply_markup,
+                            rich_message=rich_message,
+                        )
                     return await message.edit(text, reply_markup=reply_markup)
                 except Exception:
                     logger.exception("InlineCall.edit failed")
