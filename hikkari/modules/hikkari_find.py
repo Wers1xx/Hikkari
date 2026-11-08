@@ -484,45 +484,59 @@ class HikkariFindMod(loader.Module):
             modname = (info.get("name") if isinstance(info, dict) else None) or name
             rows = (info.get("rows") if isinstance(info, dict) else None) or []
             mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
-            target = None
-            with contextlib.suppress(Exception):
-                target = utils.get_chat_id(call)
-            if not target:
-                with contextlib.suppress(Exception):
-                    target = getattr(call, "chat_id", None)
-            if not target:
-                target = self.tg_id
-            with contextlib.suppress(Exception):
-                await call.delete()
             rich_ok = False
-            if hasattr(loader_mod, "_rich_module_loaded"):
-                with contextlib.suppress(Exception):
-                    rich_ok = await loader_mod._rich_module_loaded(
-                        target,
-                        modname=str(modname),
-                        mod_doc=str(mod_doc or ""),
-                        rows=rows,
-                        subscribe_markup=None,
-                        origin=str(url or ""),
-                        developer="",
-                        meta_banner=None,
-                        version="",
-                    )
-            if rich_ok:
-                return
-            with contextlib.suppress(Exception):
-                await call.edit(
-                    self.strings["installed"].format(name=utils.escape_html(str(modname)))
+            try:
+                from ..utils.rich import can_use_rich
+                from ..utils.rich_api import (
+                    html_table,
+                    to_rich_compatible,
+                    markup_to_tg_rows,
                 )
-            if not rich_ok:
-                # last resort: bot PM
-                with contextlib.suppress(Exception):
-                    bot = getattr(self.inline, "bot", None)
-                    text = self.strings["installed"].format(
-                        name=utils.escape_html(str(modname))
+                if can_use_rich(self._client, self._db):
+                    name_p = utils.escape_html(str(modname)[:64])
+                    parts = [f"<h2>{name_p}</h2>"]
+                    if mod_doc:
+                        parts.append(
+                            f"<p><i>{utils.escape_html(str(mod_doc)[:300])}</i></p>"
+                        )
+                    clean = []
+                    for item in rows or []:
+                        if isinstance(item, (list, tuple)) and item:
+                            clean.append(
+                                (
+                                    utils.escape_html(str(item[0])[:64]),
+                                    utils.escape_html(
+                                        str(item[1] if len(item) > 1 else "")[:100]
+                                    ),
+                                )
+                            )
+                    if clean:
+                        table = html_table(clean, header=("Command", "Description"))
+                        parts.append(
+                            f"<details><summary><b>Commands</b> ({len(clean)})</summary>\n"
+                            f"{table}\n</details>"
+                        )
+                    html = to_rich_compatible("\n".join(parts))
+                    close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                    uid = getattr(call, "unit_id", None) or ""
+                    btn = markup_to_tg_rows(close_mk, uid) or ""
+                    if btn:
+                        html = f"{html}\n{btn}"
+                    await call.edit(
+                        f"✅ {modname} loaded",
+                        reply_markup=close_mk,
+                        rich_message=html,
                     )
-                    if bot is not None:
-                        await bot.send_message(self.tg_id, text)
+                    rich_ok = True
+            except Exception:
+                logger.debug("find in-place rich failed", exc_info=True)
+            if not rich_ok:
+                with contextlib.suppress(Exception):
+                    await call.edit(
+                        self.strings["installed"].format(
+                            name=utils.escape_html(str(modname))
+                        )
+                    )
         else:
             with contextlib.suppress(Exception):
                 await call.edit(
@@ -531,3 +545,4 @@ class HikkariFindMod(loader.Module):
                         err=utils.escape_html(err or "unknown"),
                     )
                 )
+

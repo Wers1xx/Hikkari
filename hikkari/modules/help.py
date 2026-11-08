@@ -433,7 +433,7 @@ class Help(loader.Module):
             if can_use_rich(self._client, self._db):
                 undoc = self._plain_doc(self.strings.get("undoc"), "—")
                 rows = []
-                for name, fun in list(commands.items())[:80]:
+                for name, fun in list(commands.items())[:50]:
                     try:
                         doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                         rows.append(
@@ -447,7 +447,7 @@ class Help(loader.Module):
                     except Exception:
                         continue
                 if hasattr(module, "inline_handlers"):
-                    for name, fun in list(module.inline_handlers.items())[:40]:
+                    for name, fun in list(module.inline_handlers.items())[:20]:
                         try:
                             doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                             rows.append(
@@ -496,9 +496,7 @@ class Help(loader.Module):
                     if origin and not str(origin).startswith("<"):
                         from pathlib import Path as _P
                         if _P(str(origin)).is_file():
-                            src = _P(str(origin)).read_text(
-                                encoding="utf-8", errors="ignore"
-                            )
+                            src = ""  # skip slow full-file read
                     if hasattr(self, "_get_banner_url"):
                         meta_b = self._get_banner_url(src) if src else None
                     elif hasattr(module, "strings"):
@@ -513,7 +511,7 @@ class Help(loader.Module):
                             pth = _P(str(origin))
                             if pth.is_file():
                                 meta_b = loader_mod._get_banner_url(
-                                    pth.read_text(encoding="utf-8", errors="ignore")
+                                    ""  # skip slow full-file read
                                 )
                 burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 if burl:
@@ -524,15 +522,6 @@ class Help(loader.Module):
                     btn = markup_to_tg_rows(close_mk, "")
                     if btn:
                         html = f"{html}\n{btn}"
-
-                # native
-                with contextlib.suppress(Exception):
-                    chat = utils.get_chat_id(message)
-                    if chat and await try_send_rich(self._client, chat, html):
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        return
 
                 if getattr(self.inline, "init_complete", False):
                     try:

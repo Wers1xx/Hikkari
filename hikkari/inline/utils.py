@@ -695,31 +695,51 @@ class Utils(InlineUnit):
         if rm is not None:
             try:
                 mid = inline_message_id
-                if mid is None and unit_id in self._units:
+                if mid is None and unit_id and unit_id in self._units:
                     mid = self._units[unit_id].get("inline_message_id")
-                # Keep/update unit callbacks; never wipe with []
-                if unit_id and unit_id in self._units and reply_markup:
+                # Keep callback map in sync so navigation keeps working
+                if unit_id and unit_id in self._units:
                     self._units[unit_id]["buttons"] = reply_markup
+                    if text is not None:
+                        self._units[unit_id]["text"] = text
+                    self._units[unit_id]["rich_message"] = rm
                     with contextlib.suppress(Exception):
                         self.generate_markup(unit_id)
-                # Rich = tg-buttons in HTML only (no classic InlineKeyboard)
                 if mid and hasattr(self.bot, "edit_rich_message"):
-                    await self.bot.edit_rich_message(
-                        html=rm if isinstance(rm, str) else None,
-                        rich_message=None if isinstance(rm, str) else rm,
-                        inline_message_id=mid,
-                        reply_markup=None,
-                    )
-                    if unit_id in self._units:
-                        if text is not None:
-                            self._units[unit_id]["text"] = text
-                        if rich_message is not None:
-                            self._units[unit_id]["rich_message"] = rm
-                        elif text is not None:
+                    try:
+                        await self.bot.edit_rich_message(
+                            html=rm if isinstance(rm, str) else None,
+                            rich_message=None if isinstance(rm, str) else rm,
+                            inline_message_id=mid,
+                            reply_markup=None,
+                        )
+                        return True
+                    except Exception:
+                        logger.debug("edit_rich_message failed", exc_info=True)
+                # Classic edit of same inline message with keyboard
+                if mid:
+                    try:
+                        kb = None
+                        with contextlib.suppress(Exception):
+                            kb = self.generate_markup(unit_id) if unit_id else None
+                        await self.bot.edit_message_text(
+                            text=text
+                            if text is not None
+                            else (self._units.get(unit_id) or {}).get("text")
+                            or "·",
+                            inline_message_id=mid,
+                            reply_markup=kb,
+                            parse_mode="HTML",
+                            disable_web_page_preview=disable_web_page_preview,
+                        )
+                        if unit_id and unit_id in self._units and text is not None:
                             self._units[unit_id].pop("rich_message", None)
-                    return True
+                        return True
+                    except Exception:
+                        logger.debug("classic inline edit after rich fail", exc_info=True)
             except Exception:
                 logger.debug("rich edit_unit failed, classic path", exc_info=True)
+
 
 
         if text is not None and not isinstance(text, str):

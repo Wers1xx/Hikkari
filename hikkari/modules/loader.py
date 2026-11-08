@@ -1596,7 +1596,6 @@ class LoaderMod(loader.Module):
         with contextlib.suppress(Exception):
             await call.edit(self.strings["safety_installing"])
 
-        # Load quietly — never edit a stale unit Message (MessageIdInvalidError)
         ok = await self.load_module(
             doc,
             call,
@@ -1613,68 +1612,136 @@ class LoaderMod(loader.Module):
             or name
             or "module"
         )
-        if ok:
-            rows = (info.get("rows") if isinstance(info, dict) else None) or []
-            mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
-            meta_b = None
+        if not ok:
             with contextlib.suppress(Exception):
-                meta_b = self._get_banner_url(doc) if doc else None
-            ver = ""
-            with contextlib.suppress(Exception):
-                ver = self._module_version_str(
-                    self.lookup(str(modname)), doc or ""
-                ) if hasattr(self, "_module_version_str") else ""
+                await call.edit(self.strings.get("load_failed", "❌ Install failed"))
+            return
 
-            # Drop confirm form, then same rich card as normal .dlm / .loadmod
-            target = None
+        rows = (info.get("rows") if isinstance(info, dict) else None) or []
+        mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
+        meta_b = None
+        with contextlib.suppress(Exception):
+            meta_b = self._get_banner_url(doc) if doc else None
+        ver = ""
+        with contextlib.suppress(Exception):
+            ver = (
+                self._module_version_str(self.lookup(str(modname)), doc or "")
+                if hasattr(self, "_module_version_str")
+                else ""
+            )
+
+        uid = getattr(call, "unit_id", None)
+        unit = {}
+        with contextlib.suppress(Exception):
+            unit = (getattr(self.inline, "_units", {}) or {}).get(uid) or {}
+        target = unit.get("chat")
+        if not target:
             with contextlib.suppress(Exception):
                 target = utils.get_chat_id(call)
-            if not target:
-                with contextlib.suppress(Exception):
-                    target = getattr(call, "chat_id", None) or getattr(call, "chat", None)
-            if not target:
-                target = self.tg_id
+        if not target:
             with contextlib.suppress(Exception):
-                await call.delete()
+                target = getattr(call, "chat_id", None)
+        orig_msg = unit.get("message")
 
-            rich_ok = False
+        # EDIT the same form in place — no Избранное, no stuck "installing"
+        rich_ok = False
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import (
+                html_table,
+                markup_to_tg_rows,
+                to_rich_compatible,
+                inject_banner_html,
+                pick_banner_url,
+            )
+            import html as html_mod
+
+            if can_use_rich(self._client, self._db):
+                name_p = self._plain_cmd_doc(modname, str(modname))[:64]
+                desc = self._plain_cmd_doc(mod_doc, "")[:400]
+                clean_rows = []
+                for item in rows or []:
+                    try:
+                        if isinstance(item, (list, tuple)) and item:
+                            c = self._plain_cmd_doc(item[0], str(item[0]))[:64]
+                            d = self._plain_cmd_doc(
+                                item[1] if len(item) > 1 else "", ""
+                            )[:120]
+                            clean_rows.append(
+                                (html_mod.escape(c), html_mod.escape(d))
+                            )
+                    except Exception:
+                        continue
+                ver_s = f" (v{ver})" if ver else ""
+                parts = [f"<h2>{html_mod.escape(name_p)}{html_mod.escape(ver_s)}</h2>"]
+                if desc:
+                    parts.append(f"<p><i>{html_mod.escape(desc)}</i></p>")
+                if clean_rows:
+                    table = html_table(clean_rows, header=("Command", "Description"))
+                    parts.append(
+                        f"<details><summary><b>Commands</b> ({len(clean_rows)})</summary>\n"
+                        f"{table}\n</details>"
+                    )
+                html = "\n".join(parts)
+                with contextlib.suppress(Exception):
+                    html = to_rich_compatible(html)
+                burl = pick_banner_url(meta_b) if meta_b else None
+                if burl:
+                    html = inject_banner_html(html, burl, force=True)
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                with contextlib.suppress(Exception):
+                    btn = markup_to_tg_rows(close_mk, uid or "")
+                    if btn:
+                        html = f"{html}\n{btn}"
+                with contextlib.suppress(Exception):
+                    await call.edit(
+                        f"✅ {name_p} loaded",
+                        reply_markup=close_mk,
+                        rich_message=html,
+                    )
+                    rich_ok = True
+        except Exception:
+            logger.debug("safety rich in-place failed", exc_info=True)
+
+        if rich_ok:
+            return
+
+        lines = [
+            f"<emoji document_id=5262880537416054812>✅</emoji> <b>{utils.escape_html(str(modname))}</b>",
+            "<i>Модуль установлен</i>",
+        ]
+        for row in rows[:12]:
+            if isinstance(row, (list, tuple)) and row:
+                lines.append(f"• <code>{utils.escape_html(str(row[0]))}</code>")
+        text = "\n".join(lines)
+        with contextlib.suppress(Exception):
+            await call.edit(
+                text,
+                reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+            )
+            return
+        if orig_msg is not None:
             with contextlib.suppress(Exception):
-                rich_ok = await self._rich_module_loaded(
+                await self._rich_module_loaded(
+                    orig_msg,
+                    modname=str(modname),
+                    mod_doc=str(mod_doc or ""),
+                    rows=rows,
+                    origin=origin or "<string>",
+                    meta_banner=meta_b,
+                    version=str(ver or ""),
+                )
+        elif target and target != self.tg_id:
+            with contextlib.suppress(Exception):
+                await self._rich_module_loaded(
                     target,
                     modname=str(modname),
                     mod_doc=str(mod_doc or ""),
                     rows=rows,
-                    subscribe_markup=None,
                     origin=origin or "<string>",
-                    developer="",
                     meta_banner=meta_b,
                     version=str(ver or ""),
                 )
-            if rich_ok:
-                return
-
-            # Classic fallback (same text style as loader)
-            lines = [
-                f"<emoji document_id=5262880537416054812>✅</emoji> <b>{utils.escape_html(str(modname))}</b>",
-                "<i>Модуль установлен</i>",
-            ]
-            for row in rows[:12]:
-                if isinstance(row, (list, tuple)) and row:
-                    lines.append(f"• <code>{utils.escape_html(str(row[0]))}</code>")
-                elif isinstance(row, str) and row.strip():
-                    lines.append(f"• <code>{utils.escape_html(row.strip())}</code>")
-            text = "\n".join(lines)
-            with contextlib.suppress(Exception):
-                bot = getattr(self.inline, "bot", None)
-                if bot is not None:
-                    await bot.send_message(self.tg_id, text)
-                else:
-                    await self._client.send_message(self.tg_id, text)
-        else:
-            with contextlib.suppress(Exception):
-                await call.edit(self.strings.get("load_failed", "❌ Install failed"))
-
-
 
     def _validate_module_source(self, doc: str) -> str | None:
         """Return error string if source is not a loadable Hikkari/Hikka-style module."""
