@@ -698,48 +698,37 @@ class Utils(InlineUnit):
                 if mid is None and unit_id and unit_id in self._units:
                     mid = self._units[unit_id].get("inline_message_id")
 
-                def _interactive(rows):
-                    for row in rows or []:
-                        for btn in row:
-                            if not isinstance(btn, dict):
-                                continue
-                            if btn.get("callback") or btn.get("input") or btn.get("data"):
-                                return True
-                            act = btn.get("action")
-                            if act and act not in ("close",):
-                                return True
-                    return False
-
-                interactive = _interactive(reply_markup)
-
+                # Always keep unit state in sync (buttons + rich payload)
                 if unit_id and unit_id in self._units:
                     self._units[unit_id]["buttons"] = reply_markup
                     if text is not None:
                         self._units[unit_id]["text"] = text
-                    if not interactive:
-                        self._units[unit_id]["rich_message"] = rm
-                    else:
-                        self._units[unit_id].pop("rich_message", None)
+                    self._units[unit_id]["rich_message"] = rm
                     with contextlib.suppress(Exception):
                         self.generate_markup(unit_id)
 
-                if mid and (not interactive) and hasattr(self.bot, "edit_rich_message"):
+                kb = None
+                with contextlib.suppress(Exception):
+                    kb = self.generate_markup(unit_id) if unit_id else None
+
+                # Heroku docs: edit_rich_message accepts reply_markup
+                if mid and hasattr(self.bot, "edit_rich_message"):
                     try:
                         await self.bot.edit_rich_message(
                             html=rm if isinstance(rm, str) else None,
                             rich_message=None if isinstance(rm, str) else rm,
                             inline_message_id=mid,
-                            reply_markup=None,
+                            reply_markup=kb,
                         )
                         return True
                     except Exception:
-                        logger.debug("edit_rich_message failed", exc_info=True)
+                        logger.debug(
+                            "edit_rich_message(+kb) failed, classic path",
+                            exc_info=True,
+                        )
 
                 if mid:
                     try:
-                        kb = None
-                        with contextlib.suppress(Exception):
-                            kb = self.generate_markup(unit_id) if unit_id else None
                         body = text
                         if body is None and unit_id in self._units:
                             body = self._units[unit_id].get("text")

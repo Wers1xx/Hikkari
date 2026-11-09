@@ -107,24 +107,58 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI: media banner + working callback keyboard.
+        """Config UI.
 
-        Pure Rich (reply_markup=None) breaks multi-button navigation — after
-        opening a section buttons die and going back fails. Use classic form
-        with photo/video for ALL pages so kb always works.
+        When rich_mode + Premium: rich HTML (banner + text) + callback keyboard
+        (edit_rich_message / form support reply_markup — see Heroku rich docs).
+        Otherwise: classic form with photo/video banner.
         """
+        import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         banner_kw = self._cfg_banner_kwargs()
         markup = reply_markup
+        rich_html = None
 
-        # Navigation / unit edit — keep same unit + buttons + media
+        try:
+            from ..utils.rich import can_use_rich
+            from ..utils.rich_api import (
+                inject_banner_html,
+                to_rich_compatible,
+                pick_banner_url,
+            )
+
+            if can_use_rich(getattr(self, "_client", None) or getattr(self, "client", None), self._db):
+                body = str(text or "")
+                html = body
+                with contextlib.suppress(Exception):
+                    html = to_rich_compatible(body)
+                # Prefer config banner_url; fall back to media kwargs
+                burl = None
+                with contextlib.suppress(Exception):
+                    burl = pick_banner_url(self.config.get("banner_url"))
+                if not burl:
+                    for k in ("photo", "video", "gif"):
+                        v = banner_kw.get(k)
+                        if isinstance(v, str) and v.startswith(("http://", "https://")):
+                            burl = v
+                            break
+                if burl:
+                    with contextlib.suppress(Exception):
+                        html = inject_banner_html(html, burl, force=True)
+                rich_html = html
+        except Exception:
+            rich_html = None
+
+        # Navigation: edit same unit — rich_message + reply_markup together
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
-            edit_kw = {
-                k: v
-                for k, v in banner_kw.items()
-                if k in ("photo", "video", "gif", "file", "mime_type")
-            }
+            edit_kw = {}
+            if rich_html is not None:
+                edit_kw["rich_message"] = rich_html
+            else:
+                for k in ("photo", "video", "gif", "file", "mime_type"):
+                    if k in banner_kw and banner_kw[k] is not None:
+                        edit_kw[k] = banner_kw[k]
             try:
                 return await message.edit(text, reply_markup=markup, **edit_kw)
             except TypeError:
@@ -132,24 +166,38 @@ class HikkariConfigMod(loader.Module):
             except Exception:
                 pass
             try:
+                if rich_html is not None:
+                    return await message.edit(
+                        text, reply_markup=markup, rich_message=rich_html
+                    )
                 return await message.edit(text, reply_markup=markup)
             except Exception:
                 pass
+            form_kw = dict(banner_kw)
+            if rich_html is not None:
+                form_kw["rich_message"] = rich_html
             return await self.inline.form(
                 text,
                 message=message,
                 reply_markup=markup,
                 silent=True,
-                **banner_kw,
+                **form_kw,
             )
 
-        # Fresh .cfg open — single classic form with banner
+        # Fresh .cfg open
+        form_kw = dict(banner_kw)
+        if rich_html is not None:
+            form_kw["rich_message"] = rich_html
+            # Prefer rich article; avoid double media if banner already in HTML
+            form_kw.pop("photo", None)
+            form_kw.pop("video", None)
+            form_kw.pop("gif", None)
         return await self.inline.form(
             text,
             message=message,
             reply_markup=markup,
             silent=True,
-            **banner_kw,
+            **form_kw,
         )
 
     def _cfg_banner_kwargs(self) -> dict:
