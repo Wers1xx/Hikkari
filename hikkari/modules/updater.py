@@ -1108,12 +1108,16 @@ class UpdaterMod(loader.Module):
     async def download_common(self):
         """Sync tree to origin/<branch>. Never uses merge/pull (avoids divergent-branch loop)."""
         global _UPDATE_IN_PROGRESS
-        if not _UPDATE_PROC_LOCK.acquire(blocking=False):
-            raise GitCommandError(
-                ["git", "update"],
-                1,
-                stderr="update already in progress",
-            )
+        # Wait up to ~25s for another update to finish instead of hard-failing
+        acquired = False
+        for _ in range(50):
+            if _UPDATE_PROC_LOCK.acquire(blocking=False):
+                acquired = True
+                break
+            await asyncio.sleep(0.5)
+        if not acquired:
+            logger.warning("download_common: another update still running after wait")
+            return False
         _UPDATE_IN_PROGRESS = True
         try:
             return await self._download_common_inner()
