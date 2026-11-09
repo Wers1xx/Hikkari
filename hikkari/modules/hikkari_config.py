@@ -276,6 +276,10 @@ class HikkariConfigMod(loader.Module):
                     **banner_kw,
                 )
 
+    async def _cfg_edit(self, call, text, reply_markup=None, **kwargs):
+        """Route config UI edits through _cfg_form so Rich never falls to classic inline."""
+        return await self._cfg_form(text, call, reply_markup=reply_markup, **kwargs)
+
     def _cfg_banner_kwargs(self) -> dict:
         """photo / video / gif for config forms from banner_url."""
         from pathlib import Path as _P
@@ -477,7 +481,7 @@ class HikkariConfigMod(loader.Module):
                 or "will be deleted automatically" in query
                 or query in {"🔄", "✨"}
             ):
-                await call.edit(
+                await self._cfg_edit(call, 
                     self.strings.get(
                         "validation_error",
                         "🚫 <b>Invalid value</b>",
@@ -505,7 +509,7 @@ class HikkariConfigMod(loader.Module):
                 if not qs.startswith(("audio:", "audio_ref:")):
                     self._cleanup_audio_banner_files(mod, str(option), prev_q)
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -556,9 +560,9 @@ class HikkariConfigMod(loader.Module):
         # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
         try:
             if imid is not None:
-                await call.edit(text, reply_markup=markup, inline_message_id=imid)
+                await self._cfg_edit(call, text, reply_markup=markup, inline_message_id=imid)
             else:
-                await call.edit(text, reply_markup=markup)
+                await self._cfg_edit(call, text, reply_markup=markup)
         except Exception:
             logger = __import__("logging").getLogger(__name__)
             logger.exception("inline__set_config edit failed (value already saved)")
@@ -573,7 +577,7 @@ class HikkariConfigMod(loader.Module):
         mod_instance = self.lookup(mod)
         mod_instance.config[option] = mod_instance.config.getdef(option)
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings[
                 "option_reset" if isinstance(obj_type, bool) else "option_reset_lib"
             ].format(
@@ -610,7 +614,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -635,7 +639,7 @@ class HikkariConfigMod(loader.Module):
             )
         )
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings[
                 (
                     "configuring_option"
@@ -746,7 +750,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config[option] = self.lookup(mod).config[option] + query
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -756,7 +760,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -838,7 +842,7 @@ class HikkariConfigMod(loader.Module):
                     " target list"
                 )
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -848,7 +852,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -956,7 +960,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -966,7 +970,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -1010,7 +1014,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config.reload()
         except loader.validators.ValidationError as e:
-            await call.edit(
+            await self._cfg_edit(call, 
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -1191,11 +1195,11 @@ class HikkariConfigMod(loader.Module):
             pass
         text = self._clip_cfg_text(text, 950)
         try:
-            return await call.edit(text, reply_markup=reply_markup, **kwargs)
+            return await self._cfg_edit(call, text, reply_markup=reply_markup, **kwargs)
         except Exception:
             logger.debug("cfg edit failed, hard clip", exc_info=True)
             with contextlib.suppress(Exception):
-                return await call.edit(
+                return await self._cfg_edit(call, 
                     self._clip_cfg_text(text, 500),
                     reply_markup=reply_markup,
                     **kwargs,
@@ -1313,7 +1317,7 @@ class HikkariConfigMod(loader.Module):
             )
             match validator.internal_id:
                 case "Boolean":
-                    await call.edit(
+                    await self._cfg_edit(call, 
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1323,7 +1327,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Series":
-                    await call.edit(
+                    await self._cfg_edit(call, 
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1335,7 +1339,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Choice":
-                    await call.edit(
+                    await self._cfg_edit(call, 
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1347,7 +1351,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "MultiChoice":
-                    await call.edit(
+                    await self._cfg_edit(call, 
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1415,11 +1419,11 @@ class HikkariConfigMod(loader.Module):
             ],
         ]
         try:
-            await call.edit(text, reply_markup=markup)
+            await self._cfg_edit(call, text, reply_markup=markup)
         except Exception:
             logger.exception("configure_option edit failed")
             with contextlib.suppress(Exception):
-                await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
+                await self._cfg_edit(call, self._clip_cfg_text(text, 500), reply_markup=markup)
             with contextlib.suppress(Exception):
                 await call.answer("⚠️ text truncated", show_alert=False)
 
@@ -1499,7 +1503,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await call.edit(
+            return await self._cfg_edit(call, 
                 cat_text,
                 reply_markup=list(
                     utils.chunks(
@@ -1554,7 +1558,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await call.edit(
+            return await self._cfg_edit(call, 
                 text,
                 reply_markup=list(
                     utils.chunks(
@@ -1648,7 +1652,7 @@ class HikkariConfigMod(loader.Module):
             functools.partial(self.inline__configure_page, mod=mod, obj_type=obj_type),
         )
 
-        await call.edit(
+        await self._cfg_edit(call, 
             text,
             reply_markup=list(utils.chunks(btns, 2))
             + pagination
@@ -1876,7 +1880,7 @@ class HikkariConfigMod(loader.Module):
                     f"<tg-emoji emoji-id=5253713110111365241>▫️</tg-emoji> <b>{utils.escape_html(mod_name)}</b>"
                 )
 
-        await call.edit(
+        await self._cfg_edit(call, 
             self.strings["configuring_folder"].format(
                 utils.escape_html(folder),
                 "\n".join(text_parts) if text_parts else "No options",
@@ -2014,7 +2018,7 @@ class HikkariConfigMod(loader.Module):
             total_pages,
         )
 
-        await call.edit(title, reply_markup=kb)
+        await self._cfg_edit(call, title, reply_markup=kb)
 
 
     @staticmethod
