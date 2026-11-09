@@ -731,6 +731,11 @@ class Utils(InlineUnit):
                         )
 
                 if mid:
+                    pure = isinstance(rm, str) and "<tg-button" in rm
+                    if pure:
+                        logger.debug("pure rich edit failed; skip classic fallback")
+                        return False
+
                     try:
                         body = text
                         if body is None and unit_id in self._units:
