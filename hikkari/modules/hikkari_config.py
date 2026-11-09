@@ -107,11 +107,12 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI.
+        """Config UI with proper Rich support (Heroku rich-message docs).
 
-        When rich_mode + Premium: rich HTML (banner + text) + callback keyboard
-        (edit_rich_message / form support reply_markup — see Heroku rich docs).
-        Otherwise: classic form with photo/video banner.
+        When rich_mode + Premium:
+          - build HTML (+ banner via inject_banner_html)
+          - form / edit with rich_message AND reply_markup together
+        Otherwise classic form with photo/video banner.
         """
         import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
@@ -128,12 +129,12 @@ class HikkariConfigMod(loader.Module):
                 pick_banner_url,
             )
 
-            if can_use_rich(getattr(self, "_client", None) or getattr(self, "client", None), self._db):
+            client = getattr(self, "_client", None) or getattr(self, "client", None)
+            if can_use_rich(client, self._db):
                 body = str(text or "")
                 html = body
                 with contextlib.suppress(Exception):
                     html = to_rich_compatible(body)
-                # Prefer config banner_url; fall back to media kwargs
                 burl = None
                 with contextlib.suppress(Exception):
                     burl = pick_banner_url(self.config.get("banner_url"))
@@ -150,32 +151,39 @@ class HikkariConfigMod(loader.Module):
         except Exception:
             rich_html = None
 
-        # Navigation: edit same unit — rich_message + reply_markup together
-        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
-            edit_kw = {}
-            if rich_html is not None:
-                edit_kw["rich_message"] = rich_html
-            else:
-                for k in ("photo", "video", "gif", "file", "mime_type"):
-                    if k in banner_kw and banner_kw[k] is not None:
-                        edit_kw[k] = banner_kw[k]
-            try:
-                return await message.edit(text, reply_markup=markup, **edit_kw)
-            except TypeError:
-                pass
-            except Exception:
-                pass
+        # Keep inline bot alive for callback/edit path
+        with contextlib.suppress(Exception):
+            await self.inline.ensure_inline_ready()
+
+        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
+
+        if is_nav:
+            # Always re-pass rich_message so page text updates stay rich
             try:
                 if rich_html is not None:
                     return await message.edit(
-                        text, reply_markup=markup, rich_message=rich_html
+                        text,
+                        reply_markup=markup,
+                        rich_message=rich_html,
                     )
+                edit_kw = {
+                    k: banner_kw[k]
+                    for k in ("photo", "video", "gif", "file", "mime_type")
+                    if k in banner_kw and banner_kw[k] is not None
+                }
+                return await message.edit(text, reply_markup=markup, **edit_kw)
+            except Exception:
+                pass
+            try:
                 return await message.edit(text, reply_markup=markup)
             except Exception:
                 pass
-            form_kw = dict(banner_kw)
+            # last resort: new form unit in same chat
+            form_kw = {}
             if rich_html is not None:
                 form_kw["rich_message"] = rich_html
+            else:
+                form_kw.update(banner_kw)
             return await self.inline.form(
                 text,
                 message=message,
@@ -184,14 +192,12 @@ class HikkariConfigMod(loader.Module):
                 **form_kw,
             )
 
-        # Fresh .cfg open
-        form_kw = dict(banner_kw)
+        # Fresh open
+        form_kw = {}
         if rich_html is not None:
             form_kw["rich_message"] = rich_html
-            # Prefer rich article; avoid double media if banner already in HTML
-            form_kw.pop("photo", None)
-            form_kw.pop("video", None)
-            form_kw.pop("gif", None)
+        else:
+            form_kw.update(banner_kw)
         return await self.inline.form(
             text,
             message=message,

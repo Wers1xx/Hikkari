@@ -443,6 +443,13 @@ class TelethonBot:
             EditMessageRequest,
         )
 
+        # ensure bot MTProto session is alive
+        try:
+            if hasattr(self.client, "is_connected") and not self.client.is_connected():
+                await self.client.connect()
+        except Exception:
+            pass
+
         markup = self._build_reply_markup(reply_markup)
         rich_input = self._rich_input(html, markdown, rich_message)
         fallback_text = self._rich_fallback_text(html, markdown, rich_message)
@@ -454,7 +461,14 @@ class TelethonBot:
                 rich_message=rich_input,
                 reply_markup=markup,
             )
-            return await self.client(request)
+            try:
+                return await self.client(request)
+            except ConnectionError:
+                try:
+                    await self.client.connect()
+                    return await self.client(request)
+                except Exception:
+                    raise
 
         entity = await self.client.get_input_entity(chat_id)
         request = EditMessageRequest(

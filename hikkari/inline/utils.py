@@ -712,6 +712,8 @@ class Utils(InlineUnit):
                     kb = self.generate_markup(unit_id) if unit_id else None
 
                 # Heroku docs: edit_rich_message accepts reply_markup
+                with contextlib.suppress(Exception):
+                    await self.ensure_inline_ready()
                 if mid and hasattr(self.bot, "edit_rich_message"):
                     try:
                         await self.bot.edit_rich_message(

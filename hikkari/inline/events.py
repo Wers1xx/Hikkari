@@ -572,12 +572,20 @@ class Events(InlineUnit):
                             call, self, None
                         ),
                     )
+                except ConnectionError as e:
+                    logger.warning("Callback watcher: bot disconnected (%s), reconnecting", e)
+                    with contextlib.suppress(Exception):
+                        await self.ensure_inline_ready(force=True)
+                    with contextlib.suppress(Exception):
+                        await call.answer("Bot reconnecting, try again", alert=True)
+                    continue
                 except Exception:
                     logger.exception("Error on running callback watcher!")
-                    await call.answer(
-                        "Error occured while processing request. More info in logs",
-                        alert=True,
-                    )
+                    with contextlib.suppress(Exception):
+                        await call.answer(
+                            "Error occured while processing request. More info in logs",
+                            alert=True,
+                        )
                     continue
 
         for unit_id, unit in self._units.copy().items():
