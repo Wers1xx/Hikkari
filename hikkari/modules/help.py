@@ -579,6 +579,227 @@ class Help(loader.Module):
         ua_doc="[args] | допоможіть з вашими модулями!",
         de_doc="[args] | Hilfe mit deinen Modulen!",
     )
+
+    def _help_collect_modules(self, force: bool = False, only_core: bool = False, only_loaded: bool = False):
+        """Return list of (display_name, lookup_key, is_core, has_config)."""
+        hidden = set(self.get("hide", []) or [])
+        seen = set()
+        out = []
+        for mod in self.allmodules.modules:
+            cls = mod.__class__.__name__
+            if cls in seen:
+                continue
+            seen.add(cls)
+            if not hasattr(mod, "commands"):
+                continue
+            if cls in hidden and not force:
+                continue
+            is_core = str(getattr(mod, "__origin__", "") or "").startswith("<core")
+            if only_core and not is_core:
+                continue
+            if only_loaded and is_core:
+                continue
+            try:
+                name = mod.strings["name"]
+            except Exception:
+                name = getattr(mod, "name", None) or cls
+            name = str(name)
+            has_cfg = bool(getattr(mod, "config", None))
+            out.append((name, name, is_core, has_cfg))
+        out.sort(key=lambda x: (not x[2], x[0].lower()))
+        return out
+
+    def _help_list_markup(self, page: int = 0, force: bool = False, only_core: bool = False, only_loaded: bool = False, per_page: int = 8):
+        mods = self._help_collect_modules(force=force, only_core=only_core, only_loaded=only_loaded)
+        total = max(1, (len(mods) + per_page - 1) // per_page) if mods else 1
+        page = max(0, min(int(page or 0), total - 1))
+        slice_ = mods[page * per_page : (page + 1) * per_page]
+        kb = []
+        for name, key, is_core, has_cfg in slice_:
+            label = (name[:28] + "…") if len(name) > 28 else name
+            row = [
+                {
+                    "text": f"{'🛡' if is_core else '📦'} {label}",
+                    "callback": self.inline__help_mod,
+                    "kwargs": {
+                        "mod": key,
+                        "page": page,
+                        "force": force,
+                        "only_core": only_core,
+                        "only_loaded": only_loaded,
+                    },
+                },
+                {
+                    "text": "❓ Help",
+                    "callback": self.inline__help_mod,
+                    "kwargs": {
+                        "mod": key,
+                        "page": page,
+                        "force": force,
+                        "only_core": only_core,
+                        "only_loaded": only_loaded,
+                    },
+                },
+            ]
+            kb.append(row)
+        nav = []
+        if total > 1:
+            if page > 0:
+                nav.append(
+                    {
+                        "text": "◀️",
+                        "callback": self.inline__help_page,
+                        "kwargs": {
+                            "page": page - 1,
+                            "force": force,
+                            "only_core": only_core,
+                            "only_loaded": only_loaded,
+                        },
+                    }
+                )
+            nav.append({"text": f"{page + 1}/{total}", "data": "noop"})
+            if page < total - 1:
+                nav.append(
+                    {
+                        "text": "▶️",
+                        "callback": self.inline__help_page,
+                        "kwargs": {
+                            "page": page + 1,
+                            "force": force,
+                            "only_core": only_core,
+                            "only_loaded": only_loaded,
+                        },
+                    }
+                )
+            kb.append(nav)
+        kb.append(
+            [
+                {
+                    "text": self.strings.get("close_btn", "🔻 Закрыть"),
+                    "action": "close",
+                    "style": "danger",
+                }
+            ]
+        )
+        return kb, page, total, len(mods)
+
+    def _help_list_text(self, page: int, total: int, count: int) -> str:
+        icon = self.config.get("desc_icon") or "✨"
+        return (
+            f"{icon} <b>Hikkari · Help</b>\n"
+            f"<i>Модулей: {count} · стр. {page + 1}/{total}</i>\n"
+            f"Нажми <b>Help</b> у модуля или его имя."
+        )
+
+    async def inline__help_page(self, call, page: int = 0, force: bool = False, only_core: bool = False, only_loaded: bool = False):
+        kb, page, total, count = self._help_list_markup(
+            page=page, force=force, only_core=only_core, only_loaded=only_loaded
+        )
+        text = self._help_list_text(page, total, count)
+        try:
+            await call.edit(text, reply_markup=kb)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self.inline.form(text, message=call, reply_markup=kb, silent=True)
+
+    async def inline__help_list(self, call, page: int = 0, force: bool = False, only_core: bool = False, only_loaded: bool = False):
+        await self.inline__help_page(call, page=page, force=force, only_core=only_core, only_loaded=only_loaded)
+
+    async def inline__help_mod(
+        self,
+        call,
+        mod: str = "",
+        page: int = 0,
+        force: bool = False,
+        only_core: bool = False,
+        only_loaded: bool = False,
+    ):
+        """Open single-module help card with Back / Config / Close."""
+        module = self.lookup(mod) if mod else None
+        if not module:
+            with contextlib.suppress(Exception):
+                await call.answer("Module not found", show_alert=True)
+            return
+
+        try:
+            name = module.strings["name"]
+        except Exception:
+            name = getattr(module, "name", None) or module.__class__.__name__
+        name = str(name)
+
+        _name = (
+            "{} (v{})".format(utils.escape_html(name), ".".join(map(str, module.__version__)))
+            if hasattr(module, "__version__")
+            else utils.escape_html(name)
+        )
+        reply = "{} <b>{}</b>".format(
+            "<tg-emoji emoji-id=5283176512747507510>✨</tg-emoji>",
+            _name,
+        )
+        if module.__doc__:
+            with contextlib.suppress(Exception):
+                reply += "\n<i>{}</i>".format(
+                    utils.escape_html(inspect.getdoc(module) or "")[:500]
+                )
+
+        lines = []
+        commands = {}
+        with contextlib.suppress(Exception):
+            commands = dict(getattr(module, "commands", {}) or {})
+        for cname, fun in commands.items():
+            doc = ""
+            with contextlib.suppress(Exception):
+                doc = inspect.getdoc(fun) or ""
+            lines.append(
+                "• <code>{}{}</code> — {}".format(
+                    utils.escape_html(self.get_prefix()),
+                    utils.escape_html(cname),
+                    utils.escape_html(doc)[:120] if doc else self.strings.get("undoc", ""),
+                )
+            )
+        if lines:
+            reply += "\n\n<b>Команды</b>\n" + "\n".join(lines[:30])
+
+        has_cfg = bool(getattr(module, "config", None))
+        back_row = [
+            {
+                "text": self.strings.get("back_btn", "◀️ Назад"),
+                "callback": self.inline__help_list,
+                "kwargs": {
+                    "page": page,
+                    "force": force,
+                    "only_core": only_core,
+                    "only_loaded": only_loaded,
+                },
+                "style": "primary",
+            }
+        ]
+        if has_cfg:
+            cfg_mod = self.lookup("HikkariConfig") or self.lookup("HikkariConfigMod")
+            if cfg_mod and hasattr(cfg_mod, "inline__configure"):
+                back_row.append(
+                    {
+                        "text": self.strings.get("config", "⚙️ Конфиг"),
+                        "callback": cfg_mod.inline__configure,
+                        "args": (name,),
+                        "kwargs": {"obj_type": str(getattr(module, "__origin__", "")).startswith("<core")},
+                    }
+                )
+        back_row.append(
+            {
+                "text": self.strings.get("close_btn", "🔻 Закрыть"),
+                "action": "close",
+                "style": "danger",
+            }
+        )
+        kb = [back_row]
+        try:
+            await call.edit(reply, reply_markup=kb)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self.inline.form(reply, message=call, reply_markup=kb, silent=True)
+
+
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
@@ -651,6 +872,28 @@ class Help(loader.Module):
         if args:
             await self.modhelp(message, args)
             return
+
+        # Interactive help with per-module Help buttons (FHeta-style)
+        if getattr(self.inline, "init_complete", False):
+            try:
+                kb, page, total, count = self._help_list_markup(
+                    page=0, force=force, only_core=only_core, only_loaded=only_loaded
+                )
+                text = self._help_list_text(page, total, count)
+                # optional banner
+                form_kw = {"silent": True}
+                with contextlib.suppress(Exception):
+                    bu = str(self.config.get("banner_url") or "").strip()
+                    if bu.startswith(("http://", "https://")):
+                        if bu.lower().split("?", 1)[0].endswith((".mp4", ".webm", ".mov")):
+                            form_kw["video"] = bu
+                        else:
+                            form_kw["photo"] = bu
+                await self.inline.form(text, message=message, reply_markup=kb, **form_kw)
+                return
+            except Exception:
+                logger.debug("interactive help form failed, classic list", exc_info=True)
+
 
         hidden = self.get("hide", [])
         shown_warn = False
