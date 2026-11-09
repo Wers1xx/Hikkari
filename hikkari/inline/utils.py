@@ -711,21 +711,22 @@ class Utils(InlineUnit):
                 with contextlib.suppress(Exception):
                     kb = self.generate_markup(unit_id) if unit_id else None
 
-                # Heroku docs: edit_rich_message accepts reply_markup
                 with contextlib.suppress(Exception):
                     await self.ensure_inline_ready()
                 if mid and hasattr(self.bot, "edit_rich_message"):
                     try:
+                        # If HTML already has <tg-button>, skip classic kb
+                        pure = isinstance(rm, str) and "<tg-button" in rm
                         await self.bot.edit_rich_message(
                             html=rm if isinstance(rm, str) else None,
                             rich_message=None if isinstance(rm, str) else rm,
                             inline_message_id=mid,
-                            reply_markup=kb,
+                            reply_markup=None if pure else kb,
                         )
                         return True
                     except Exception:
                         logger.debug(
-                            "edit_rich_message(+kb) failed, classic path",
+                            "edit_rich_message failed, classic path",
                             exc_info=True,
                         )
 

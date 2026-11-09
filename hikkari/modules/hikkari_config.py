@@ -107,104 +107,174 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI with proper Rich support (Heroku rich-message docs).
+        """Config UI.
 
-        When rich_mode + Premium:
-          - build HTML (+ banner via inject_banner_html)
-          - form / edit with rich_message AND reply_markup together
-        Otherwise classic form with photo/video banner.
+        Rich mode ON (Premium): pure Rich only — inline.rich / edit_rich_message
+        with <tg-button-row> inside HTML. No classic inline keyboard.
+        Rich mode OFF: classic form + photo/video banner.
         """
         import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         banner_kw = self._cfg_banner_kwargs()
-        markup = reply_markup
-        rich_html = None
+        markup = reply_markup or []
 
+        client = getattr(self, "_client", None) or getattr(self, "client", None)
+        use_rich = False
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import (
-                inject_banner_html,
-                to_rich_compatible,
-                pick_banner_url,
-            )
-
-            client = getattr(self, "_client", None) or getattr(self, "client", None)
-            if can_use_rich(client, self._db):
-                body = str(text or "")
-                html = body
-                with contextlib.suppress(Exception):
-                    html = to_rich_compatible(body)
-                burl = None
-                with contextlib.suppress(Exception):
-                    burl = pick_banner_url(self.config.get("banner_url"))
-                if not burl:
-                    for k in ("photo", "video", "gif"):
-                        v = banner_kw.get(k)
-                        if isinstance(v, str) and v.startswith(("http://", "https://")):
-                            burl = v
-                            break
-                if burl:
-                    with contextlib.suppress(Exception):
-                        html = inject_banner_html(html, burl, force=True)
-                rich_html = html
+            use_rich = bool(can_use_rich(client, self._db))
         except Exception:
-            rich_html = None
+            use_rich = False
 
-        # Keep inline bot alive for callback/edit path
         with contextlib.suppress(Exception):
             await self.inline.ensure_inline_ready()
 
-        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
-
-        if is_nav:
-            # Always re-pass rich_message so page text updates stay rich
-            try:
-                if rich_html is not None:
-                    return await message.edit(
-                        text,
-                        reply_markup=markup,
-                        rich_message=rich_html,
-                    )
-                edit_kw = {
-                    k: banner_kw[k]
-                    for k in ("photo", "video", "gif", "file", "mime_type")
-                    if k in banner_kw and banner_kw[k] is not None
-                }
-                return await message.edit(text, reply_markup=markup, **edit_kw)
-            except Exception:
-                pass
-            try:
-                return await message.edit(text, reply_markup=markup)
-            except Exception:
-                pass
-            # last resort: new form unit in same chat
-            form_kw = {}
-            if rich_html is not None:
-                form_kw["rich_message"] = rich_html
-            else:
-                form_kw.update(banner_kw)
+        # ── Classic path (rich mode off) ──
+        if not use_rich:
+            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+                try:
+                    return await message.edit(text, reply_markup=markup, **{
+                        k: banner_kw[k]
+                        for k in ("photo", "video", "gif")
+                        if k in banner_kw and banner_kw[k] is not None
+                    })
+                except Exception:
+                    pass
+                try:
+                    return await message.edit(text, reply_markup=markup)
+                except Exception:
+                    pass
             return await self.inline.form(
                 text,
                 message=message,
                 reply_markup=markup,
                 silent=True,
-                **form_kw,
+                **banner_kw,
             )
 
-        # Fresh open
-        form_kw = {}
-        if rich_html is not None:
-            form_kw["rich_message"] = rich_html
-        else:
-            form_kw.update(banner_kw)
-        return await self.inline.form(
-            text,
-            message=message,
-            reply_markup=markup,
-            silent=True,
-            **form_kw,
+        # ── Pure Rich path ──
+        from ..utils.rich_api import (
+            inject_banner_html,
+            to_rich_compatible,
+            pick_banner_url,
+            markup_to_tg_rows,
         )
+
+        body = str(text or "")
+        html = body
+        with contextlib.suppress(Exception):
+            html = to_rich_compatible(body)
+
+        burl = None
+        with contextlib.suppress(Exception):
+            burl = pick_banner_url(self.config.get("banner_url"))
+        if not burl:
+            for k in ("photo", "video", "gif"):
+                v = banner_kw.get(k)
+                if isinstance(v, str) and v.startswith(("http://", "https://")):
+                    burl = v
+                    break
+        if burl:
+            with contextlib.suppress(Exception):
+                html = inject_banner_html(html, burl, force=True)
+
+        def _embed_buttons(h, unit_id, buttons):
+            """Register callbacks on unit, embed <tg-button-row> into HTML."""
+            if not buttons:
+                return h
+            try:
+                if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                    self.inline._units[unit_id]["buttons"] = buttons
+                    self.inline._units[unit_id]["text"] = text
+                    self.inline._units[unit_id]["rich_message"] = h
+                    with contextlib.suppress(Exception):
+                        self.inline.generate_markup(unit_id)
+                    buttons = self.inline._units[unit_id].get("buttons") or buttons
+                btn_html = markup_to_tg_rows(buttons, unit_id or "")
+                if btn_html:
+                    return h + "\n" + btn_html
+            except Exception:
+                pass
+            return h
+
+        # Navigation: edit existing rich unit in-place
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            unit_id = getattr(message, "unit_id", None)
+            full_html = _embed_buttons(html, unit_id, markup)
+            mid = getattr(message, "inline_message_id", None)
+            if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
+                mid = self.inline._units[unit_id].get("inline_message_id")
+
+            # Prefer official edit_rich_message — pure rich, no classic kb
+            if mid and hasattr(self.inline, "bot") and hasattr(self.inline.bot, "edit_rich_message"):
+                try:
+                    await self.inline.bot.edit_rich_message(
+                        html=full_html,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    if unit_id and unit_id in self.inline._units:
+                        self.inline._units[unit_id]["rich_message"] = full_html
+                        self.inline._units[unit_id]["text"] = text
+                        self.inline._units[unit_id]["buttons"] = markup
+                    return True
+                except Exception:
+                    pass
+
+            # Fallback: message.edit with rich_message only
+            try:
+                return await message.edit(
+                    text,
+                    reply_markup=None,
+                    rich_message=full_html,
+                )
+            except Exception:
+                pass
+
+            # Last: reopen as pure rich
+            try:
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=markup,
+                    silent=True,
+                    title="HikkariConfig",
+                    description="Config",
+                )
+            except Exception:
+                pass
+            return False
+
+        # Fresh open — pure rich unit (tg-buttons in HTML)
+        try:
+            return await self.inline.rich(
+                message,
+                html,
+                reply_markup=markup,
+                silent=True,
+                title="HikkariConfig",
+                description="Config",
+            )
+        except Exception:
+            # ultimate fallback still tries form(rich_message=...) not classic
+            try:
+                full = _embed_buttons(html, None, markup)
+                return await self.inline.form(
+                    text,
+                    message=message,
+                    reply_markup=markup,
+                    silent=True,
+                    rich_message=full,
+                )
+            except Exception:
+                return await self.inline.form(
+                    text,
+                    message=message,
+                    reply_markup=markup,
+                    silent=True,
+                    **banner_kw,
+                )
 
     def _cfg_banner_kwargs(self) -> dict:
         """photo / video / gif for config forms from banner_url."""
