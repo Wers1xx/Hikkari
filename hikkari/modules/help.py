@@ -657,7 +657,7 @@ class Help(loader.Module):
                         },
                     }
                 )
-            nav.append({"text": f"{page + 1}/{total}", "data": "noop"})
+            nav.append({"text": f"{page + 1}/{total}", "callback": self.inline__help_page, "kwargs": {"page": page, "force": force, "only_core": only_core, "only_loaded": only_loaded}})
             if page < total - 1:
                 nav.append(
                     {
@@ -842,7 +842,7 @@ class Help(loader.Module):
                 banner = local_path
                 banner_url_str = local_path
             elif banner_url_str.startswith(("http://", "https://")):
-                if self.config["media_quote"] is True or (
+                if self.config.get("media_quote") is True or (
                     getattr(self.client, "hikkari_me", None)
                     and self.client.hikkari_me.premium is False
                 ):
@@ -880,19 +880,33 @@ class Help(loader.Module):
                     page=0, force=force, only_core=only_core, only_loaded=only_loaded
                 )
                 text = self._help_list_text(page, total, count)
-                # optional banner
                 form_kw = {"silent": True}
                 with contextlib.suppress(Exception):
                     bu = str(self.config.get("banner_url") or "").strip()
-                    if bu.startswith(("http://", "https://")):
+                    if (
+                        bu.startswith(("http://", "https://"))
+                        and "Transferring value" not in bu
+                    ):
                         if bu.lower().split("?", 1)[0].endswith((".mp4", ".webm", ".mov")):
                             form_kw["video"] = bu
                         else:
                             form_kw["photo"] = bu
-                await self.inline.form(text, message=message, reply_markup=kb, **form_kw)
-                return
+                m = None
+                try:
+                    m = await self.inline.form(
+                        text, message=message, reply_markup=kb, **form_kw
+                    )
+                except Exception:
+                    form_kw.pop("photo", None)
+                    form_kw.pop("video", None)
+                    with contextlib.suppress(Exception):
+                        m = await self.inline.form(
+                            text, message=message, reply_markup=kb, **form_kw
+                        )
+                if m:
+                    return
             except Exception:
-                logger.debug("interactive help form failed, classic list", exc_info=True)
+                logger.exception("interactive help form failed, classic list")
 
 
         hidden = self.get("hide", [])
