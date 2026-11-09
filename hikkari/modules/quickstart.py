@@ -267,16 +267,17 @@ class Quickstart(loader.Module):
             ]
 
         banner_paths = [
-            Path(__file__).resolve().parent.parent.parent / "assets" / "unit_alpha_banner.jpg",
+            Path("/opt/Hikkari/assets/unit_alpha_banner.jpg"),
             Path("/root/Hikkari/assets/unit_alpha_banner.jpg"),
             Path("/data/unit_alpha_banner.jpg"),
+            Path.cwd() / "assets" / "unit_alpha_banner.jpg",
         ]
-        # module path: hikkari/modules/quickstart.py -> assets at repo root
+        # Core modules may have no __file__; only fixed paths
         try:
-            banner_paths.insert(
-                0,
-                Path(__file__).resolve().parents[2] / "assets" / "unit_alpha_banner.jpg",
-            )
+            import hikkari as _hikkari_pkg
+            _root = Path(getattr(_hikkari_pkg, "__file__", "") or "").resolve().parent.parent
+            if _root.name:
+                banner_paths.insert(0, _root / "assets" / "unit_alpha_banner.jpg")
         except Exception:
             pass
         banner = next((p for p in banner_paths if p.is_file()), None)

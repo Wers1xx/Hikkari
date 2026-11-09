@@ -657,6 +657,49 @@ class Form(InlineUnit):
             logger.error("inline.rich: no bot username")
             return False
 
+        # Navigation: InlineCall / InlineMessage → edit existing unit, never Peer cast
+        try:
+            from .types import InlineCall, InlineMessage, BotInlineCall
+        except Exception:
+            InlineCall = InlineMessage = BotInlineCall = ()  # type: ignore
+
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            markup = self._validate_markup(reply_markup) if reply_markup else []
+            unit_id = getattr(message, "unit_id", None)
+            try:
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                body = to_rich_compatible(html)
+                if unit_id and unit_id in self._units:
+                    self._units[unit_id]["buttons"] = markup
+                    with contextlib.suppress(Exception):
+                        self.generate_markup(unit_id)
+                    markup = self._units[unit_id].get("buttons") or markup
+                btn_html = markup_to_tg_rows(markup, unit_id or "") if markup else ""
+                if btn_html:
+                    body = body + "\n" + btn_html
+                if unit_id and unit_id in self._units:
+                    self._units[unit_id]["rich_message"] = body
+                    self._units[unit_id]["rich_html"] = body
+                    self._units[unit_id]["text"] = body
+                mid = getattr(message, "inline_message_id", None)
+                if mid is None and unit_id and unit_id in self._units:
+                    mid = self._units[unit_id].get("inline_message_id")
+                if mid and hasattr(getattr(self, "bot", None), "edit_rich_message"):
+                    await self.bot.edit_rich_message(
+                        html=body,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    return True
+                return await message.edit(
+                    body,
+                    reply_markup=None,
+                    rich_message=body,
+                )
+            except Exception:
+                logger.exception("inline.rich: InlineCall edit failed")
+                return False
+
         unit_id = utils.rand(16)
         markup = self._validate_markup(reply_markup) if reply_markup else []
         # Official Rich buttons inside HTML (<tg-button-row>), not only reply_markup
