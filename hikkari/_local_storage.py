@@ -121,15 +121,20 @@ class RemoteStorage:
         self._client = client
 
     async def preload(self, urls: list[str]):
-        """Preloads modules from remote storage."""
-        logger.debug("Preloading modules from remote storage.")
+        """Preloads modules from remote storage (skip already cached)."""
+        logger.debug("Preloading modules from remote storage (%s urls).", len(urls))
         for url in urls:
+            try:
+                _, repo, module_name = self._parse_url(url)
+                if self._local_storage.fetch(repo, module_name):
+                    continue
+            except Exception:
+                pass
             logger.debug("Preloading module %s", url)
-
             with contextlib.suppress(Exception):
                 await self.fetch(url)
+            await asyncio.sleep(0.05)
 
-            await asyncio.sleep(5)
 
     @staticmethod
     def _parse_url(url: str) -> tuple[str, str, str]:
