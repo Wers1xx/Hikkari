@@ -871,10 +871,11 @@ class Events(InlineUnit):
                     call = InlineCall(
                         ChosenInlineCall(chosen_inline_query), self, unit_id
                     )
-                    # Prefer live msg_id on the call/unit
-                    if msg_id is not None:
-                        call.inline_message_id = msg_id
-                        unit["inline_message_id"] = msg_id
+                    # NEVER overwrite unit/call inline_message_id with chosen msg_id:
+                    # msg_id is the NEW selected message; form bubble keeps its mid.
+                    # ChosenInlineCall already prefers unit.get("inline_message_id").
+                    if getattr(call, "inline_message_id", None) is None and unit.get("inline_message_id"):
+                        call.inline_message_id = unit["inline_message_id"]
 
                     handler = button["handler"]
                     args = list(button.get("args") or [])
