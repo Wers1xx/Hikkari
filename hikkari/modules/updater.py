@@ -411,6 +411,83 @@ class UpdaterMod(loader.Module):
             ]
         ]
 
+
+    async def _send_update_widget(
+        self,
+        current: str,
+        pending: str,
+        commits_raw: list | None = None,
+        changelog_text: str = "",
+    ) -> object | None:
+        """Bot API 10.4 HTML widget changelog in bot PM. Falls back to None."""
+        token = None
+        with contextlib.suppress(Exception):
+            token = getattr(self.inline, "_token", None) or getattr(
+                self.inline, "token", None
+            )
+        if not token:
+            with contextlib.suppress(Exception):
+                token = self._db.get("hikkari.inline", "bot_token", None) or self._db.get(
+                    "hikka.inline", "bot_token", None
+                )
+        if not token:
+            return None
+
+        try:
+            from ..utils.widgets import (
+                build_changelog_widget_html,
+                send_widget,
+                split_commits,
+            )
+        except Exception:
+            logger.debug("widgets util missing", exc_info=True)
+            return None
+
+        buckets = {"added": [], "fixed": [], "changed": [], "removed": [], "docs": [], "other": []}
+        if commits_raw:
+            with contextlib.suppress(Exception):
+                buckets = split_commits(commits_raw, limit=20)
+        elif changelog_text:
+            # Parse plain changelog lines into other
+            for line in str(changelog_text).splitlines():
+                line = line.strip().lstrip("-•* ").strip()
+                if line:
+                    buckets["other"].append(line[:90])
+
+        html = build_changelog_widget_html(
+            current=current or "",
+            pending=pending or "",
+            commits=buckets,
+            branch=self._current_branch() if hasattr(self, "_current_branch") else "master",
+        )
+        caption = (
+            f"⚜️ <b>Hikkari update</b>\n"
+            f"<code>{(current or '')[:7]}</code> → <code>{(pending or '')[:7]}</code>\n"
+            f"Open the widget for full changelog."
+        )
+        ikb = {"inline_keyboard": self._markup_rows()}
+        result = await send_widget(
+            token,
+            int(self.tg_id),
+            html,
+            caption=caption,
+            width=360,
+            height=440,
+            reply_markup=ikb,
+            parse_mode="HTML",
+        )
+        if result is None:
+            return None
+        # Normalize to object with message_id for upd_msg storage
+        class _W:
+            pass
+        w = _W()
+        w.message_id = result.get("message_id")
+        w.id = result.get("message_id")
+        w.raw = result
+        return w
+
+
     async def _send_owner_notice(self, text: str, reply_markup=None) -> object | None:
         """Notify owner in bot PM with buttons (Heroku-style)."""
         import re as _re
@@ -547,19 +624,32 @@ class UpdaterMod(loader.Module):
             with contextlib.suppress(Exception):
                 await self._delete_all_upd_messages()
 
-            text = self.strings["update_required"].format(
-                current[:6],
-                '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
-                    current[:12],
-                    pending[:12],
-                    pending[:6],
-                ),
-                changelog,
-            )
-            markup = None
+            # Prefer Bot API 10.4 HTML widget changelog (private chat with bot)
+            m = None
+            commits_raw = None
             with contextlib.suppress(Exception):
-                markup = self._markup()
-            m = await self._send_owner_notice(text, reply_markup=markup)
+                # re-fetch commits list for structured widget (best effort)
+                with git.Repo() as repo:
+                    br = self._current_branch()
+                    commits_raw = [*repo.iter_commits(f"HEAD..origin/{br}")]
+            with contextlib.suppress(Exception):
+                m = await self._send_update_widget(
+                    current, pending, commits_raw, str(changelog or "")
+                )
+            if m is None:
+                text = self.strings["update_required"].format(
+                    current[:6],
+                    '<a href="https://github.com/Wers1xx/Hikkari/compare/{}...{}">{}</a>'.format(
+                        current[:12],
+                        pending[:12],
+                        pending[:6],
+                    ),
+                    changelog,
+                )
+                markup = None
+                with contextlib.suppress(Exception):
+                    markup = self._markup()
+                m = await self._send_owner_notice(text, reply_markup=markup)
             if m is None:
                 logger.warning("update notice not delivered — will retry next poll")
                 return
