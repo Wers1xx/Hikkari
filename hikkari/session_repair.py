@@ -182,22 +182,28 @@ def patch_sqlite_session_class() -> None:
 
 
 
-def unlock_session(path: Path | str) -> None:
-    """Drop stale -journal/-wal/-shm so a single process can open the session."""
+def unlock_session(path: Path | str, *, force: bool = False) -> None:
+    """Drop stale lock files so a single process can open the session.
+
+    Default: only remove -journal.
+    force=True (cold start): also remove -wal/-shm.
+    Never delete WAL/SHM of a live client — that causes wrong session ID
+    and the userbot stops answering commands while still "running".
+    """
     path = Path(path)
     if path.suffix == ".session":
         base = path
     else:
         base = Path(str(path) + ("" if str(path).endswith(".session") else ".session"))
-    for suffix in ("-journal", "-wal", "-shm"):
-        p = Path(str(base) + suffix)
-        if p.exists():
+    suffixes = ("-journal", "-wal", "-shm") if force else ("-journal",)
+    for suffix in suffixes:
+        lp = Path(str(base) + suffix)
+        if lp.exists():
             try:
-                p.unlink()
-                logger.debug("Removed stale lock file %s", p.name)
+                lp.unlink()
+                logger.debug("Removed stale lock file %s", lp.name)
             except Exception:
-                logger.debug("Could not remove %s", p, exc_info=True)
-    # ensure schema after lock clear
+                logger.debug("Could not remove %s", lp, exc_info=True)
     if base.is_file():
         with contextlib.suppress(Exception):
             repair_session_file(base)

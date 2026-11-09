@@ -1019,7 +1019,7 @@ class Hikkari:
                 try:
                     try:
                         fname = getattr(session, "filename", None) or str(session)
-                        session_repair.unlock_session(fname)
+                        session_repair.unlock_session(fname, force=True)
                     except Exception:
                         pass
 
@@ -1055,7 +1055,7 @@ class Hikkari:
                     await asyncio.sleep(0.6 * attempt)
                     try:
                         fname = getattr(session, "filename", None) or str(session)
-                        session_repair.unlock_session(fname)
+                        session_repair.unlock_session(fname, force=True)
                         from hikkaritl.sessions import SQLiteSession as _SQ
                         stem = str(fname).rsplit(".session", maxsplit=1)[0]
                         session = _SQ(stem)
