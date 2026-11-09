@@ -874,6 +874,7 @@ class Help(loader.Module):
             return
 
         # Interactive help with per-module Help buttons (FHeta-style)
+        # Hard timeout: broken inline bot must not freeze .help
         if getattr(self.inline, "init_complete", False):
             try:
                 kb, page, total, count = self._help_list_markup(
@@ -893,20 +894,26 @@ class Help(loader.Module):
                             form_kw["photo"] = bu
                 m = None
                 try:
-                    m = await self.inline.form(
-                        text, message=message, reply_markup=kb, **form_kw
+                    m = await asyncio.wait_for(
+                        self.inline.form(
+                            text, message=message, reply_markup=kb, **form_kw
+                        ),
+                        timeout=6,
                     )
                 except Exception:
                     form_kw.pop("photo", None)
                     form_kw.pop("video", None)
                     with contextlib.suppress(Exception):
-                        m = await self.inline.form(
-                            text, message=message, reply_markup=kb, **form_kw
+                        m = await asyncio.wait_for(
+                            self.inline.form(
+                                text, message=message, reply_markup=kb, **form_kw
+                            ),
+                            timeout=4,
                         )
                 if m:
                     return
             except Exception:
-                logger.exception("interactive help form failed, classic list")
+                logger.debug("interactive help form failed, classic list", exc_info=True)
 
 
         hidden = self.get("hide", [])
