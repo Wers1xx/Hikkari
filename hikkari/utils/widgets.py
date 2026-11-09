@@ -12,7 +12,6 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-# Production: widgets only in private chats; protected content auto-applied
 BOT_API = "https://api.telegram.org"
 
 
@@ -35,7 +34,7 @@ def classify_commit(msg: str) -> str:
     return "other"
 
 
-def split_commits(commits: list[Any], limit: int = 20) -> dict[str, list[str]]:
+def split_commits(commits: list[Any], limit: int = 24) -> dict[str, list[str]]:
     out = {
         "added": [],
         "fixed": [],
@@ -53,21 +52,35 @@ def split_commits(commits: list[Any], limit: int = 20) -> dict[str, list[str]]:
         if not msg:
             continue
         bucket = classify_commit(msg)
-        # strip conventional prefix for display
         display = msg
         for pref in (
-            "feat:", "fix:", "chore:", "refactor:", "docs:", "perf:",
-            "style:", "test:", "build:", "ci:", "revert:",
-            "feat(", "fix(", "chore(", "refactor(",
+            "feat:",
+            "fix:",
+            "chore:",
+            "refactor:",
+            "docs:",
+            "perf:",
+            "style:",
+            "test:",
+            "build:",
+            "ci:",
+            "revert:",
+            "feat(",
+            "fix(",
+            "chore(",
+            "refactor(",
         ):
             if display.lower().startswith(pref):
-                # drop type until ): or :
                 if "(" in pref and ")" in display[:40]:
-                    display = display.split("):", 1)[-1].strip() if "):" in display else display
+                    display = (
+                        display.split("):", 1)[-1].strip()
+                        if "):" in display
+                        else display
+                    )
                 else:
                     display = display.split(":", 1)[-1].strip()
                 break
-        out[bucket].append(f"{sha} {display[:80]}")
+        out[bucket].append(f"{sha} {display[:72]}")
     return out
 
 
@@ -78,7 +91,10 @@ def build_changelog_widget_html(
     commits: dict[str, list[str]],
     branch: str = "master",
 ) -> str:
-    """Self-contained HTML for sendWidget (≤32KB). No external assets."""
+    """Native-looking interactive changelog widget (tabs, theme CSS vars).
+
+    Must stay under 32KB HTML / ~4KB zlib. No external assets, no network.
+    """
 
     def esc(s: str) -> str:
         return (
@@ -89,58 +105,109 @@ def build_changelog_widget_html(
             .replace('"', "&quot;")
         )
 
-    def section(title: str, color: str, items: list[str]) -> str:
-        if not items:
-            return ""
-        rows = "".join(
-            f'<div class="row"><span class="sha">{esc(i.split(" ",1)[0])}</span>'
-            f'<span class="msg">{esc(i.split(" ",1)[-1] if " " in i else i)}</span></div>'
-            for i in items[:12]
-        )
-        return (
-            f'<div class="sec">'
-            f'<div class="htag" style="color:{color}">{esc(title)} · {len(items)}</div>'
-            f"{rows}</div>"
-        )
-
-    body = ""
-    body += section("✨ Added", "#3dd68c", commits.get("added") or [])
-    body += section("🔧 Changed", "#6cb6ff", commits.get("changed") or [])
-    body += section("🐛 Fixed", "#ff7b72", commits.get("fixed") or [])
-    body += section("🗑 Removed", "#ffa657", commits.get("removed") or [])
-    body += section("📝 Docs", "#d2a8ff", commits.get("docs") or [])
-    body += section("• Other", "#8b949e", commits.get("other") or [])
-    if not body:
-        body = '<div class="empty">No detailed commits — open GitHub compare.</div>'
+    def items_json(key: str) -> str:
+        arr = commits.get(key) or []
+        return json.dumps(arr[:14], ensure_ascii=False)
 
     cur = esc((current or "")[:7])
     pend = esc((pending or "")[:7])
     br = esc(branch or "master")
 
-    # Keep HTML compact for 4KB compressed limit
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+    data = {
+        "added": commits.get("added") or [],
+        "changed": commits.get("changed") or [],
+        "fixed": commits.get("fixed") or [],
+        "removed": commits.get("removed") or [],
+        "docs": commits.get("docs") or [],
+        "other": commits.get("other") or [],
+    }
+    # trim for size
+    for k in list(data.keys()):
+        data[k] = [str(x)[:80] for x in data[k][:12]]
+
+    payload = json.dumps(data, ensure_ascii=False)
+
+    # Native palette via --tg-theme-*; interactive tabs via pure JS
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
 <style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-body{{font:13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;
-color:#e6edf3;background:linear-gradient(160deg,#0d1117 0%,#161b22 100%);
-padding:10px 12px;width:100%;height:100%}}
-.head{{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}}
-.title{{font-weight:700;font-size:15px;letter-spacing:.2px}}
-.badge{{background:#238636;color:#fff;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600}}
-.meta{{color:#8b949e;font-size:11px;margin-bottom:10px}}
-.meta b{{color:#58a6ff}}
-.sec{{margin-bottom:8px}}
-.htag{{font-weight:600;font-size:12px;margin-bottom:4px}}
-.row{{display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #21262d}}
-.sha{{color:#58a6ff;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;flex:0 0 auto}}
-.msg{{color:#c9d1d9;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.empty{{color:#8b949e;font-size:12px;padding:8px 0}}
-.foot{{margin-top:8px;font-size:10px;color:#484f58;text-align:center}}
+*{{box-sizing:border-box}}
+html,body{{margin:0;padding:0;background:transparent;color:var(--tg-theme-text-color,#111)}}
+body{{font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:10px 12px 18px}}
+.h{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}}
+.t{{font-weight:700;font-size:15px}}
+.b{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
+background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}}
+.m{{font-size:12px;color:var(--tg-theme-hint-color,#888);margin-bottom:8px}}
+.m b{{color:var(--tg-theme-link-color,#2481cc);font-weight:600}}
+.tabs{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}}
+.tabs button{{font-size:12px;padding:5px 10px;border-radius:10px;border:0;
+background:var(--tg-theme-secondary-bg-color,rgba(0,0,0,.06));
+color:var(--tg-theme-text-color,#111)}}
+.tabs button.on{{background:var(--tg-theme-button-color,#2481cc);
+color:var(--tg-theme-button-text-color,#fff)}}
+.list{{min-height:120px}}
+.row{{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--tg-theme-section-separator-color,rgba(0,0,0,.08))}}
+.sha{{flex:0 0 auto;font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;
+color:var(--tg-theme-link-color,#2481cc)}}
+.msg{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.empty{{color:var(--tg-theme-hint-color,#888);padding:12px 0;text-align:center}}
+.cnt{{font-size:11px;color:var(--tg-theme-hint-color,#888);margin-top:6px}}
 </style></head><body>
-<div class="head"><div class="title">Hikkari Update</div><div class="badge">NEW</div></div>
-<div class="meta"><b>{cur}</b> → <b>{pend}</b> · {br}</div>
-{body}
-<div class="foot">Bot API 10.4 widget · tap Update below</div>
+<div class="h"><div class="t">Hikkari Update</div><div class="b">NEW</div></div>
+<div class="m"><b>{cur}</b> → <b>{pend}</b> · {br}</div>
+<div class="tabs" id="tabs"></div>
+<div class="list" id="list"></div>
+<div class="cnt" id="cnt"></div>
+<script>
+var D={payload};
+var order=[["added","Added"],["changed","Changed"],["fixed","Fixed"],["removed","Removed"],["docs","Docs"],["other","Other"]];
+var cur="added";
+function pick(){{
+  for(var i=0;i<order.length;i++){{
+    var k=order[i][0];
+    if((D[k]||[]).length){{cur=k;return}}
+  }}
+  cur="other";
+}}
+function render(){{
+  var tabs=document.getElementById("tabs");
+  var list=document.getElementById("list");
+  var cnt=document.getElementById("cnt");
+  tabs.innerHTML="";
+  for(var i=0;i<order.length;i++){{
+    var k=order[i][0], label=order[i][1], n=(D[k]||[]).length;
+    if(!n && k!==cur) continue;
+    var b=document.createElement("button");
+    b.textContent=label+(n?(" "+n):"");
+    if(k===cur) b.className="on";
+    b.onclick=(function(key){{return function(){{cur=key;render();
+      try{{TelegramWidget.HapticFeedback.impactOccurred("light")}}catch(e){{}}
+    }}}})(k);
+    tabs.appendChild(b);
+  }}
+  var items=D[cur]||[];
+  list.innerHTML="";
+  if(!items.length){{
+    list.innerHTML='<div class="empty">Нет записей в этой категории</div>';
+  }} else {{
+    for(var j=0;j<items.length;j++){{
+      var s=String(items[j]);
+      var sp=s.indexOf(" ");
+      var sha=sp>0?s.slice(0,sp):s;
+      var msg=sp>0?s.slice(sp+1):"";
+      var row=document.createElement("div");
+      row.className="row";
+      row.innerHTML='<span class="sha">'+sha+'</span><span class="msg">'+msg+'</span>';
+      list.appendChild(row);
+    }}
+  }}
+  var total=0; for(var k in D) total+=(D[k]||[]).length;
+  cnt.textContent=items.length+" / "+total+" коммитов · листай вкладки";
+}}
+pick(); render();
+try{{TelegramWidget.ready()}}catch(e){{}}
+</script>
 </body></html>"""
     return html
 
@@ -151,8 +218,8 @@ async def send_widget(
     html: str,
     *,
     caption: str | None = None,
-    width: int = 360,
-    height: int = 420,
+    width: int = 0,
+    height: int = 0,
     public_data: str | None = None,
     chat_data: str | None = None,
     allow_queries: bool = False,
@@ -165,9 +232,12 @@ async def send_widget(
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "html": html,
-        "width": int(width),
-        "height": int(height),
     }
+    # 0 = automatic size (docs: omit or 0 for auto)
+    if width:
+        payload["width"] = int(width)
+    if height:
+        payload["height"] = int(height)
     if caption:
         payload["caption"] = caption[:1024]
         if parse_mode:

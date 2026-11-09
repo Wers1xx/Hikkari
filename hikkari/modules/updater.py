@@ -471,8 +471,8 @@ class UpdaterMod(loader.Module):
             int(self.tg_id),
             html,
             caption=caption,
-            width=360,
-            height=440,
+            width=0,
+            height=0,
             reply_markup=ikb,
             parse_mode="HTML",
         )
