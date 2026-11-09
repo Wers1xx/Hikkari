@@ -759,6 +759,7 @@ class Events(InlineUnit):
                         self.id = getattr(update, "id", None)
                         self.sender_id = getattr(update, "user_id", None)
                         self.query = update
+                        # Prefer form unit mid (imid), not chosen result msg_id
                         self.inline_message_id = imid or getattr(update, "msg_id", None)
                         self.chat_id = chat_id
                         self.message_id = message_id
@@ -786,7 +787,9 @@ class Events(InlineUnit):
                 and "future" in unit
                 and isinstance(unit["future"], Event)
             ):
-                if msg_id is not None:
+                # Keep original form's inline_message_id (needed for Rich/classic edit).
+                # chosen msg_id is the NEW selected message, not the form bubble.
+                if msg_id is not None and not unit.get("inline_message_id"):
                     unit["inline_message_id"] = msg_id
                 unit["future"].set()
                 return
@@ -835,7 +838,9 @@ class Events(InlineUnit):
                     query.split(maxsplit=1)[1] if len(query.split()) > 1 else ""
                 )
 
-                if msg_id is not None:
+                # Keep original form's inline_message_id (needed for Rich/classic edit).
+                # chosen msg_id is the NEW selected message, not the form bubble.
+                if msg_id is not None and not unit.get("inline_message_id"):
                     unit["inline_message_id"] = msg_id
 
                 class ChosenInlineCall:
@@ -847,12 +852,15 @@ class Events(InlineUnit):
                         self.id = getattr(update, "id", None)
                         self.sender_id = getattr(update, "user_id", None)
                         self.query = update
-                        # Heroku-compatible: expose msg_id on query
                         try:
                             self.query.msg_id = getattr(update, "msg_id", None)
                         except Exception:
                             pass
-                        self.inline_message_id = getattr(update, "msg_id", None)
+                        # Prefer original form mid so option_saved edits the Rich form
+                        self.inline_message_id = (
+                            unit.get("inline_message_id")
+                            or getattr(update, "msg_id", None)
+                        )
                         self.chat_id = unit.get("chat")
                         self.message_id = unit.get("message_id")
 

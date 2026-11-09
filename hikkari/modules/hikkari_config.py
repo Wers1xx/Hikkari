@@ -553,12 +553,50 @@ class HikkariConfigMod(loader.Module):
             ]
         ]
 
-        # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
+        # Refresh form after input (Rich must edit original form bubble)
         try:
+            unit_id = getattr(call, "unit_id", None)
+            units = getattr(getattr(self, "inline", None), "_units", {}) or {}
+            if unit_id and unit_id in units and units[unit_id].get("inline_message_id"):
+                imid = units[unit_id]["inline_message_id"]
+                try:
+                    call.inline_message_id = imid
+                except Exception:
+                    pass
             if imid is not None:
                 await self._cfg_edit(call, text, reply_markup=markup, inline_message_id=imid)
             else:
                 await self._cfg_edit(call, text, reply_markup=markup)
+            # Extra: direct rich edit if still pure-rich mode (guarantees UI update)
+            try:
+                from ..utils.rich import can_use_rich
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible, inject_banner_html, pick_banner_url
+                client = getattr(self, "_client", None) or getattr(self, "client", None)
+                if can_use_rich(client, self._db) and imid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
+                    html = to_rich_compatible(text)
+                    burl = None
+                    with contextlib.suppress(Exception):
+                        burl = pick_banner_url(self.config.get("banner_url"))
+                    if burl:
+                        with contextlib.suppress(Exception):
+                            html = inject_banner_html(html, burl, force=True)
+                    if unit_id and unit_id in units:
+                        units[unit_id]["buttons"] = markup
+                        with contextlib.suppress(Exception):
+                            self.inline.generate_markup(unit_id)
+                        markup = units[unit_id].get("buttons") or markup
+                    btn = markup_to_tg_rows(markup, unit_id or "") if markup else ""
+                    full = html + (("\n" + btn) if btn else "")
+                    if unit_id and unit_id in units:
+                        units[unit_id]["rich_message"] = full
+                        units[unit_id]["rich_html"] = full
+                    await self.inline.bot.edit_rich_message(
+                        html=full,
+                        inline_message_id=imid,
+                        reply_markup=None,
+                    )
+            except Exception:
+                pass
         except Exception:
             logger = __import__("logging").getLogger(__name__)
             logger.exception("inline__set_config edit failed (value already saved)")
