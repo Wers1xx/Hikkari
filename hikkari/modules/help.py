@@ -574,12 +574,6 @@ class Help(loader.Module):
             **banner_kwargs,
         )
 
-    @loader.command(
-        ru_doc="[args] | Помощь с вашими модулями!",
-        ua_doc="[args] | допоможіть з вашими модулями!",
-        de_doc="[args] | Hilfe mit deinen Modulen!",
-    )
-
     def _help_collect_modules(self, force: bool = False, only_core: bool = False, only_loaded: bool = False):
         """Return list of (display_name, lookup_key, is_core, has_config)."""
         hidden = set(self.get("hide", []) or [])
@@ -800,6 +794,11 @@ class Help(loader.Module):
                 await self.inline.form(reply, message=call, reply_markup=kb, silent=True)
 
 
+    @loader.command(
+        ru_doc="[args] | Помощь с вашими модулями!",
+        ua_doc="[args] | допоможіть з вашими модулями!",
+        de_doc="[args] | Hilfe mit deinen Modulen!",
+    )
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
