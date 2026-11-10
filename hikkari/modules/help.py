@@ -516,44 +516,25 @@ class Help(loader.Module):
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
-                close_mk = []
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # Classic reply_markup — always visible & working (no empty tg-button)
-                close_mk.append([{
-                    "text": "◀️ Назад",
-                    "callback": self.inline__help_show_list,
-                }])
-                try:
-                    if getattr(module, "config", None):
-                        close_mk.append([{
-                            "text": "⚙️ Config",
-                            "callback": self.inline__help_open_cfg,
-                            "args": (_mod_key,),
-                        }])
-                except Exception:
-                    pass
-                close_mk.append([{
-                    "text": "🔻 Закрыть",
-                    "action": "close",
-                }])
+                # ONE row: Back | Config | Close — form() first so callbacks register
+                close_mk = [[
+                    {
+                        "text": "◀️ Назад",
+                        "callback": self.inline__help_show_list,
+                    },
+                    {
+                        "text": "⚙️ Config",
+                        "callback": self.inline__help_open_cfg,
+                        "args": (_mod_key,),
+                    },
+                    {
+                        "text": "🔻 Закрыть",
+                        "action": "close",
+                    },
+                ]]
 
                 if getattr(self.inline, "init_complete", False):
-                    try:
-                        m = await self.inline.rich(
-                            message,
-                            html,
-                            title=str(_name)[:64],
-                            description=self._plain_doc(
-                                inspect.getdoc(module), "Module help"
-                            )[:80],
-                            thumbnail_url=burl,
-                            reply_markup=close_mk,
-                            silent=True,
-                        )
-                        if m:
-                            return
-                    except Exception as e:
-                        logger.debug("help inline.rich failed: %s", e)
                     try:
                         m = await self.inline.form(
                             text=str(_name)[:120] or "Help",
@@ -590,12 +571,14 @@ class Help(loader.Module):
 
     async def inline__help_show_list(self, call):
         """Back from module help → full modules list."""
+        with contextlib.suppress(Exception):
+            await call.answer()
         try:
             await self.help(call)
         except Exception as e:
-            logger.debug("inline__help_show_list: %s", e)
+            logger.exception("inline__help_show_list: %s", e)
             with contextlib.suppress(Exception):
-                await call.answer("Error")
+                await call.answer(str(e)[:60], show_alert=True)
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
@@ -604,6 +587,8 @@ class Help(loader.Module):
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
+        with contextlib.suppress(Exception):
+            await call.answer()
         try:
             cfg = None
             for m in self.allmodules.modules:
