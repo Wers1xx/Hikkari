@@ -163,7 +163,7 @@ background:var(--tg-theme-secondary-bg-color,rgba(0,0,0,.06));
 color:var(--tg-theme-text-color,#111)}}
 .tabs button.on{{background:var(--tg-theme-button-color,#2481cc);
 color:var(--tg-theme-button-text-color,#fff)}}
-.list{{min-height:120px}}
+.list{{min-height:240px;max-height:380px;overflow:auto;-webkit-overflow-scrolling:touch}}
 .row{{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--tg-theme-section-separator-color,rgba(0,0,0,.08))}}
 .sha{{flex:0 0 auto;font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;
 color:var(--tg-theme-link-color,#2481cc)}}
@@ -251,10 +251,8 @@ async def send_widget(
         "html": html,
     }
     # 0 = automatic size (docs: omit or 0 for auto)
-    if width:
-        payload["width"] = int(width)
-    if height:
-        payload["height"] = int(height)
+    payload["width"] = int(width) if width else 360
+    payload["height"] = int(height) if height else 440
     if caption:
         payload["caption"] = caption[:1024]
         if parse_mode:

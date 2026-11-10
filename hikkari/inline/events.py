@@ -426,7 +426,9 @@ class Events(InlineUnit):
                             help_inst = m
                             break
                 if help_inst is not None:
-                    msg = getattr(call, "message", None) or call
+                    msg = getattr(call, "message", None)
+                    if msg is None or type(msg).__name__ == "Event":
+                        msg = call
                     try:
                         await help_inst.modhelp(msg, mod_name)
                     except Exception as e:

@@ -518,7 +518,17 @@ class Help(loader.Module):
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = []
+                try:
+                    if getattr(module, "config", None):
+                        close_mk.append([{
+                            "text": "⚙️ Config",
+                            "callback": self.inline__help_open_cfg,
+                            "args": (module.strings.get("name", module.__class__.__name__),),
+                        }])
+                except Exception:
+                    pass
+                close_mk.append([{"text": "🔻 Закрыть", "action": "close"}])
                 with contextlib.suppress(Exception):
                     btn = markup_to_tg_rows(close_mk, "")
                     if btn:
@@ -580,6 +590,28 @@ class Help(loader.Module):
         ua_doc="[args] | допоможіть з вашими модулями!",
         de_doc="[args] | Hilfe mit deinen Modulen!",
     )
+    async def inline__help_open_cfg(self, call, mod_name: str = ""):
+        try:
+            cfg = None
+            for m in self.allmodules.modules:
+                cn = m.__class__.__name__.lower()
+                if "config" in cn and (hasattr(m, "inline__configure") or hasattr(m, "cfgcmd")):
+                    cfg = m
+                    break
+            if cfg is None:
+                await call.answer("Config unavailable")
+                return
+            if mod_name and hasattr(cfg, "inline__configure"):
+                mod = self.lookup(mod_name)
+                key = mod.strings.get("name", mod_name) if mod else mod_name
+                await cfg.inline__configure(call, key)
+                return
+            await call.answer("Config")
+        except Exception as e:
+            logger.debug("help open cfg: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer("Error")
+
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
@@ -705,17 +737,7 @@ class Help(loader.Module):
                 if core
                 else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"
             )
-            try:
-                from ..utils.rich_api import tg_button as _tg_btn
-                _hb = _tg_btn(
-                    "Help",
-                    type="callback_data",
-                    data=("hmod|" + str(name))[:64],
-                    style="link",
-                )
-            except Exception:
-                _hb = ""
-            tmp += f"\n{emoji} <code>{name}</code> {_hb}"
+            tmp += f"\n{emoji} <code>{name}</code>"
             first = True
 
             commands = [
@@ -772,6 +794,17 @@ class Help(loader.Module):
 
             if commands or icommands or placeholders:
                 tmp += " )"
+                try:
+                    from ..utils.rich_api import tg_button as _tg_btn
+                    _hb = _tg_btn(
+                        "Help",
+                        type="callback_data",
+                        data=("hmod|" + str(name))[:64],
+                        style="primary",
+                    )
+                    tmp += " " + _hb
+                except Exception:
+                    pass
                 if core:
                     core_ += [tmp]
                 else:

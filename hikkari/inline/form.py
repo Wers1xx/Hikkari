@@ -298,12 +298,26 @@ class Form(InlineUnit):
                 logger.exception("InlineCall.edit failed")
                 return False
 
-        if not isinstance(message, (Message, int)):
-            logger.error(
-                "Invalid type for `message`. Expected `Message`, `int` or InlineCall, got `%s`",
-                type(message),
-            )
-            return False
+        # Accept Message, int, InlineCall, or CallbackQuery.Event
+        if message is not None and not isinstance(message, (Message, int)):
+            cls_name = type(message).__name__
+            mod_name = (getattr(type(message), "__module__", "") or "").lower()
+            if cls_name == "Event" or "callbackquery" in mod_name:
+                underlying = getattr(message, "message", None)
+                if underlying is not None and isinstance(underlying, Message):
+                    message = underlying
+                elif not (getattr(message, "inline_message_id", None) or hasattr(message, "edit")):
+                    logger.error(
+                        "Invalid type for `message`. Expected Message/int/InlineCall, got %s",
+                        type(message),
+                    )
+                    return False
+            elif not (hasattr(message, "edit") or hasattr(message, "inline_message_id")):
+                logger.error(
+                    "Invalid type for `message`. Expected Message/int/InlineCall, got %s",
+                    type(message),
+                )
+                return False
 
         if not isinstance(reply_markup, (list, dict)):
             logger.error(
