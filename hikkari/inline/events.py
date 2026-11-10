@@ -426,8 +426,10 @@ class Events(InlineUnit):
                 except Exception:
                     icall = call
                 if help_inst is not None:
-                    # Re-open full module list (edits current form)
-                    await help_inst.help(icall)
+                    if hasattr(help_inst, "inline__help_show_list"):
+                        await help_inst.inline__help_show_list(icall)
+                    else:
+                        await help_inst.help(icall)
                 return
             except Exception:
                 logger.exception("hhelp|list callback failed")

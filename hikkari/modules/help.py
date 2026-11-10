@@ -518,35 +518,24 @@ class Help(loader.Module):
 
                 close_mk = []
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # Back -> full module list (always when rich form)
+                # Classic reply_markup — always visible & working (no empty tg-button)
                 close_mk.append([{
-                    "text": "Назад",
-                    "_callback_data": "hhelp|list",
+                    "text": "◀️ Назад",
+                    "callback": self.inline__help_show_list,
                 }])
                 try:
                     if getattr(module, "config", None):
                         close_mk.append([{
-                            "text": "Config",
+                            "text": "⚙️ Config",
                             "callback": self.inline__help_open_cfg,
                             "args": (_mod_key,),
-                            "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
                         }])
                 except Exception:
                     pass
                 close_mk.append([{
-                    "text": "Закрыть",
+                    "text": "🔻 Закрыть",
                     "action": "close",
-                    "_callback_data": "hhelp|close",
                 }])
-                # tg-buttons in HTML only — never also pass reply_markup (avoids double Config/Close)
-                _rich_btns = ""
-                with contextlib.suppress(Exception):
-                    _rich_btns = markup_to_tg_rows(close_mk, "") or ""
-                if _rich_btns:
-                    html = f"{html}\n{_rich_btns}"
-                    _rm = []
-                else:
-                    _rm = close_mk
 
                 if getattr(self.inline, "init_complete", False):
                     try:
@@ -558,7 +547,7 @@ class Help(loader.Module):
                                 inspect.getdoc(module), "Module help"
                             )[:80],
                             thumbnail_url=burl,
-                            reply_markup=_rm,
+                            reply_markup=close_mk,
                             silent=True,
                         )
                         if m:
@@ -570,7 +559,7 @@ class Help(loader.Module):
                             text=str(_name)[:120] or "Help",
                             message=message,
                             rich_message=html,
-                            reply_markup=_rm,
+                            reply_markup=close_mk,
                             silent=True,
                         )
                         if m:
@@ -598,6 +587,15 @@ class Help(loader.Module):
             skip_rich=True,
             **banner_kwargs,
         )
+
+    async def inline__help_show_list(self, call):
+        """Back from module help → full modules list."""
+        try:
+            await self.help(call)
+        except Exception as e:
+            logger.debug("inline__help_show_list: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer("Error")
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
@@ -640,7 +638,10 @@ class Help(loader.Module):
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        args = utils.get_args_raw(message)
+        try:
+            args = utils.get_args_raw(message) or ""
+        except Exception:
+            args = ""
 
         raw_banner = str(self.config["banner_url"] or "").strip()
         # Reject garbage saved from broken inline input (transfer msg, etc.)
@@ -893,21 +894,18 @@ class Help(loader.Module):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                close_mk = [[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]]
+                # Close via classic keyboard only — avoids empty/broken tg-button under list
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
-                        from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                        html = to_rich_compatible(
-                            rich_message
-                            + "\n"
-                            + (markup_to_tg_rows(close_mk, "") or "")
-                        )
+                        from ..utils.rich_api import to_rich_compatible
+                        html = to_rich_compatible(rich_message)
                         m = await self.inline.form(
                             text=str(reply)[:200] or "Hikkari Help",
                             message=message,
                             rich_message=html,
-                            reply_markup=[],
+                            reply_markup=close_mk,
                             silent=True,
                         )
                         sent = bool(m)
