@@ -529,10 +529,15 @@ class Help(loader.Module):
                 except Exception:
                     pass
                 close_mk.append([{"text": "🔻 Закрыть", "action": "close"}])
+                # tg-buttons in HTML only — never also pass reply_markup (avoids double Config/Close)
+                _rich_btns = ""
                 with contextlib.suppress(Exception):
-                    btn = markup_to_tg_rows(close_mk, "")
-                    if btn:
-                        html = f"{html}\n{btn}"
+                    _rich_btns = markup_to_tg_rows(close_mk, "") or ""
+                if _rich_btns:
+                    html = f"{html}\n{_rich_btns}"
+                    _rm = []
+                else:
+                    _rm = close_mk
 
                 if getattr(self.inline, "init_complete", False):
                     try:
@@ -544,7 +549,7 @@ class Help(loader.Module):
                                 inspect.getdoc(module), "Module help"
                             )[:80],
                             thumbnail_url=burl,
-                            reply_markup=close_mk,
+                            reply_markup=_rm,
                             silent=True,
                         )
                         if m:
@@ -556,7 +561,7 @@ class Help(loader.Module):
                             text=str(_name)[:120] or "Help",
                             message=message,
                             rich_message=html,
-                            reply_markup=close_mk,
+                            reply_markup=_rm,
                             silent=True,
                         )
                         if m:
@@ -568,9 +573,9 @@ class Help(loader.Module):
 
         await utils.answer(
             message,
-            f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
+            f"{reply}<blockquote>{cmds}{inline_cmd}</blockquote>"
             + (
-                f"<blockquote expandable>\n{placeholders}</blockquote>"
+                f"<blockquote>\n{placeholders}</blockquote>"
                 if placeholders
                 else ""
             )
@@ -870,7 +875,7 @@ class Help(loader.Module):
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
                 rich_message += "".join(
-                    f"<details><summary>{title}</summary>{content}</details>"
+                    f"<b>{title}</b>\n{content}"
                     for title, content in sections
                     if content
                 )
@@ -893,7 +898,7 @@ class Help(loader.Module):
                             text=str(reply)[:200] or "Hikkari Help",
                             message=message,
                             rich_message=html,
-                            reply_markup=close_mk,
+                            reply_markup=[],
                             silent=True,
                         )
                         sent = bool(m)
@@ -955,16 +960,9 @@ class Help(loader.Module):
                     return rows
 
                 def _details_block(title: str, rows: list[tuple[str, str]]) -> str:
-                    if not rows:
-                        return ""
-                    table = html_table(rows, header=("Module", "Commands"))
-                    # closed by default (no open attribute)
-                    return (
-                        f"<details>"
-                        f"<summary><b>{title}</b> ({len(rows)})</summary>\n"
-                        f"{table}\n"
-                        f"</details>"
-                    )
+                    # no <details> — TG shows «Показать больше» for expandable blocks
+                    body = "\n".join(f"{name} {cmds}" for name, cmds in rows)
+                    return f"<b>{title}</b>\n{body}"
 
                 # Keep section order: typically Core then Loaded
                 section_rows: list[tuple[str, list[tuple[str, str]]]] = []
@@ -1155,7 +1153,7 @@ class Help(loader.Module):
                     return (
                         f"{text_header}\n"
                         f"<i>{page + 1}/{total_pages}</i>\n"
-                        f"<blockquote expandable>{body}</blockquote>"
+                        f"<blockquote>{body}</blockquote>"
                     )
 
                 async def goto(call, page: int):
@@ -1201,7 +1199,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),
@@ -1223,7 +1221,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(plain_ + (no_commands_ if force else [])),
@@ -1245,7 +1243,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),
