@@ -808,17 +808,6 @@ class Help(loader.Module):
 
             if commands or icommands or placeholders:
                 tmp += " )"
-                try:
-                    from ..utils.rich_api import tg_button as _tg_btn
-                    _hb = _tg_btn(
-                        "Help",
-                        type="callback_data",
-                        data=("hmod|" + str(name))[:64],
-                        style="primary",
-                    )
-                    tmp += " " + _hb
-                except Exception:
-                    pass
                 if core:
                     core_ += [tmp]
                 else:
@@ -873,7 +862,7 @@ class Help(loader.Module):
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
                 rich_message += "".join(
-                    f"<b>{title}</b>\n{content}"
+                    f"<details><summary>{title}</summary>{content}</details>"
                     for title, content in sections
                     if content
                 )
@@ -958,9 +947,15 @@ class Help(loader.Module):
                     return rows
 
                 def _details_block(title: str, rows: list[tuple[str, str]]) -> str:
-                    # no <details> — TG shows «Показать больше» for expandable blocks
+                    if not rows:
+                        return ""
                     body = "\n".join(f"{name} {cmds}" for name, cmds in rows)
-                    return f"<b>{title}</b>\n{body}"
+                    return (
+                        f"<details>"
+                        f"<summary>{title}</summary>"
+                        f"{body}"
+                        f"</details>"
+                    )
 
                 # Keep section order: typically Core then Loaded
                 section_rows: list[tuple[str, list[tuple[str, str]]]] = []
