@@ -585,6 +585,12 @@ class Help(loader.Module):
             **banner_kwargs,
         )
 
+    async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
+        try:
+            await self.modhelp(call, mod_name or "")
+        except Exception as e:
+            logger.debug("help back from cfg: %s", e)
+
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
         try:
             cfg = None
@@ -599,6 +605,11 @@ class Help(loader.Module):
             if mod_name and hasattr(cfg, "inline__configure"):
                 mod = self.lookup(mod_name)
                 key = mod.strings.get("name", mod_name) if mod else mod_name
+                try:
+                    cfg._help_return_mod = key
+                    cfg._help_return_help = self
+                except Exception:
+                    pass
                 await cfg.inline__configure(call, key)
                 return
             await call.answer("Config")

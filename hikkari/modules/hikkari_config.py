@@ -1479,6 +1479,17 @@ class HikkariConfigMod(loader.Module):
             category=category,
         )
 
+    async def _back_from_module_cfg(self, call, obj_type=False):
+        help_mod = getattr(self, "_help_return_help", None)
+        mod_name = getattr(self, "_help_return_mod", None)
+        if help_mod is not None and mod_name and hasattr(help_mod, "modhelp"):
+            with contextlib.suppress(Exception):
+                self._help_return_mod = None
+                self._help_return_help = None
+            await help_mod.modhelp(call, mod_name)
+            return
+        await self.inline__global_config(call, obj_type=obj_type)
+
     async def inline__configure(
         self,
         call: InlineCall,
@@ -1616,7 +1627,7 @@ class HikkariConfigMod(loader.Module):
                     [
                         {
                             "text": self.strings["back_btn"],
-                            "callback": self.inline__global_config,
+                            "callback": self._back_from_module_cfg,
                             "style": "primary",
                             "kwargs": {"obj_type": obj_type},
                         },
@@ -1694,7 +1705,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": self.strings["back_btn"],
-                        "callback": self.inline__global_config,
+                        "callback": self._back_from_module_cfg,
                         "style": "primary",
                         "kwargs": {"obj_type": obj_type},
                     },
@@ -1815,12 +1826,12 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": self.strings["builtin"],
-                        "callback": self.inline__global_config,
+                        "callback": self._back_from_module_cfg,
                         "kwargs": {"obj_type": True},
                     },
                     {
                         "text": self.strings["external"],
-                        "callback": self.inline__global_config,
+                        "callback": self._back_from_module_cfg,
                     },
                 ],
                 *(
@@ -1828,7 +1839,7 @@ class HikkariConfigMod(loader.Module):
                         [
                             {
                                 "text": self.strings["libraries"],
-                                "callback": self.inline__global_config,
+                                "callback": self._back_from_module_cfg,
                                 "kwargs": {"obj_type": "library"},
                             }
                         ]
@@ -2005,7 +2016,7 @@ class HikkariConfigMod(loader.Module):
             nav = [
                 {
                     "text": "◀️" if page > 0 else " ",
-                    "callback": self.inline__global_config,
+                    "callback": self._back_from_module_cfg,
                     "kwargs": {
                         "page": int(max(0, page - 1)),
                         "obj_type": obj_type,
@@ -2013,12 +2024,12 @@ class HikkariConfigMod(loader.Module):
                 },
                 {
                     "text": f"{page + 1}/{total_pages}",
-                    "callback": self.inline__global_config,
+                    "callback": self._back_from_module_cfg,
                     "kwargs": {"page": int(page), "obj_type": obj_type},
                 },
                 {
                     "text": "▶️" if page < total_pages - 1 else " ",
-                    "callback": self.inline__global_config,
+                    "callback": self._back_from_module_cfg,
                     "kwargs": {
                         "page": int(min(total_pages - 1, page + 1)),
                         "obj_type": obj_type,

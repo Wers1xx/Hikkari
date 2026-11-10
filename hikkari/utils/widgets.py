@@ -90,7 +90,7 @@ def build_changelog_widget_html(
     pending: str,
     commits: dict[str, list[str]],
     branch: str = "master",
-    lang: str = "en",
+    lang: str = "ru",
 ) -> str:
     """Native-looking interactive changelog widget (tabs, theme CSS vars).
 
@@ -111,7 +111,7 @@ def build_changelog_widget_html(
         return json.dumps(arr[:14], ensure_ascii=False)
 
 
-    _lang = (lang or "en").lower()
+    _lang = (lang or "ru").lower()
     _ru = _lang.startswith("ru")
     _labels = {
         "added": "Добавлено" if _ru else "Added",
@@ -163,7 +163,7 @@ background:var(--tg-theme-secondary-bg-color,rgba(0,0,0,.06));
 color:var(--tg-theme-text-color,#111)}}
 .tabs button.on{{background:var(--tg-theme-button-color,#2481cc);
 color:var(--tg-theme-button-text-color,#fff)}}
-.list{{min-height:240px;max-height:380px;overflow:auto;-webkit-overflow-scrolling:touch}}
+.list{{max-height:160px;overflow:auto;-webkit-overflow-scrolling:touch}}
 .row{{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--tg-theme-section-separator-color,rgba(0,0,0,.08))}}
 .sha{{flex:0 0 auto;font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;
 color:var(--tg-theme-link-color,#2481cc)}}
@@ -177,6 +177,7 @@ color:var(--tg-theme-link-color,#2481cc)}}
 <div class="list" id="list"></div>
 <div class="cnt" id="cnt"></div>
 <script>
+var EMPTY="Нет записей";
 var D={payload};
 var order=[["added","{_labels["added"]}"],["changed","{_labels["changed"]}"],["fixed","{_labels["fixed"]}"],["removed","{_labels["removed"]}"],["docs","{_labels["docs"]}"],["other","{_labels["other"]}"]];
 var cur="added";
@@ -251,8 +252,8 @@ async def send_widget(
         "html": html,
     }
     # 0 = automatic size (docs: omit or 0 for auto)
-    payload["width"] = int(width) if width else 360
-    payload["height"] = int(height) if height else 440
+    payload["width"] = int(width) if width else 300
+    payload["height"] = int(height) if height else 260
     if caption:
         payload["caption"] = caption[:1024]
         if parse_mode:

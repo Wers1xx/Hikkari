@@ -398,10 +398,9 @@ class Events(InlineUnit):
             try:
                 mod_name = call_data.split("|", 1)[1].strip()
                 if not mod_name:
-                    await call.answer("?")
+                    with contextlib.suppress(Exception):
+                        await call.answer("?")
                     return
-                with contextlib.suppress(Exception):
-                    await call.answer(("Help · " + mod_name)[:60])
                 help_inst = None
                 client = getattr(self, "_client", None) or getattr(self, "client", None)
                 candidates = []
@@ -425,30 +424,23 @@ class Events(InlineUnit):
                         if hasattr(m, "modhelp"):
                             help_inst = m
                             break
+                try:
+                    via = bool(getattr(call, "via_inline", False))
+                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                except Exception:
+                    icall = call
+                with contextlib.suppress(Exception):
+                    await call.answer(("Help · " + mod_name)[:60])
                 if help_inst is not None:
-                    target = None
                     try:
-                        from ..inline.types import InlineCall as _IC
-                    except Exception:
-                        _IC = tuple()
-                    if _IC and isinstance(call, _IC):
-                        target = call
-                    else:
-                        msg = getattr(call, "message", None)
-                        try:
-                            from hikkaritl.tl.custom.message import Message as _Msg
-                        except Exception:
-                            from hikkaritl.tl.custom import Message as _Msg
-                        if isinstance(msg, _Msg):
-                            target = msg
-                    if target is None:
-                        with contextlib.suppress(Exception):
-                            await call.answer(("Открой: .help " + mod_name)[:60])
-                        return
-                    try:
-                        await help_inst.modhelp(target, mod_name)
+                        await help_inst.modhelp(icall, mod_name)
                     except Exception as e:
                         logger.debug("hmod modhelp: %s", e)
+                        with contextlib.suppress(Exception):
+                            await call.answer(str(e)[:60], show_alert=True)
+                else:
+                    with contextlib.suppress(Exception):
+                        await call.answer("Help module not loaded", show_alert=True)
                 return
             except Exception:
                 logger.exception("hmod rich callback failed")
