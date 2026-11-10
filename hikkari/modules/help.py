@@ -585,11 +585,6 @@ class Help(loader.Module):
             **banner_kwargs,
         )
 
-    @loader.command(
-        ru_doc="[args] | Помощь с вашими модулями!",
-        ua_doc="[args] | допоможіть з вашими модулями!",
-        de_doc="[args] | Hilfe mit deinen Modulen!",
-    )
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
         try:
             cfg = None
@@ -612,6 +607,11 @@ class Help(loader.Module):
             with contextlib.suppress(Exception):
                 await call.answer("Error")
 
+    @loader.command(
+        ru_doc="[args] | Помощь с вашими модулями!",
+        ua_doc="[args] | допоможіть з вашими модулями!",
+        de_doc="[args] | Hilfe mit deinen Modulen!",
+    )
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
