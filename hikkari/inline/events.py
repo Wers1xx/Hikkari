@@ -426,11 +426,27 @@ class Events(InlineUnit):
                             help_inst = m
                             break
                 if help_inst is not None:
-                    msg = getattr(call, "message", None)
-                    if msg is None or type(msg).__name__ == "Event":
-                        msg = call
+                    target = None
                     try:
-                        await help_inst.modhelp(msg, mod_name)
+                        from ..inline.types import InlineCall as _IC
+                    except Exception:
+                        _IC = tuple()
+                    if _IC and isinstance(call, _IC):
+                        target = call
+                    else:
+                        msg = getattr(call, "message", None)
+                        try:
+                            from hikkaritl.tl.custom.message import Message as _Msg
+                        except Exception:
+                            from hikkaritl.tl.custom import Message as _Msg
+                        if isinstance(msg, _Msg):
+                            target = msg
+                    if target is None:
+                        with contextlib.suppress(Exception):
+                            await call.answer(("Открой: .help " + mod_name)[:60])
+                        return
+                    try:
+                        await help_inst.modhelp(target, mod_name)
                     except Exception as e:
                         logger.debug("hmod modhelp: %s", e)
                 return
