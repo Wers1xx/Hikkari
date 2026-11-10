@@ -394,6 +394,47 @@ class Events(InlineUnit):
 
         # --- Official Rich Message navigation (Bot API 10.3 <tg-button>) ---
         # callback_data format: hk|<unit_id>|p|<page>
+        if isinstance(call_data, str) and call_data == "hhelp|list":
+            try:
+                with contextlib.suppress(Exception):
+                    await call.answer("Help")
+                help_inst = None
+                client = getattr(self, "_client", None) or getattr(self, "client", None)
+                candidates = []
+                for obj in (
+                    getattr(self, "allmodules", None),
+                    getattr(client, "allmodules", None) if client else None,
+                    getattr(getattr(client, "loader", None), "allmodules", None) if client else None,
+                ):
+                    if obj is None:
+                        continue
+                    mods = getattr(obj, "modules", None)
+                    if mods:
+                        candidates.extend(list(mods))
+                for m in candidates:
+                    if hasattr(m, "help") and m.__class__.__name__ in ("Help", "HelpMod"):
+                        help_inst = m
+                        break
+                if help_inst is None:
+                    for m in candidates:
+                        if hasattr(m, "help") and callable(getattr(m, "help", None)):
+                            help_inst = m
+                            break
+                try:
+                    via = bool(getattr(call, "via_inline", False))
+                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                except Exception:
+                    icall = call
+                if help_inst is not None:
+                    # Re-open full module list (edits current form)
+                    await help_inst.help(icall)
+                return
+            except Exception:
+                logger.exception("hhelp|list callback failed")
+                with contextlib.suppress(Exception):
+                    await call.answer("Error")
+                return
+
         if isinstance(call_data, str) and (call_data == "hhelp|close" or call_data.startswith("hhelp|c")):
             with contextlib.suppress(Exception):
                 await call.answer()

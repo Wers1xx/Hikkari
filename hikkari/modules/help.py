@@ -518,10 +518,15 @@ class Help(loader.Module):
 
                 close_mk = []
                 _mod_key = module.strings.get("name", module.__class__.__name__)
+                # Back -> full module list (always when rich form)
+                close_mk.append([{
+                    "text": "Назад",
+                    "_callback_data": "hhelp|list",
+                }])
                 try:
                     if getattr(module, "config", None):
                         close_mk.append([{
-                            "text": "⚙️ Config",
+                            "text": "Config",
                             "callback": self.inline__help_open_cfg,
                             "args": (_mod_key,),
                             "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
@@ -529,7 +534,7 @@ class Help(loader.Module):
                 except Exception:
                     pass
                 close_mk.append([{
-                    "text": "🔻 Закрыть",
+                    "text": "Закрыть",
                     "action": "close",
                     "_callback_data": "hhelp|close",
                 }])
@@ -888,7 +893,7 @@ class Help(loader.Module):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]]
+                close_mk = [[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
@@ -1016,7 +1021,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
+                        reply_markup=[[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                     )
@@ -1105,7 +1110,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
+                        reply_markup=[[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                         page=0,
