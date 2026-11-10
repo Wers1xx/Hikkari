@@ -90,6 +90,7 @@ def build_changelog_widget_html(
     pending: str,
     commits: dict[str, list[str]],
     branch: str = "master",
+    lang: str = "en",
 ) -> str:
     """Native-looking interactive changelog widget (tabs, theme CSS vars).
 
@@ -108,6 +109,22 @@ def build_changelog_widget_html(
     def items_json(key: str) -> str:
         arr = commits.get(key) or []
         return json.dumps(arr[:14], ensure_ascii=False)
+
+
+    _lang = (lang or "en").lower()
+    _ru = _lang.startswith("ru")
+    _labels = {
+        "added": "Добавлено" if _ru else "Added",
+        "changed": "Изменено" if _ru else "Changed",
+        "fixed": "Исправлено" if _ru else "Fixed",
+        "removed": "Удалено" if _ru else "Removed",
+        "docs": "Документация" if _ru else "Docs",
+        "other": "Прочее" if _ru else "Other",
+    }
+    _title = "Обновление Hikkari" if _ru else "Hikkari Update"
+    _new = "НОВОЕ" if _ru else "NEW"
+    _empty = "Нет записей в этой категории" if _ru else "No entries in this category"
+    _cnt_suf = "записей · листай вкладки" if _ru else "items · swipe tabs"
 
     cur = esc((current or "")[:7])
     pend = esc((pending or "")[:7])
@@ -154,14 +171,14 @@ color:var(--tg-theme-link-color,#2481cc)}}
 .empty{{color:var(--tg-theme-hint-color,#888);padding:12px 0;text-align:center}}
 .cnt{{font-size:11px;color:var(--tg-theme-hint-color,#888);margin-top:6px}}
 </style></head><body>
-<div class="h"><div class="t">Hikkari Update</div><div class="b">NEW</div></div>
+<div class="h"><div class="t">{_title}</div><div class="b">{_new}</div></div>
 <div class="m"><b>{cur}</b> → <b>{pend}</b> · {br}</div>
 <div class="tabs" id="tabs"></div>
 <div class="list" id="list"></div>
 <div class="cnt" id="cnt"></div>
 <script>
 var D={payload};
-var order=[["added","Added"],["changed","Changed"],["fixed","Fixed"],["removed","Removed"],["docs","Docs"],["other","Other"]];
+var order=[["added","{_labels["added"]}"],["changed","{_labels["changed"]}"],["fixed","{_labels["fixed"]}"],["removed","{_labels["removed"]}"],["docs","{_labels["docs"]}"],["other","{_labels["other"]}"]];
 var cur="added";
 function pick(){{
   for(var i=0;i<order.length;i++){{

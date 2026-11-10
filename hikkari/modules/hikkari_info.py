@@ -350,7 +350,7 @@ class HikkariInfoMod(loader.Module):
         safe = _Safe({k: str(v) for k, v in data.items()})
 
         # --- Rich path (explicit opt-in only) ---
-        if self.config.get("rich_mode", False):
+        if True:  # rich gated below via can_use_rich (Settings.rich_mode, live)
             try:
                 from .._internal import normalize_rich_html
                 from ..utils.rich import can_use_rich

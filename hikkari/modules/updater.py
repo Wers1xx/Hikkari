@@ -459,11 +459,20 @@ class UpdaterMod(loader.Module):
             pending=pending or "",
             commits=buckets,
             branch=self._current_branch() if hasattr(self, "_current_branch") else "master",
+            lang=str(
+                (
+                    self._db.get("hikkari.translations", "lang", None)
+                    or self._db.get("Settings", "lang", None)
+                    or "ru"
+                )
+                if getattr(self, "_db", None)
+                else "ru"
+            ),
         )
         caption = (
             f"⚜️ <b>Hikkari update</b>\n"
             f"<code>{(current or '')[:7]}</code> → <code>{(pending or '')[:7]}</code>\n"
-            f"Open the widget for full changelog."
+            f"Открой виджет, чтобы увидеть полный список изменений."
         )
         ikb = {"inline_keyboard": self._markup_rows()}
         result = await send_widget(

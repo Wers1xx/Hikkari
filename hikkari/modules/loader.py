@@ -479,7 +479,10 @@ class LoaderMod(loader.Module):
                 with contextlib.suppress(Exception):
                     html = inject_banner_html(html, burl, force=True)
 
-            close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+            close_mk = [[
+                {"text": "⚙️ Config", "callback": self._inline_open_mod_config, "args": (modname,)},
+                {"text": "🔻 Закрыть", "action": "close"},
+            ]]
             if subscribe_markup:
                 close_mk = list(subscribe_markup) + close_mk
 

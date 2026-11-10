@@ -657,7 +657,7 @@ class Help(loader.Module):
                         },
                     }
                 )
-            nav.append({"text": f"{page + 1}/{total}", "callback": self.inline__help_page, "kwargs": {"page": page, "force": force, "only_core": only_core, "only_loaded": only_loaded}})
+            nav.append({"text": f"{page + 1}/{total}", "data": "noop"})
             if page < total - 1:
                 nav.append(
                     {
@@ -842,7 +842,7 @@ class Help(loader.Module):
                 banner = local_path
                 banner_url_str = local_path
             elif banner_url_str.startswith(("http://", "https://")):
-                if self.config.get("media_quote") is True or (
+                if self.config["media_quote"] is True or (
                     getattr(self.client, "hikkari_me", None)
                     and self.client.hikkari_me.premium is False
                 ):
@@ -873,8 +873,8 @@ class Help(loader.Module):
             await self.modhelp(message, args)
             return
 
-        # Interactive help with per-module Help buttons (FHeta-style)
-        # Hard timeout: broken inline bot must not freeze .help
+                # Interactive help with per-module Help buttons (FHeta-style)
+        # Hard timeout so broken inline bot cannot freeze .help forever
         if getattr(self.inline, "init_complete", False):
             try:
                 kb, page, total, count = self._help_list_markup(
@@ -898,7 +898,7 @@ class Help(loader.Module):
                         self.inline.form(
                             text, message=message, reply_markup=kb, **form_kw
                         ),
-                        timeout=6,
+                        timeout=8,
                     )
                 except Exception:
                     form_kw.pop("photo", None)
@@ -908,7 +908,7 @@ class Help(loader.Module):
                             self.inline.form(
                                 text, message=message, reply_markup=kb, **form_kw
                             ),
-                            timeout=4,
+                            timeout=5,
                         )
                 if m:
                     return
@@ -1315,8 +1315,88 @@ class Help(loader.Module):
 
 
         async def _send_help_pages(text_header: str, sections: list[tuple[str, list[str]]]) -> bool:
-            """Skip inline pagination when form is unreliable; classic answer path used."""
-            return False
+            """
+            Rich (if on) or classic message.
+            Inline pagination ONLY when classic text would exceed Telegram ~4096 limit.
+            """
+            try:
+                entries = []
+                for sec, lines in sections:
+                    for ln in lines:
+                        if ln.strip():
+                            entries.append((sec, ln.strip()))
+                if not entries:
+                    return False
+
+                # Prefer Rich when enabled (own limit ~28k; nav only if multi-page inside rich)
+                if await _send_help_rich(
+                    text_header,
+                    [(s, "\n".join(ls)) for s, ls in sections],
+                ):
+                    return True
+
+                # Build full classic body (same structure as utils.answer fallback)
+                bodies = []
+                for sec, lines in sections:
+                    joined = "".join(lines)
+                    if joined.strip():
+                        bodies.append(joined)
+                # Approximate plain length (strip tags for limit check)
+                raw_html = text_header + "\n" + "\n".join(bodies)
+                plain_approx = re.sub(r"<[^>]+>", "", raw_html)
+                TG_LIMIT = 4000  # leave margin under 4096
+
+                # Under limit → let caller send normal message (no inline, no fake pages)
+                if len(plain_approx) <= TG_LIMIT:
+                    return False
+
+                # Over limit → paginated inline form
+                per_page = 12
+                total_pages = max(1, (len(entries) + per_page - 1) // per_page)
+
+                def page_text(page: int) -> str:
+                    page = max(0, min(page, total_pages - 1))
+                    chunk = entries[page * per_page : (page + 1) * per_page]
+                    body = "\n".join(ln for _, ln in chunk)
+                    return (
+                        f"{text_header}\n"
+                        f"<i>{page + 1}/{total_pages}</i>\n"
+                        f"<blockquote expandable>{body}</blockquote>"
+                    )
+
+                async def goto(call, page: int):
+                    page = max(0, min(page, total_pages - 1))
+                    btns = []
+                    nav = []
+                    if page > 0:
+                        nav.append({"text": "◀️", "callback": goto, "args": (page - 1,)})
+                    nav.append({"text": f"{page + 1}/{total_pages}", "data": "noop"})
+                    if page < total_pages - 1:
+                        nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
+                    btns.append(nav)
+                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    await call.edit(page_text(page), reply_markup=btns)
+
+                if not getattr(self.inline, "init_complete", False):
+                    return False
+
+                first_btns = []
+                nav = [{"text": f"1/{total_pages}", "data": "noop"}]
+                if total_pages > 1:
+                    nav.append({"text": "▶️", "callback": goto, "args": (1,)})
+                first_btns.append(nav)
+                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                await self.inline.form(
+                    page_text(0),
+                    message=message if message.out else utils.get_chat_id(message),
+                    reply_markup=first_btns,
+                    silent=True,
+                )
+                return True
+            except Exception:
+                logger.debug("help pages failed", exc_info=True)
+                return False
+
 
 
         match True:
