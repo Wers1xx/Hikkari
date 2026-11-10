@@ -488,51 +488,58 @@ class Help(loader.Module):
                 with contextlib.suppress(Exception):
                     html = to_rich_compatible(html)
 
+                # Module banner (# meta banner:) first; else help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    src = ""
                     origin = getattr(module, "__origin__", "") or ""
+                    src_head = ""
                     if origin and not str(origin).startswith("<"):
                         from pathlib import Path as _P
-                        if _P(str(origin)).is_file():
-                            src = ""  # skip slow full-file read
-                    if hasattr(self, "_get_banner_url"):
-                        meta_b = self._get_banner_url(src) if src else None
-                    elif hasattr(module, "strings"):
-                        pass
-                # meta from module file via loader helper if present
-                with contextlib.suppress(Exception):
-                    loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
-                    if loader_mod and hasattr(loader_mod, "_get_banner_url"):
-                        origin = getattr(module, "__origin__", "") or ""
-                        if origin and not str(origin).startswith("<core"):
-                            from pathlib import Path as _P
-                            pth = _P(str(origin))
-                            if pth.is_file():
-                                meta_b = loader_mod._get_banner_url(
-                                    ""  # skip slow full-file read
-                                )
+                        pth = _P(str(origin))
+                        if pth.is_file():
+                            # only first 8KB — enough for # meta banner, not full module
+                            with open(pth, "r", encoding="utf-8", errors="ignore") as _bf:
+                                src_head = _bf.read(8192)
+                    if not src_head:
+                        with contextlib.suppress(Exception):
+                            src_head = (inspect.getdoc(module) or "")[:4000]
+                    if src_head:
+                        loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                        if loader_mod and hasattr(loader_mod, "_get_banner_url"):
+                            meta_b = loader_mod._get_banner_url(src_head)
+                        if not meta_b:
+                            import re as _re
+                            _m = _re.search(r"#\s*meta\s+banner:\s*(\S+)", src_head, _re.I)
+                            if _m:
+                                meta_b = _m.group(1).strip()
                 burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # ONE row: Back | Config | Close — form() first so callbacks register
-                close_mk = [[
-                    {
+                # Back ONLY when opened from modules list (InlineCall), not via .help Name
+                _from_list = False
+                with contextlib.suppress(Exception):
+                    _tn = type(message).__name__
+                    _from_list = _tn in ("InlineCall", "BotInlineCall") or bool(
+                        getattr(message, "via_inline", False)
+                    )
+                _row = []
+                if _from_list:
+                    _row.append({
                         "text": "◀️ Назад",
                         "callback": self.inline__help_show_list,
-                    },
-                    {
-                        "text": "⚙️ Config",
-                        "callback": self.inline__help_open_cfg,
-                        "args": (_mod_key,),
-                    },
-                    {
-                        "text": "🔻 Закрыть",
-                        "action": "close",
-                    },
-                ]]
+                    })
+                _row.append({
+                    "text": "⚙️ Config",
+                    "callback": self.inline__help_open_cfg,
+                    "args": (_mod_key,),
+                })
+                _row.append({
+                    "text": "🔻 Закрыть",
+                    "action": "close",
+                })
+                close_mk = [_row]
 
                 if getattr(self.inline, "init_complete", False):
                     try:
