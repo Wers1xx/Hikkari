@@ -394,6 +394,50 @@ class Events(InlineUnit):
 
         # --- Official Rich Message navigation (Bot API 10.3 <tg-button>) ---
         # callback_data format: hk|<unit_id>|p|<page>
+        if isinstance(call_data, str) and call_data.startswith("hmod|"):
+            try:
+                mod_name = call_data.split("|", 1)[1].strip()
+                if not mod_name:
+                    await call.answer("?")
+                    return
+                with contextlib.suppress(Exception):
+                    await call.answer(("Help · " + mod_name)[:60])
+                help_inst = None
+                client = getattr(self, "_client", None) or getattr(self, "client", None)
+                candidates = []
+                for obj in (
+                    getattr(self, "allmodules", None),
+                    getattr(client, "allmodules", None) if client else None,
+                    getattr(getattr(client, "loader", None), "allmodules", None) if client else None,
+                    getattr(client, "loader", None) if client else None,
+                ):
+                    if obj is None:
+                        continue
+                    mods = getattr(obj, "modules", None)
+                    if mods:
+                        candidates.extend(list(mods))
+                for m in candidates:
+                    if hasattr(m, "modhelp") and m.__class__.__name__ in ("Help", "HelpMod"):
+                        help_inst = m
+                        break
+                if help_inst is None:
+                    for m in candidates:
+                        if hasattr(m, "modhelp"):
+                            help_inst = m
+                            break
+                if help_inst is not None:
+                    msg = getattr(call, "message", None) or call
+                    try:
+                        await help_inst.modhelp(msg, mod_name)
+                    except Exception as e:
+                        logger.debug("hmod modhelp: %s", e)
+                return
+            except Exception:
+                logger.exception("hmod rich callback failed")
+                with contextlib.suppress(Exception):
+                    await call.answer("Error")
+                return
+
         if isinstance(call_data, str) and call_data.startswith("hk|"):
             try:
                 parts = call_data.split("|")
