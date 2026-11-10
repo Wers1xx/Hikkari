@@ -469,17 +469,15 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        "<details>"
-                        f"<summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"<b>Commands</b> ({len(rows)})\n"
                         f"{table}\n"
-                        "</details>"
                     )
                 if placeholders:
                     ph = self._plain_doc(placeholders, "")
                     if ph:
                         parts.append(
-                            f"<details><summary>Placeholders</summary>"
-                            f"<p>{html_mod.escape(ph[:500])}</p></details>"
+                            f"<b>Placeholders</b>\n"
+                            f"<p>{html_mod.escape(ph[:500])}</p>"
                         )
                 if dev_text:
                     parts.append(
