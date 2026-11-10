@@ -517,16 +517,22 @@ class Help(loader.Module):
                     html = inject_banner_html(html, burl, force=True)
 
                 close_mk = []
+                _mod_key = module.strings.get("name", module.__class__.__name__)
                 try:
                     if getattr(module, "config", None):
                         close_mk.append([{
                             "text": "⚙️ Config",
                             "callback": self.inline__help_open_cfg,
-                            "args": (module.strings.get("name", module.__class__.__name__),),
+                            "args": (_mod_key,),
+                            "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
                         }])
                 except Exception:
                     pass
-                close_mk.append([{"text": "🔻 Закрыть", "action": "close"}])
+                close_mk.append([{
+                    "text": "🔻 Закрыть",
+                    "action": "close",
+                    "_callback_data": "hhelp|close",
+                }])
                 # tg-buttons in HTML only — never also pass reply_markup (avoids double Config/Close)
                 _rich_btns = ""
                 with contextlib.suppress(Exception):
@@ -808,6 +814,17 @@ class Help(loader.Module):
 
             if commands or icommands or placeholders:
                 tmp += " )"
+                try:
+                    from ..utils.rich_api import tg_button as _tg_btn
+                    _hb = _tg_btn(
+                        "Help",
+                        type="callback_data",
+                        data=("hmod|" + str(name))[:64],
+                        style="primary",
+                    )
+                    tmp += " " + _hb
+                except Exception:
+                    pass
                 if core:
                     core_ += [tmp]
                 else:
@@ -871,7 +888,7 @@ class Help(loader.Module):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
@@ -999,7 +1016,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                     )
@@ -1088,7 +1105,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                         page=0,

@@ -394,6 +394,59 @@ class Events(InlineUnit):
 
         # --- Official Rich Message navigation (Bot API 10.3 <tg-button>) ---
         # callback_data format: hk|<unit_id>|p|<page>
+        if isinstance(call_data, str) and (call_data == "hhelp|close" or call_data.startswith("hhelp|c")):
+            with contextlib.suppress(Exception):
+                await call.answer()
+            try:
+                via = bool(getattr(call, "via_inline", False))
+                icall = (InlineCall if via else BotInlineCall)(call, self, None)
+            except Exception:
+                icall = call
+            with contextlib.suppress(Exception):
+                await self._close_unit_handler(icall)
+            return
+
+        if isinstance(call_data, str) and call_data.startswith("hcfgmod|"):
+            try:
+                mod_name = call_data.split("|", 1)[1].strip()
+                with contextlib.suppress(Exception):
+                    await call.answer(("Config · " + mod_name)[:60])
+                help_inst = None
+                client = getattr(self, "_client", None) or getattr(self, "client", None)
+                candidates = []
+                for obj in (
+                    getattr(self, "allmodules", None),
+                    getattr(client, "allmodules", None) if client else None,
+                    getattr(getattr(client, "loader", None), "allmodules", None) if client else None,
+                ):
+                    if obj is None:
+                        continue
+                    mods = getattr(obj, "modules", None)
+                    if mods:
+                        candidates.extend(list(mods))
+                for m in candidates:
+                    if hasattr(m, "inline__help_open_cfg") and m.__class__.__name__ in ("Help", "HelpMod"):
+                        help_inst = m
+                        break
+                if help_inst is None:
+                    for m in candidates:
+                        if hasattr(m, "inline__help_open_cfg"):
+                            help_inst = m
+                            break
+                try:
+                    via = bool(getattr(call, "via_inline", False))
+                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                except Exception:
+                    icall = call
+                if help_inst is not None:
+                    await help_inst.inline__help_open_cfg(icall, mod_name)
+                return
+            except Exception:
+                logger.exception("hcfgmod callback failed")
+                with contextlib.suppress(Exception):
+                    await call.answer("Error")
+                return
+
         if isinstance(call_data, str) and call_data.startswith("hmod|"):
             try:
                 mod_name = call_data.split("|", 1)[1].strip()
