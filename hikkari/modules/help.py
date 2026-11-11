@@ -612,7 +612,7 @@ class Help(loader.Module):
             await call.answer()
         self._help_nav_from_list = False
         try:
-            # Re-render full help list by editing current form/message
+            # Must open LIST, not re-parse form text as module name
             await self.help(call)
         except Exception as e:
             logger.exception("inline__help_show_list: %s", e)
@@ -627,19 +627,19 @@ class Help(loader.Module):
         except Exception as e:
             logger.debug("help back from cfg: %s", e)
 
-    async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open config for a module (from help)."""
+        async def inline__help_open_cfg(self, call, mod_name: str = ""):
+        """Open config for a module (from help list or command help)."""
         with contextlib.suppress(Exception):
             await call.answer()
         try:
             cfg = (
                 self.lookup("HikkariConfig")
                 or self.lookup("HikkariConfigMod")
-                or self.lookup("Config")
+                or self.lookup("ConfigMod")
                 or self.lookup("config")
             )
             if cfg is None:
-                for m in self.allmodules.modules:
+                for m in list(getattr(self.allmodules, "modules", []) or []):
                     if hasattr(m, "inline__configure"):
                         cfg = m
                         break
@@ -647,24 +647,30 @@ class Help(loader.Module):
                 with contextlib.suppress(Exception):
                     await call.answer("Config unavailable", show_alert=True)
                 return
-            mod = self.lookup(mod_name) if mod_name else None
-            key = mod_name
+
+            key = (mod_name or "").strip()
+            mod = self.lookup(key) if key else None
             if mod is not None:
                 with contextlib.suppress(Exception):
-                    key = mod.strings.get("name", mod.__class__.__name__)
+                    key = str(mod.strings.get("name", mod.__class__.__name__))
                 if not key:
                     key = mod.__class__.__name__
-            try:
+            if not key:
+                with contextlib.suppress(Exception):
+                    await call.answer("No module", show_alert=True)
+                return
+
+            with contextlib.suppress(Exception):
                 cfg._help_return_mod = key
                 cfg._help_return_help = self
                 cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
-            except Exception:
-                pass
+
             await cfg.inline__configure(call, str(key))
         except Exception as e:
             logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):
                 await call.answer(str(e)[:60], show_alert=True)
+
 
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
@@ -674,10 +680,17 @@ class Help(loader.Module):
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        try:
-            args = utils.get_args_raw(message) or ""
-        except Exception:
+        # InlineCall/BotInlineCall: message body is form text, NOT command args
+        _tn = type(message).__name__
+        if _tn in ("InlineCall", "BotInlineCall") or getattr(message, "inline_message_id", None):
             args = ""
+        else:
+            try:
+                args = utils.get_args_raw(message) or ""
+            except Exception:
+                args = ""
+            if args is False:
+                args = ""
 
         raw_banner = str(self.config["banner_url"] or "").strip()
         # Reject garbage saved from broken inline input (transfer msg, etc.)
