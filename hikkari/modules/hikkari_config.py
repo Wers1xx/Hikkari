@@ -1498,16 +1498,26 @@ class HikkariConfigMod(loader.Module):
             category=category,
         )
 
-    async def _back_from_module_cfg(self, call, obj_type=False):
+    async def _back_from_module_cfg(self, call, obj_type=False, page=0, **kwargs):
+        """Back from module config → help modhelp or global config list.
+        Accepts page/**kwargs so mis-wired pagination never crashes.
+        """
         help_mod = getattr(self, "_help_return_help", None)
         mod_name = getattr(self, "_help_return_mod", None)
+        from_list = bool(getattr(self, "_help_from_list", False))
         if help_mod is not None and mod_name and hasattr(help_mod, "modhelp"):
             with contextlib.suppress(Exception):
                 self._help_return_mod = None
                 self._help_return_help = None
-            await help_mod.modhelp(call, mod_name)
+                self._help_from_list = False
+            await help_mod.modhelp(call, mod_name, from_list=from_list)
             return
-        await self.inline__global_config(call, obj_type=obj_type)
+        # Not from help — this is global config nav; honor page if present
+        try:
+            page = int(page or 0)
+        except Exception:
+            page = 0
+        await self.inline__global_config(call, page=page, obj_type=obj_type)
 
     async def inline__configure(
         self,
@@ -2048,7 +2058,7 @@ class HikkariConfigMod(loader.Module):
             nav = [
                 {
                     "text": "◀️" if page > 0 else " ",
-                    "callback": self._back_from_module_cfg,
+                    "callback": self.inline__global_config,
                     "kwargs": {
                         "page": int(max(0, page - 1)),
                         "obj_type": obj_type,
@@ -2056,12 +2066,12 @@ class HikkariConfigMod(loader.Module):
                 },
                 {
                     "text": f"{page + 1}/{total_pages}",
-                    "callback": self._back_from_module_cfg,
+                    "callback": self.inline__global_config,
                     "kwargs": {"page": int(page), "obj_type": obj_type},
                 },
                 {
                     "text": "▶️" if page < total_pages - 1 else " ",
-                    "callback": self._back_from_module_cfg,
+                    "callback": self.inline__global_config,
                     "kwargs": {
                         "page": int(min(total_pages - 1, page + 1)),
                         "obj_type": obj_type,

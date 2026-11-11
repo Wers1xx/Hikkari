@@ -647,28 +647,63 @@ class Help(loader.Module):
                 # Module banner (# meta banner:) first; else help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    origin = getattr(module, "__origin__", "") or ""
                     src_head = ""
-                    if origin and not str(origin).startswith("<"):
-                        from pathlib import Path as _P
-                        pth = _P(str(origin))
+                    from pathlib import Path as _P
+                    # try all known paths to module source
+                    candidates = []
+                    for attr in ("__origin__", "__file__", "_source_path"):
+                        with contextlib.suppress(Exception):
+                            v = getattr(module, attr, None)
+                            if v and not str(v).startswith("<"):
+                                candidates.append(str(v))
+                    with contextlib.suppress(Exception):
+                        import inspect as _ins
+                        f = _ins.getfile(module.__class__)
+                        if f and not f.startswith("<"):
+                            candidates.append(f)
+                    for path in candidates:
+                        pth = _P(path)
                         if pth.is_file():
-                            # only first 8KB — enough for # meta banner, not full module
                             with open(pth, "r", encoding="utf-8", errors="ignore") as _bf:
-                                src_head = _bf.read(8192)
+                                src_head = _bf.read(16384)
+                            if src_head:
+                                break
+                    if not src_head:
+                        with contextlib.suppress(Exception):
+                            import inspect as _ins
+                            src_head = (_ins.getsource(module.__class__) or "")[:16384]
                     if not src_head:
                         with contextlib.suppress(Exception):
                             src_head = (inspect.getdoc(module) or "")[:4000]
                     if src_head:
-                        loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
-                        if loader_mod and hasattr(loader_mod, "_get_banner_url"):
-                            meta_b = loader_mod._get_banner_url(src_head)
+                        # Help's own parser
+                        with contextlib.suppress(Exception):
+                            meta_b = self._get_banner_url(src_head)
+                        if not meta_b:
+                            loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                            if loader_mod and hasattr(loader_mod, "_get_banner_url"):
+                                meta_b = loader_mod._get_banner_url(src_head)
                         if not meta_b:
                             import re as _re
-                            _m = _re.search(r"#\s*meta\s+banner:\s*(\S+)", src_head, _re.I)
-                            if _m:
-                                meta_b = _m.group(1).strip()
-                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
+                            for pat in (
+                                r"#\s*meta\s+banner:\s*(\S+)",
+                                r"#\s*banner:\s*(\S+)",
+                                r"banner_url\s*=\s*["'](https?://[^"']+)["']",
+                                r"banner\s*=\s*["'](https?://[^"']+)["']",
+                            ):
+                                _m = _re.search(pat, src_head, _re.I)
+                                if _m:
+                                    meta_b = _m.group(1).strip().strip(""'")
+                                    break
+                # Priority: module meta → already resolved banner_url → help config
+                burl = meta_b or banner_url or pick_banner_url(self.config.get("banner_url"))
+                if not burl and module is not None:
+                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
+                        with contextlib.suppress(Exception):
+                            v = getattr(module, attr, None)
+                            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                burl = v.strip()
+                                break
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
