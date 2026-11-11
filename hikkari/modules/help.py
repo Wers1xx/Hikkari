@@ -108,6 +108,124 @@ class Help(loader.Module):
         """True if outgoing Message; False for InlineCall/BotInlineCall/incoming."""
         return bool(getattr(message, "out", False))
 
+
+    async def _help_form(
+        self,
+        text: str,
+        message,
+        reply_markup=None,
+        *,
+        rich_html: str | None = None,
+        banner_url: str | None = None,
+    ):
+        """Same edit model as HikkariConfig._cfg_form: reuse unit, register buttons, edit in place."""
+        import contextlib
+        from ..inline.types import InlineCall, InlineMessage, BotInlineCall
+
+        markup = reply_markup or []
+        html = rich_html if rich_html is not None else str(text or "")
+
+        with contextlib.suppress(Exception):
+            from ..utils.rich_api import to_rich_compatible
+            html = to_rich_compatible(html)
+
+        banner_kw = {}
+        if banner_url and str(banner_url).startswith(("http://", "https://")):
+            banner_kw["photo"] = str(banner_url)
+
+        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
+
+        if is_nav:
+            unit_id = getattr(message, "unit_id", None)
+
+            # Update existing unit buttons so callbacks work (like config)
+            if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                self.inline._units[unit_id]["buttons"] = markup
+                self.inline._units[unit_id]["text"] = text
+                with contextlib.suppress(Exception):
+                    self.inline.generate_markup(unit_id)
+                markup = self.inline._units[unit_id].get("buttons") or markup
+
+                full = html
+                with contextlib.suppress(Exception):
+                    from ..utils.rich_api import markup_to_tg_rows
+                    btn_html = markup_to_tg_rows(markup, unit_id) or ""
+                    if btn_html:
+                        full = f"{html}\n{btn_html}"
+                self.inline._units[unit_id]["rich_message"] = full
+                self.inline._units[unit_id]["rich_html"] = full
+
+                mid = getattr(message, "inline_message_id", None)
+                if mid is None:
+                    mid = self.inline._units[unit_id].get("inline_message_id")
+
+                if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
+                    try:
+                        await self.inline.bot.edit_rich_message(
+                            html=full,
+                            inline_message_id=mid,
+                            reply_markup=None,
+                        )
+                        return True
+                    except Exception as e:
+                        logger.debug("help edit_rich_message: %s", e)
+
+                try:
+                    ok = await message.edit(
+                        text,
+                        reply_markup=markup,
+                        rich_message=full,
+                    )
+                    if ok is not False:
+                        return ok
+                except Exception as e:
+                    logger.debug("help message.edit: %s", e)
+
+            # No unit / edit failed → form creates unit (buttons registered)
+            with contextlib.suppress(Exception):
+                m = await self.inline.form(
+                    text=str(text)[:200] or "Help",
+                    message=message,
+                    reply_markup=markup,
+                    rich_message=html,
+                    silent=True,
+                    **banner_kw,
+                )
+                if m:
+                    return m
+            with contextlib.suppress(Exception):
+                return await self.inline.form(
+                    text=str(text)[:200] or "Help",
+                    message=message,
+                    reply_markup=markup,
+                    silent=True,
+                    **banner_kw,
+                )
+            return False
+
+        # Fresh send
+        with contextlib.suppress(Exception):
+            m = await self.inline.form(
+                text=str(text)[:200] or "Help",
+                message=message,
+                reply_markup=markup,
+                rich_message=html,
+                silent=True,
+                **banner_kw,
+            )
+            if m:
+                return m
+        with contextlib.suppress(Exception):
+            return await self.inline.form(
+                text=str(text)[:200] or "Help",
+                message=message,
+                reply_markup=markup,
+                silent=True,
+                **banner_kw,
+            )
+        return False
+
+
     async def client_ready(self):
         # Overwrite stale Help config from old installs (▪️ / 🪐)
         with contextlib.suppress(Exception):
@@ -409,6 +527,33 @@ class Help(loader.Module):
                                 )
                                 break
                 banner_url = self._get_banner_url(source) if source else None
+                # Module attrs / strings before Help config banner
+                if not banner_url and module is not None:
+                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
+                        with contextlib.suppress(Exception):
+                            v = getattr(module, attr, None)
+                            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                banner_url = v.strip()
+                                break
+                    if not banner_url:
+                        with contextlib.suppress(Exception):
+                            for sk in ("banner", "banner_url", "meta_banner"):
+                                v = module.strings.get(sk) if hasattr(module, "strings") else None
+                                if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                    banner_url = v.strip()
+                                    break
+                    if not banner_url:
+                        with contextlib.suppress(Exception):
+                            cfg = getattr(module, "config", None)
+                            if cfg is not None:
+                                for ck in ("banner", "banner_url", "meta_banner"):
+                                    try:
+                                        v = cfg[ck]
+                                    except Exception:
+                                        v = None
+                                    if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                        banner_url = v.strip()
+                                        break
                 if not banner_url:
                     banner_url = str(self.config.get("banner_url") or "").strip() or None
                 if banner_url and str(banner_url).startswith(("http://", "https://")):
@@ -568,12 +713,12 @@ class Help(loader.Module):
 
                 if getattr(self.inline, "init_complete", False):
                     try:
-                        m = await self.inline.form(
-                            text=str(_name)[:120] or "Help",
-                            message=message,
-                            rich_message=html,
+                        m = await self._help_form(
+                            str(_name)[:120] or "Help",
+                            message,
                             reply_markup=close_mk,
-                            silent=True,
+                            rich_html=html,
+                            banner_url=locals().get("banner_url"),
                         )
                         if m:
                             return
@@ -977,12 +1122,11 @@ class Help(loader.Module):
                     with contextlib.suppress(Exception):
                         from ..utils.rich_api import to_rich_compatible
                         html = to_rich_compatible(rich_message)
-                        m = await self.inline.form(
-                            text=str(reply)[:200] or "Hikkari Help",
-                            message=message,
-                            rich_message=html,
+                        m = await self._help_form(
+                            str(reply)[:200] or "Hikkari Help",
+                            message,
                             reply_markup=close_mk,
-                            silent=True,
+                            rich_html=html,
                         )
                         sent = bool(m)
                     if not sent:

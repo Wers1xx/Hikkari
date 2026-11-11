@@ -376,7 +376,33 @@ class Events(InlineUnit):
         return uid in self._inline_allowed_users(unit, button)
 
 
-    async def _callback_query_handler(
+    
+    def _unit_id_from_call(self, call) -> str | None:
+        """Resolve form unit_id from callback so edits stay on the same message."""
+        # 1) already on call
+        uid = getattr(call, "unit_id", None)
+        if uid:
+            return str(uid)
+        # 2) by inline_message_id
+        mid = getattr(call, "inline_message_id", None)
+        if mid and hasattr(self, "_units"):
+            for u, data in list(self._units.items()):
+                if not isinstance(data, dict):
+                    continue
+                if data.get("inline_message_id") == mid:
+                    return u
+        # 3) by chat + message id (bot message forms)
+        chat = getattr(call, "chat_id", None) or getattr(getattr(call, "message", None), "chat_id", None)
+        msgid = getattr(call, "message_id", None) or getattr(getattr(call, "message", None), "id", None)
+        if chat is not None and msgid is not None and hasattr(self, "_units"):
+            for u, data in list(self._units.items()):
+                if not isinstance(data, dict):
+                    continue
+                if data.get("chat") == chat and data.get("message_id") == msgid:
+                    return u
+        return None
+
+async def _callback_query_handler(
         self: "InlineManager",
         call,
         reply_markup: None | (list[list[dict[str, typing.Any]]]) = None,
@@ -422,7 +448,8 @@ class Events(InlineUnit):
                             break
                 try:
                     via = bool(getattr(call, "via_inline", False))
-                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                    _uid = self._unit_id_from_call(call)
+                    icall = (InlineCall if via else BotInlineCall)(call, self, _uid)
                 except Exception:
                     icall = call
                 if help_inst is not None:
@@ -478,7 +505,8 @@ class Events(InlineUnit):
                             break
                 try:
                     via = bool(getattr(call, "via_inline", False))
-                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                    _uid = self._unit_id_from_call(call)
+                    icall = (InlineCall if via else BotInlineCall)(call, self, _uid)
                 except Exception:
                     icall = call
                 if help_inst is not None:
@@ -522,7 +550,8 @@ class Events(InlineUnit):
                             break
                 try:
                     via = bool(getattr(call, "via_inline", False))
-                    icall = (InlineCall if via else BotInlineCall)(call, self, None)
+                    _uid = self._unit_id_from_call(call)
+                    icall = (InlineCall if via else BotInlineCall)(call, self, _uid)
                 except Exception:
                     icall = call
                 with contextlib.suppress(Exception):
