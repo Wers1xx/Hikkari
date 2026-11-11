@@ -264,6 +264,11 @@ class Help(loader.Module):
         return f"{base} ({', '.join(al)})"
 
     async def modhelp(self, message: Message, args: str, from_list: bool = False):
+        # Command path vs list path must stay separate
+        if not from_list:
+            self._help_nav_from_list = False
+        else:
+            self._help_nav_from_list = True
         exact = True
         if not (module := self.lookup(args)):
             if method := self.allmodules.dispatch(
@@ -602,15 +607,17 @@ class Help(loader.Module):
         )
 
     async def inline__help_show_list(self, call):
-        """Back from module help → full modules list."""
-        # silent answer — no toast text on top
+        """Back from module help → full modules list (list path only)."""
         with contextlib.suppress(Exception):
             await call.answer()
         self._help_nav_from_list = False
         try:
+            # Re-render full help list by editing current form/message
             await self.help(call)
         except Exception as e:
             logger.exception("inline__help_show_list: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer("Back failed", show_alert=True)
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
@@ -621,34 +628,43 @@ class Help(loader.Module):
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
+        """Open config for a module (from help)."""
         with contextlib.suppress(Exception):
             await call.answer()
         try:
-            cfg = None
-            for m in self.allmodules.modules:
-                cn = m.__class__.__name__.lower()
-                if "config" in cn and (hasattr(m, "inline__configure") or hasattr(m, "cfgcmd")):
-                    cfg = m
-                    break
+            cfg = (
+                self.lookup("HikkariConfig")
+                or self.lookup("HikkariConfigMod")
+                or self.lookup("Config")
+                or self.lookup("config")
+            )
             if cfg is None:
-                await call.answer("Config unavailable")
+                for m in self.allmodules.modules:
+                    if hasattr(m, "inline__configure"):
+                        cfg = m
+                        break
+            if cfg is None or not hasattr(cfg, "inline__configure"):
+                with contextlib.suppress(Exception):
+                    await call.answer("Config unavailable", show_alert=True)
                 return
-            if mod_name and hasattr(cfg, "inline__configure"):
-                mod = self.lookup(mod_name)
-                key = mod.strings.get("name", mod_name) if mod else mod_name
-                try:
-                    cfg._help_return_mod = key
-                    cfg._help_return_help = self
-                    cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
-                except Exception:
-                    pass
-                await cfg.inline__configure(call, key)
-                return
-            await call.answer("Config")
+            mod = self.lookup(mod_name) if mod_name else None
+            key = mod_name
+            if mod is not None:
+                with contextlib.suppress(Exception):
+                    key = mod.strings.get("name", mod.__class__.__name__)
+                if not key:
+                    key = mod.__class__.__name__
+            try:
+                cfg._help_return_mod = key
+                cfg._help_return_help = self
+                cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
+            except Exception:
+                pass
+            await cfg.inline__configure(call, str(key))
         except Exception as e:
-            logger.debug("help open cfg: %s", e)
+            logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):
-                await call.answer("Error")
+                await call.answer(str(e)[:60], show_alert=True)
 
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",

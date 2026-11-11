@@ -161,7 +161,17 @@ class LoaderMod(loader.Module):
 
         self._storage = RemoteStorage(self._client)
 
-        self.allmodules.add_aliases(settings.get("aliases", {}))
+        aliases = {}
+        with contextlib.suppress(Exception):
+            if settings is not None and not isinstance(settings, bool) and hasattr(settings, "get"):
+                raw = settings.get("aliases", {})
+                if isinstance(raw, dict):
+                    aliases = raw
+            if not aliases:
+                raw = self._db.get("CoreMod", "aliases", None) or self._db.get("Settings", "aliases", None)
+                if isinstance(raw, dict):
+                    aliases = raw
+        self.allmodules.add_aliases(aliases)
 
         main.hikkari.ready.set()
 

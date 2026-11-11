@@ -317,7 +317,6 @@ class CoreMod(loader.Module):
                 False,
                 lambda: "Rich mode: premium emoji / blockquotes in built-in texts",
                 validator=loader.validators.Boolean(),
-                on_change=self._on_rich_mode_change,
             ),
             loader.ConfigValue(
                 "rich_template",
@@ -351,6 +350,11 @@ class CoreMod(loader.Module):
             self._db.set("hikkari.rich", "template", str(self.config["rich_template"] or "{text}"))
         except Exception:
             pass
+
+    def _sync_rich_flag(self):
+        """Call after cfg change so rich_mode applies without restart."""
+        with contextlib.suppress(Exception):
+            self._db.set("hikkari.rich", "enabled", bool(self.config["rich_mode"]))
         # Restore aliases (with args) after all commands are registered
         with contextlib.suppress(Exception):
             stored = self.get("aliases", None)
