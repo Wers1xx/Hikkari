@@ -102,6 +102,12 @@ class Help(loader.Module):
             ),
         )
 
+
+    @staticmethod
+    def _is_out(message) -> bool:
+        """True if outgoing Message; False for InlineCall/BotInlineCall/incoming."""
+        return bool(getattr(message, "out", False))
+
     async def client_ready(self):
         # Overwrite stale Help config from old installs (▪️ / 🪐)
         with contextlib.suppress(Exception):
@@ -473,8 +479,9 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<b>Commands</b> ({len(rows)})\n"
+                        f"<details>\n<summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n"
+                        f"</details>"
                     )
                 if placeholders:
                     ph = self._plain_doc(placeholders, "")
@@ -858,7 +865,7 @@ class Help(loader.Module):
                             func=func,
                             user=(
                                 message.sender_id
-                                if not message.out
+                                if not self._is_out(message)
                                 else self._client.tg_id
                             ),
                         )
@@ -952,9 +959,9 @@ class Help(loader.Module):
                     sections = [("Модули", rich_modules)]
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
-                # expandable blockquote = collapsed by default in Telegram (details often open)
+                # closed by default (no open attr)
                 rich_message += "".join(
-                    f'<blockquote expandable><b>{title}</b>\n{content}</blockquote>'
+                    f"<details>\n<summary>{title}</summary>\n{content}\n</details>"
                     for title, content in sections
                     if content
                 )
@@ -1275,7 +1282,7 @@ class Help(loader.Module):
                 first_btns.append([{"text": "🔻 Close", "action": "close"}])
                 await self.inline.form(
                     page_text(0),
-                    message=message if message.out else utils.get_chat_id(message),
+                    message=message if self._is_out(message) else utils.get_chat_id(message),
                     reply_markup=first_btns,
                     silent=True,
                 )

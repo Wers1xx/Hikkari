@@ -202,6 +202,25 @@ class HikkariConfigMod(loader.Module):
 
         if is_nav:
             unit_id = getattr(message, "unit_id", None)
+            # Without unit, button callbacks become noop — create form unit
+            if not unit_id:
+                with contextlib.suppress(Exception):
+                    return await self.inline.form(
+                        text,
+                        message=message,
+                        reply_markup=markup,
+                        rich_message=html,
+                        silent=True,
+                        **banner_kw,
+                    )
+                with contextlib.suppress(Exception):
+                    return await self.inline.form(
+                        text,
+                        message=message,
+                        reply_markup=markup,
+                        silent=True,
+                        **banner_kw,
+                    )
             full_html, buttons = _prepare(html, unit_id, markup)
             mid = getattr(message, "inline_message_id", None)
             if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
