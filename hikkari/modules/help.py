@@ -526,12 +526,22 @@ class Help(loader.Module):
                         "callback": self.inline__help_show_list,
                         "_callback_data": "hhelp|list",
                     })
-                _row.append({
-                    "text": "⚙️ Config",
-                    "callback": self.inline__help_open_cfg,
-                    "args": (_mod_key,),
-                    "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
-                })
+                # Config only when module actually has configurable options
+                _has_cfg = False
+                with contextlib.suppress(Exception):
+                    _mc = getattr(module, "config", None)
+                    if _mc is not None:
+                        try:
+                            _has_cfg = len(list(_mc)) > 0
+                        except Exception:
+                            _has_cfg = bool(_mc)
+                if _has_cfg:
+                    _row.append({
+                        "text": "⚙️ Config",
+                        "callback": self.inline__help_open_cfg,
+                        "args": (_mod_key,),
+                        "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
+                    })
                 _row.append({
                     "text": "🔻 Закрыть",
                     "action": "close",
@@ -593,6 +603,7 @@ class Help(loader.Module):
 
     async def inline__help_show_list(self, call):
         """Back from module help → full modules list."""
+        # silent answer — no toast text on top
         with contextlib.suppress(Exception):
             await call.answer()
         self._help_nav_from_list = False
@@ -600,8 +611,6 @@ class Help(loader.Module):
             await self.help(call)
         except Exception as e:
             logger.exception("inline__help_show_list: %s", e)
-            with contextlib.suppress(Exception):
-                await call.answer(str(e)[:60], show_alert=True)
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:

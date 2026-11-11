@@ -92,10 +92,7 @@ def build_changelog_widget_html(
     branch: str = "master",
     lang: str = "ru",
 ) -> str:
-    """Native-looking interactive changelog widget (tabs, theme CSS vars).
-
-    Must stay under 32KB HTML / ~4KB zlib. No external assets, no network.
-    """
+    """Readable changelog widget. Simple HTML + light JS tabs. Under size limits."""
 
     def esc(s: str) -> str:
         return (
@@ -106,14 +103,8 @@ def build_changelog_widget_html(
             .replace('"', "&quot;")
         )
 
-    def items_json(key: str) -> str:
-        arr = commits.get(key) or []
-        return json.dumps(arr[:14], ensure_ascii=False)
-
-
-    _lang = (lang or "ru").lower()
-    _ru = _lang.startswith("ru")
-    _labels = {
+    _ru = (lang or "ru").lower().startswith("ru")
+    labels = {
         "added": "Добавлено" if _ru else "Added",
         "changed": "Изменено" if _ru else "Changed",
         "fixed": "Исправлено" if _ru else "Fixed",
@@ -121,113 +112,98 @@ def build_changelog_widget_html(
         "docs": "Документация" if _ru else "Docs",
         "other": "Прочее" if _ru else "Other",
     }
-    _title = "Обновление Hikkari" if _ru else "Hikkari Update"
-    _new = "НОВОЕ" if _ru else "NEW"
-    _empty = "Нет записей в этой категории" if _ru else "No entries in this category"
-    _cnt_suf = "записей · листай вкладки" if _ru else "items · swipe tabs"
+    title = "Обновление Hikkari" if _ru else "Hikkari Update"
+    empty = "Пока пусто" if _ru else "Empty"
+    hint = "Нажми вкладку, чтобы посмотреть изменения" if _ru else "Tap a tab to view changes"
 
     cur = esc((current or "")[:7])
     pend = esc((pending or "")[:7])
     br = esc(branch or "master")
 
-    data = {
-        "added": commits.get("added") or [],
-        "changed": commits.get("changed") or [],
-        "fixed": commits.get("fixed") or [],
-        "removed": commits.get("removed") or [],
-        "docs": commits.get("docs") or [],
-        "other": commits.get("other") or [],
-    }
-    # trim for size
-    for k in list(data.keys()):
-        data[k] = [str(x)[:80] for x in data[k][:12]]
+    data: dict[str, list[str]] = {}
+    for k in ("added", "changed", "fixed", "removed", "docs", "other"):
+        data[k] = [str(x)[:90] for x in (commits.get(k) or [])[:15]]
 
     payload = json.dumps(data, ensure_ascii=False)
+    labels_json = json.dumps(labels, ensure_ascii=False)
 
-    # Native palette via --tg-theme-*; interactive tabs via pure JS
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
+    # Compact, mobile-friendly, no overflow, explicit scroll
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-*{{box-sizing:border-box}}
-html,body{{margin:0;padding:0;background:transparent;color:var(--tg-theme-text-color,#111)}}
-body{{font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:10px 12px 18px}}
-.h{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}}
-.t{{font-weight:700;font-size:15px}}
-.b{{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
-background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff)}}
-.m{{font-size:12px;color:var(--tg-theme-hint-color,#888);margin-bottom:8px}}
-.m b{{color:var(--tg-theme-link-color,#2481cc);font-weight:600}}
-.tabs{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}}
-.tabs button{{font-size:12px;padding:5px 10px;border-radius:10px;border:0;
-background:var(--tg-theme-secondary-bg-color,rgba(0,0,0,.06));
-color:var(--tg-theme-text-color,#111)}}
-.tabs button.on{{background:var(--tg-theme-button-color,#2481cc);
-color:var(--tg-theme-button-text-color,#fff)}}
-.list{{max-height:160px;overflow:auto;-webkit-overflow-scrolling:touch}}
-.row{{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--tg-theme-section-separator-color,rgba(0,0,0,.08))}}
-.sha{{flex:0 0 auto;font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;
-color:var(--tg-theme-link-color,#2481cc)}}
-.msg{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.empty{{color:var(--tg-theme-hint-color,#888);padding:12px 0;text-align:center}}
-.cnt{{font-size:11px;color:var(--tg-theme-hint-color,#888);margin-top:6px}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+html,body{{height:100%;background:var(--tg-theme-bg-color,#1c1c1e);color:var(--tg-theme-text-color,#fff);
+font:14px/1.45 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif}}
+body{{padding:12px;display:flex;flex-direction:column;gap:8px}}
+.head{{display:flex;align-items:center;justify-content:space-between}}
+.head h1{{font-size:16px;font-weight:700}}
+.badge{{font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;
+background:var(--tg-theme-button-color,#2aabee);color:var(--tg-theme-button-text-color,#fff)}}
+.meta{{font-size:12px;color:var(--tg-theme-hint-color,#8e8e93)}}
+.meta b{{color:var(--tg-theme-link-color,#2aabee)}}
+.tabs{{display:flex;flex-wrap:wrap;gap:6px}}
+.tabs button{{border:0;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:600;
+background:var(--tg-theme-secondary-bg-color,#2c2c2e);color:var(--tg-theme-text-color,#fff)}}
+.tabs button.on{{background:var(--tg-theme-button-color,#2aabee);color:var(--tg-theme-button-text-color,#fff)}}
+.list{{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;min-height:120px;
+border-radius:12px;background:var(--tg-theme-secondary-bg-color,#2c2c2e);padding:8px 10px}}
+.row{{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px}}
+.row:last-child{{border-bottom:0}}
+.sha{{flex:0 0 auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
+color:var(--tg-theme-link-color,#2aabee)}}
+.msg{{flex:1;word-break:break-word}}
+.empty{{color:var(--tg-theme-hint-color,#8e8e93);text-align:center;padding:24px 8px}}
+.foot{{font-size:11px;color:var(--tg-theme-hint-color,#8e8e93)}}
 </style></head><body>
-<div class="h"><div class="t">{_title}</div><div class="b">{_new}</div></div>
-<div class="m"><b>{cur}</b> → <b>{pend}</b> · {br}</div>
+<div class="head"><h1>{title}</h1><span class="badge">NEW</span></div>
+<div class="meta"><b>{cur}</b> → <b>{pend}</b> · {br}</div>
 <div class="tabs" id="tabs"></div>
-<div class="list" id="list"></div>
-<div class="cnt" id="cnt"></div>
+<div class="list" id="list"><div class="empty">{hint}</div></div>
+<div class="foot" id="foot"></div>
 <script>
-var EMPTY="Нет записей";
 var D={payload};
-var order=[["added","{_labels["added"]}"],["changed","{_labels["changed"]}"],["fixed","{_labels["fixed"]}"],["removed","{_labels["removed"]}"],["docs","{_labels["docs"]}"],["other","{_labels["other"]}"]];
-var cur="added";
-function pick(){{
-  for(var i=0;i<order.length;i++){{
-    var k=order[i][0];
-    if((D[k]||[]).length){{cur=k;return}}
-  }}
-  cur="other";
+var L={labels_json};
+var order=["added","changed","fixed","removed","docs","other"];
+var cur="";
+function first(){{
+  for(var i=0;i<order.length;i++){{ if((D[order[i]]||[]).length){{cur=order[i];return}}}}
+  cur="added";
 }}
 function render(){{
   var tabs=document.getElementById("tabs");
   var list=document.getElementById("list");
-  var cnt=document.getElementById("cnt");
+  var foot=document.getElementById("foot");
   tabs.innerHTML="";
   for(var i=0;i<order.length;i++){{
-    var k=order[i][0], label=order[i][1], n=(D[k]||[]).length;
-    if(!n && k!==cur) continue;
+    var k=order[i], n=(D[k]||[]).length;
+    if(!n) continue;
     var b=document.createElement("button");
-    b.textContent=label+(n?(" "+n):"");
+    b.textContent=(L[k]||k)+" "+n;
     if(k===cur) b.className="on";
-    b.onclick=(function(key){{return function(){{cur=key;render();
-      try{{TelegramWidget.HapticFeedback.impactOccurred("light")}}catch(e){{}}
-    }}}})(k);
+    b.onclick=(function(key){{return function(){{cur=key;render();}}}})(k);
     tabs.appendChild(b);
   }}
   var items=D[cur]||[];
-  list.innerHTML="";
   if(!items.length){{
-    list.innerHTML='<div class="empty">Нет записей в этой категории</div>';
+    list.innerHTML='<div class="empty">{empty}</div>';
   }} else {{
+    var html="";
     for(var j=0;j<items.length;j++){{
-      var s=String(items[j]);
-      var sp=s.indexOf(" ");
+      var s=String(items[j]), sp=s.indexOf(" ");
       var sha=sp>0?s.slice(0,sp):s;
-      var msg=sp>0?s.slice(sp+1):"";
-      var row=document.createElement("div");
-      row.className="row";
-      row.innerHTML='<span class="sha">'+sha+'</span><span class="msg">'+msg+'</span>';
-      list.appendChild(row);
+      var msg=sp>0?s.slice(sp+1):s;
+      html+='<div class="row"><span class="sha">'+sha+'</span><span class="msg">'+msg+'</span></div>';
     }}
+    list.innerHTML=html;
   }}
   var total=0; for(var k in D) total+=(D[k]||[]).length;
-  cnt.textContent=items.length+" / "+total+" коммитов · листай вкладки";
+  foot.textContent=items.length+" / "+total;
 }}
-pick(); render();
+first(); render();
 try{{TelegramWidget.ready()}}catch(e){{}}
 </script>
 </body></html>"""
-    return html
+
 
 
 async def send_widget(
@@ -251,9 +227,15 @@ async def send_widget(
         "chat_id": chat_id,
         "html": html,
     }
-    # 0 = automatic size (docs: omit or 0 for auto)
-    payload["width"] = int(width) if width else 300
-    payload["height"] = int(height) if height else 260
+    # Prefer larger readable area; 0 = let client auto-size when supported
+    if width and int(width) > 0:
+        payload["width"] = int(width)
+    else:
+        payload["width"] = 360
+    if height and int(height) > 0:
+        payload["height"] = int(height)
+    else:
+        payload["height"] = 420
     if caption:
         payload["caption"] = caption[:1024]
         if parse_mode:

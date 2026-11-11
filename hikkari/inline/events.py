@@ -397,7 +397,7 @@ class Events(InlineUnit):
         if isinstance(call_data, str) and call_data == "hhelp|list":
             try:
                 with contextlib.suppress(Exception):
-                    await call.answer("Help")
+                    await call.answer()
                 help_inst = None
                 client = getattr(self, "_client", None) or getattr(self, "client", None)
                 candidates = []
