@@ -621,13 +621,12 @@ class Help(loader.Module):
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
-            # Do NOT treat as list-nav unless we came from list originally
             fl = bool(getattr(self, "_help_nav_from_list", False))
             await self.modhelp(call, mod_name or "", from_list=fl)
         except Exception as e:
             logger.debug("help back from cfg: %s", e)
 
-        async def inline__help_open_cfg(self, call, mod_name: str = ""):
+    async def inline__help_open_cfg(self, call, mod_name: str = ""):
         """Open config for a module (from help list or command help)."""
         with contextlib.suppress(Exception):
             await call.answer()
