@@ -371,12 +371,18 @@ class HikkariInfoMod(loader.Module):
                     elif tmpl:
                         html = str(tmpl)
                     else:
+                        star = '<tg-emoji emoji-id="5283176512747507510">✨</tg-emoji>'
                         html = (
-                            "<p><b>Owner</b>: {me}</p>"
-                            "<p><b>Version</b>: {version}</p>"
-                            "<p><b>Prefix</b>: {prefix}</p>"
-                            "<p><b>Uptime</b>: {uptime}</p>"
-                            "<p><b>Ping</b>: {ping}</p>"
+                            f"<p>{star} <b>Hikkari Userbot</b></p>"
+                            "<table bordered striped compact>"
+                            "<tr><td><b>Owner</b></td><td>{me}</td></tr>"
+                            "<tr><td><b>Version</b></td><td>{version}</td></tr>"
+                            "<tr><td><b>Build</b></td><td>{build}</td></tr>"
+                            "<tr><td><b>Prefix</b></td><td>{prefix}</td></tr>"
+                            "<tr><td><b>Uptime</b></td><td>{uptime}</td></tr>"
+                            "<tr><td><b>Ping</b></td><td>{ping}</td></tr>"
+                            "<tr><td><b>Platform</b></td><td>{platform}</td></tr>"
+                            "</table>"
                         )
                     html = _format_info_template(html, data)
                     banner = self.config.get("banner_url")
@@ -417,19 +423,24 @@ class HikkariInfoMod(loader.Module):
         elif tmpl:
             text = str(tmpl)
         else:
+            # Classic Hikkari (Heroku-like tree, slightly own style)
             text = (
-                "<b>Owner</b>: {me}\n"
-                "<b>Version</b>: {version}\n"
-                "<b>Prefix</b>: {prefix}\n"
-                "<b>Uptime</b>: {uptime}\n"
-                "<b>Branch</b>: {branch}\n"
-                "<b>CPU</b>: {cpu_usage}\n"
-                "<b>RAM</b>: {ram_usage}\n"
-                "<b>Ping</b>: {ping}\n"
-                "<b>Update</b>: {upd}\n"
-                "<b>Host</b>: {platform}\n"
-                "<b>OS</b>: {os}\n"
-                "<b>Python</b>: {python_ver}"
+                "<b>✨ Hikkari Userbot</b>\n"
+                "<blockquote>"
+                "┌ <b>Owner</b>: {me}\n"
+                "├ <b>Version</b>: {version}\n"
+                "├ <b>Build</b>: {build}\n"
+                "├ <b>Prefix</b>: <code>{prefix}</code>\n"
+                "├ <b>Uptime</b>: {uptime}\n"
+                "├ <b>Branch</b>: {branch}\n"
+                "├ <b>CPU</b>: {cpu_usage}%\n"
+                "├ <b>RAM</b>: {ram_usage}\n"
+                "├ <b>Ping</b>: {ping} ms\n"
+                "├ <b>Update</b>: {upd}\n"
+                "├ <b>Platform</b>: {platform}\n"
+                "├ <b>OS</b>: {os}\n"
+                "└ <b>Python</b>: {python_ver}"
+                "</blockquote>"
             )
         text = _format_info_template(text, data)
 

@@ -317,6 +317,7 @@ class CoreMod(loader.Module):
                 False,
                 lambda: "Rich mode: premium emoji / blockquotes in built-in texts",
                 validator=loader.validators.Boolean(),
+                on_change=self._on_rich_mode_change,
             ),
             loader.ConfigValue(
                 "rich_template",

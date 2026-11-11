@@ -263,7 +263,7 @@ class Help(loader.Module):
             return base
         return f"{base} ({', '.join(al)})"
 
-    async def modhelp(self, message: Message, args: str):
+    async def modhelp(self, message: Message, args: str, from_list: bool = False):
         exact = True
         if not (module := self.lookup(args)):
             if method := self.allmodules.dispatch(
@@ -517,29 +517,33 @@ class Help(loader.Module):
                     html = inject_banner_html(html, burl, force=True)
 
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # Back ONLY when opened from modules list (InlineCall), not via .help Name
-                _from_list = False
-                with contextlib.suppress(Exception):
-                    _tn = type(message).__name__
-                    _from_list = _tn in ("InlineCall", "BotInlineCall") or bool(
-                        getattr(message, "via_inline", False)
-                    )
+                # from_list: explicit flag from hmod callback (not type-guess)
+                _from_list = bool(from_list) or bool(getattr(self, "_help_nav_from_list", False))
                 _row = []
                 if _from_list:
                     _row.append({
                         "text": "◀️ Назад",
                         "callback": self.inline__help_show_list,
+                        "_callback_data": "hhelp|list",
                     })
                 _row.append({
                     "text": "⚙️ Config",
                     "callback": self.inline__help_open_cfg,
                     "args": (_mod_key,),
+                    "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
                 })
                 _row.append({
                     "text": "🔻 Закрыть",
                     "action": "close",
+                    "_callback_data": "hhelp|close",
                 })
                 close_mk = [_row]
+                # Rich shows tg-buttons in HTML; classic also gets reply_markup
+                with contextlib.suppress(Exception):
+                    from ..utils.rich_api import markup_to_tg_rows
+                    _tb = markup_to_tg_rows(close_mk, "") or ""
+                    if _tb:
+                        html = f"{html}\n{_tb}"
 
                 if getattr(self.inline, "init_complete", False):
                     try:
@@ -554,6 +558,17 @@ class Help(loader.Module):
                             return
                     except Exception as e:
                         logger.debug("help form rich failed: %s", e)
+                    # fallback rich without form unit
+                    with contextlib.suppress(Exception):
+                        m = await self.inline.rich(
+                            message,
+                            html,
+                            title=str(_name)[:64],
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        if m:
+                            return
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
@@ -580,6 +595,7 @@ class Help(loader.Module):
         """Back from module help → full modules list."""
         with contextlib.suppress(Exception):
             await call.answer()
+        self._help_nav_from_list = False
         try:
             await self.help(call)
         except Exception as e:
@@ -589,7 +605,9 @@ class Help(loader.Module):
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
-            await self.modhelp(call, mod_name or "")
+            # Do NOT treat as list-nav unless we came from list originally
+            fl = bool(getattr(self, "_help_nav_from_list", False))
+            await self.modhelp(call, mod_name or "", from_list=fl)
         except Exception as e:
             logger.debug("help back from cfg: %s", e)
 
@@ -612,6 +630,7 @@ class Help(loader.Module):
                 try:
                     cfg._help_return_mod = key
                     cfg._help_return_help = self
+                    cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
                 except Exception:
                     pass
                 await cfg.inline__configure(call, key)
@@ -877,7 +896,7 @@ class Help(loader.Module):
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
                 rich_message += "".join(
-                    f"<details><summary>{title}</summary>{content}</details>"
+                    f"<details>{chr(10)}<summary>{title}</summary>{chr(10)}{content}{chr(10)}</details>"
                     for title, content in sections
                     if content
                 )

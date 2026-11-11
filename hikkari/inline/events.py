@@ -529,7 +529,8 @@ class Events(InlineUnit):
                     await call.answer(("Help · " + mod_name)[:60])
                 if help_inst is not None:
                     try:
-                        await help_inst.modhelp(icall, mod_name)
+                        help_inst._help_nav_from_list = True
+                        await help_inst.modhelp(icall, mod_name, from_list=True)
                     except Exception as e:
                         logger.debug("hmod modhelp: %s", e)
                         with contextlib.suppress(Exception):
