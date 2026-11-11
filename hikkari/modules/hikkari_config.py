@@ -1501,6 +1501,19 @@ class HikkariConfigMod(loader.Module):
     ):
 
         module = self.lookup(mod)
+        if module is None:
+            # retry by class name / loose match
+            for m in list(getattr(self.allmodules, "modules", []) or []):
+                names = {m.__class__.__name__}
+                with contextlib.suppress(Exception):
+                    names.add(str(m.strings.get("name", "")))
+                if str(mod) in names or str(mod).lower() in {x.lower() for x in names if x}:
+                    module = m
+                    break
+        if module is None or not getattr(module, "config", None):
+            with contextlib.suppress(Exception):
+                await call.answer("Module/config not found", show_alert=True)
+            return
         grouped = module.config.grouped_options()
 
         def fmt_value(option: str) -> str:

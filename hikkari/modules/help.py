@@ -606,8 +606,7 @@ class Help(loader.Module):
         )
 
     async def inline__help_show_list(self, call):
-        """Back from module help → full modules list."""
-        # silent answer — no toast text on top
+        """Back → modules list. Always EDIT current form, never send a new one."""
         with contextlib.suppress(Exception):
             await call.answer()
         self._help_nav_from_list = False
@@ -615,6 +614,8 @@ class Help(loader.Module):
             await self.help(call)
         except Exception as e:
             logger.exception("inline__help_show_list: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer("Back failed", show_alert=True)
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
@@ -625,7 +626,7 @@ class Help(loader.Module):
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open config for a module (from help)."""
+        """Open config for a module (from help). Always edit current form."""
         with contextlib.suppress(Exception):
             await call.answer()
         try:
@@ -644,26 +645,48 @@ class Help(loader.Module):
                 with contextlib.suppress(Exception):
                     await call.answer("Config unavailable", show_alert=True)
                 return
+
             key = (mod_name or "").strip()
-            mod = self.lookup(key) if key else None
-            if mod is not None:
+            mod = None
+            if key:
+                mod = self.lookup(key)
+                if mod is None:
+                    # fuzzy: class name / strings name
+                    for m in list(getattr(self.allmodules, "modules", []) or []):
+                        names = {
+                            m.__class__.__name__,
+                            getattr(m, "name", None),
+                        }
+                        with contextlib.suppress(Exception):
+                            names.add(str(m.strings.get("name", "")))
+                        names = {str(x) for x in names if x}
+                        if key in names or key.lower() in {x.lower() for x in names}:
+                            mod = m
+                            break
+            if mod is None:
                 with contextlib.suppress(Exception):
-                    key = str(mod.strings.get("name", mod.__class__.__name__))
-                if not key:
-                    key = mod.__class__.__name__
-            if not key:
-                with contextlib.suppress(Exception):
-                    await call.answer("No module", show_alert=True)
+                    await call.answer("Module not found", show_alert=True)
                 return
+            if not getattr(mod, "config", None):
+                with contextlib.suppress(Exception):
+                    await call.answer("No config", show_alert=True)
+                return
+
+            # Prefer strings name then class name for configure lookup
+            key = mod.__class__.__name__
+            with contextlib.suppress(Exception):
+                key = str(mod.strings.get("name", key)) or key
+
             with contextlib.suppress(Exception):
                 cfg._help_return_mod = key
                 cfg._help_return_help = self
                 cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
+
             await cfg.inline__configure(call, str(key))
         except Exception as e:
             logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):
-                await call.answer(str(e)[:60], show_alert=True)
+                await call.answer(str(e)[:80], show_alert=True)
 
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
@@ -684,6 +707,9 @@ class Help(loader.Module):
                 args = ""
             if args is False:
                 args = ""
+        _is_form_edit = _tn in ("InlineCall", "BotInlineCall") or bool(
+            getattr(message, "inline_message_id", None)
+        )
 
         raw_banner = str(self.config["banner_url"] or "").strip()
         # Reject garbage saved from broken inline input (transfer msg, etc.)
@@ -926,8 +952,9 @@ class Help(loader.Module):
                     sections = [("Модули", rich_modules)]
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
+                # expandable blockquote = collapsed by default in Telegram (details often open)
                 rich_message += "".join(
-                    f"<details>{chr(10)}<summary>{title}</summary>{chr(10)}{content}{chr(10)}</details>"
+                    f'<blockquote expandable><b>{title}</b>\n{content}</blockquote>'
                     for title, content in sections
                     if content
                 )
@@ -952,6 +979,19 @@ class Help(loader.Module):
                         )
                         sent = bool(m)
                     if not sent:
+                        # Back/list from existing form: never open a second message
+                        if _is_form_edit:
+                            with contextlib.suppress(Exception):
+                                from ..utils.rich_api import to_rich_compatible
+                                html2 = to_rich_compatible(rich_message)
+                                if hasattr(message, "edit"):
+                                    await message.edit(
+                                        text=str(reply)[:200] or "Hikkari Help",
+                                        reply_markup=close_mk,
+                                    )
+                                    sent = True
+                            if sent:
+                                return
                         with contextlib.suppress(Exception):
                             m = await self.inline.rich(
                                 message,
