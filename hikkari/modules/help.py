@@ -264,7 +264,6 @@ class Help(loader.Module):
         return f"{base} ({', '.join(al)})"
 
     async def modhelp(self, message: Message, args: str, from_list: bool = False):
-        # Command path vs list path must stay separate
         if not from_list:
             self._help_nav_from_list = False
         else:
@@ -607,27 +606,26 @@ class Help(loader.Module):
         )
 
     async def inline__help_show_list(self, call):
-        """Back from module help → full modules list (list path only)."""
+        """Back from module help → full modules list."""
+        # silent answer — no toast text on top
         with contextlib.suppress(Exception):
             await call.answer()
         self._help_nav_from_list = False
         try:
-            # Must open LIST, not re-parse form text as module name
             await self.help(call)
         except Exception as e:
             logger.exception("inline__help_show_list: %s", e)
-            with contextlib.suppress(Exception):
-                await call.answer("Back failed", show_alert=True)
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
+            # Do NOT treat as list-nav unless we came from list originally
             fl = bool(getattr(self, "_help_nav_from_list", False))
             await self.modhelp(call, mod_name or "", from_list=fl)
         except Exception as e:
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open config for a module (from help list or command help)."""
+        """Open config for a module (from help)."""
         with contextlib.suppress(Exception):
             await call.answer()
         try:
@@ -646,7 +644,6 @@ class Help(loader.Module):
                 with contextlib.suppress(Exception):
                     await call.answer("Config unavailable", show_alert=True)
                 return
-
             key = (mod_name or "").strip()
             mod = self.lookup(key) if key else None
             if mod is not None:
@@ -658,18 +655,15 @@ class Help(loader.Module):
                 with contextlib.suppress(Exception):
                     await call.answer("No module", show_alert=True)
                 return
-
             with contextlib.suppress(Exception):
                 cfg._help_return_mod = key
                 cfg._help_return_help = self
                 cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
-
             await cfg.inline__configure(call, str(key))
         except Exception as e:
             logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):
                 await call.answer(str(e)[:60], show_alert=True)
-
 
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
@@ -679,7 +673,7 @@ class Help(loader.Module):
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        # InlineCall/BotInlineCall: message body is form text, NOT command args
+        # Form callbacks pass InlineCall — body text is NOT command args
         _tn = type(message).__name__
         if _tn in ("InlineCall", "BotInlineCall") or getattr(message, "inline_message_id", None):
             args = ""
