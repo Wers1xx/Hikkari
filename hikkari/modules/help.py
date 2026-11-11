@@ -688,14 +688,12 @@ class Help(loader.Module):
                             for pat in (
                                 r"#\s*meta\s+banner:\s*(\S+)",
                                 r"#\s*banner:\s*(\S+)",
-                                r"banner_url\s*=\s*["'](https?://[^"']+)["']",
-                                r"banner\s*=\s*["'](https?://[^"']+)["']",
                             ):
                                 _m = _re.search(pat, src_head, _re.I)
                                 if _m:
-                                    meta_b = _m.group(1).strip().strip(""'")
+                                    meta_b = _m.group(1).strip().strip(chr(34) + chr(39))
                                     break
-                # Priority: module meta → already resolved banner_url → help config
+
                 burl = meta_b or banner_url or pick_banner_url(self.config.get("banner_url"))
                 if not burl and module is not None:
                     for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
