@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class Help(loader.Module):
+class Help(loader.Module):  # HELP_BANNER_REGEX_OK
     """Shows help for modules and commands"""
 
     strings = {"close_btn": "🔻 Закрыть",
