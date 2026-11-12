@@ -154,9 +154,9 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     self.inline.generate_markup(unit_id)
                 btns = self.inline._units[unit_id].get("buttons") or btns
             btn_html = ""
+            full = str(html_body or "")
             with contextlib.suppress(Exception):
                 from ..utils.rich_api import markup_to_tg_rows
-                # strip old rows then append
                 import re as _re
                 base = _re.sub(
                     r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
@@ -166,8 +166,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 )
                 btn_html = markup_to_tg_rows(btns, unit_id or "") if btns else ""
                 full = base.rstrip() + (("\n" + btn_html) if btn_html else "")
-            else:
-                full = str(html_body or "")
+
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["rich_message"] = full
                 self.inline._units[unit_id]["rich_html"] = full
