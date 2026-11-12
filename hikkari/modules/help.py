@@ -112,6 +112,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
 
 
+
     async def _help_form(
         self,
         text: str,
@@ -121,57 +122,85 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         rich_html: str | None = None,
         banner_url: str | None = None,
     ):
-        """Help UI: pure Rich body (details / banners) + buttons in HTML after generate_markup.
-
-        Config first-open embeds <tg-button> in HTML and that works. Classic form
-        without rich_message flattens details into a wall of text — do not do that.
-        form.py must NOT also attach Bot API keyboard when HTML already has tg-button.
-        """
+        """Same path as HikkariConfig._cfg_form — pure Rich + tg-buttons via inline.rich."""
         import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         markup = reply_markup or []
-        body = str(rich_html if rich_html is not None else text or "")
-        with contextlib.suppress(Exception):
-            from ..utils.rich_api import to_rich_compatible
-            body = to_rich_compatible(body)
-
-        if banner_url and str(banner_url).startswith(("http://", "https://")):
-            with contextlib.suppress(Exception):
-                from ..utils.rich_api import inject_banner_html
-                body = inject_banner_html(body, str(banner_url), force=True)
-
         banner_kw = {}
         if banner_url and str(banner_url).startswith(("http://", "https://")):
             banner_kw["photo"] = str(banner_url)
 
-        def _prepare(html_body, unit_id, buttons):
-            btns = buttons or []
+        client = getattr(self, "_client", None) or getattr(self, "client", None)
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(client, self._db))
+
+        with contextlib.suppress(Exception):
+            await self.inline.ensure_inline_ready()
+
+        body = str(rich_html if rich_html is not None else text or "")
+
+        if not use_rich:
+            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+                try:
+                    return await message.edit(
+                        body,
+                        reply_markup=markup,
+                        **{k: banner_kw[k] for k in ("photo", "video", "gif") if k in banner_kw},
+                    )
+                except Exception:
+                    pass
+                try:
+                    return await message.edit(body, reply_markup=markup)
+                except Exception:
+                    pass
+            return await self.inline.form(
+                body,
+                message=message,
+                reply_markup=markup,
+                silent=True,
+                **banner_kw,
+            )
+
+        # ── Pure Rich (identical idea to config) ──
+        from ..utils.rich_api import (
+            inject_banner_html,
+            to_rich_compatible,
+            pick_banner_url,
+            markup_to_tg_rows,
+        )
+
+        html = body
+        with contextlib.suppress(Exception):
+            html = to_rich_compatible(body)
+
+        burl = None
+        if banner_url and str(banner_url).startswith(("http://", "https://")):
+            burl = str(banner_url)
+        if not burl:
+            with contextlib.suppress(Exception):
+                burl = pick_banner_url(self.config.get("banner_url"))
+        if burl:
+            with contextlib.suppress(Exception):
+                html = inject_banner_html(html, burl, force=True)
+
+        def _prepare(h, unit_id, buttons):
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = btns
+                self.inline._units[unit_id]["buttons"] = buttons
                 self.inline._units[unit_id]["text"] = text
                 with contextlib.suppress(Exception):
                     self.inline.generate_markup(unit_id)
-                btns = self.inline._units[unit_id].get("buttons") or btns
+                buttons = self.inline._units[unit_id].get("buttons") or buttons
             btn_html = ""
-            full = str(html_body or "")
             with contextlib.suppress(Exception):
-                from ..utils.rich_api import markup_to_tg_rows
-                import re as _re
-                base = _re.sub(
-                    r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
-                    "",
-                    str(html_body or ""),
-                    flags=_re.I | _re.S,
-                )
-                btn_html = markup_to_tg_rows(btns, unit_id or "") if btns else ""
-                full = base.rstrip() + (("\n" + btn_html) if btn_html else "")
-
+                btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
+            full = h + ("\n" + btn_html if btn_html else "")
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["rich_message"] = full
                 self.inline._units[unit_id]["rich_html"] = full
-                self.inline._units[unit_id]["buttons"] = btns
-            return full, btns
+            return full, buttons
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
@@ -186,56 +215,89 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                             with contextlib.suppress(Exception):
                                 message.unit_id = uid
                             break
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                full, markup = _prepare(body, unit_id, markup)
-                mid = getattr(message, "inline_message_id", None) or self.inline._units[unit_id].get(
-                    "inline_message_id"
-                )
-                if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                    try:
-                        await self.inline.bot.edit_rich_message(
-                            html=full,
-                            inline_message_id=mid,
-                            reply_markup=None,
-                        )
-                        return True
-                    except Exception as e:
-                        logger.debug("help edit_rich: %s", e)
+            if not unit_id:
+                with contextlib.suppress(Exception):
+                    return await self.inline.rich(
+                        message,
+                        html,
+                        reply_markup=markup,
+                        silent=True,
+                        title=str(text)[:64] or "Help",
+                        description="Hikkari Help",
+                        **({"thumbnail_url": burl} if burl else {}),
+                    )
+                with contextlib.suppress(Exception):
+                    return await self.inline.form(
+                        text,
+                        message=message,
+                        reply_markup=markup,
+                        rich_message=html,
+                        silent=True,
+                        **banner_kw,
+                    )
+            full_html, buttons = _prepare(html, unit_id, markup)
+            mid = getattr(message, "inline_message_id", None)
+            if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
+                mid = self.inline._units[unit_id].get("inline_message_id")
+
+            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
-                    ok = await message.edit(text, reply_markup=None, rich_message=full)
-                    if ok is not False:
-                        return ok
+                    await self.inline.bot.edit_rich_message(
+                        html=full_html,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    return True
                 except Exception as e:
-                    logger.debug("help edit: %s", e)
+                    logger.debug("help edit_rich_message: %s", e)
 
-            with contextlib.suppress(Exception):
-                m = await self.inline.form(
-                    text=str(text)[:200] or "Help",
-                    message=message,
-                    reply_markup=markup,
-                    rich_message=body,
-                    silent=True,
-                    **banner_kw,
+            try:
+                ok = await message.edit(
+                    text,
+                    reply_markup=None,
+                    rich_message=full_html,
                 )
-                if m:
-                    return m
-            return False
+                if ok is not False:
+                    return ok
+            except Exception:
+                pass
 
-        # first open: form with rich_message; form handler embeds buttons after generate_markup
-        with contextlib.suppress(Exception):
-            await self.inline.ensure_inline_ready()
-        with contextlib.suppress(Exception):
-            m = await self.inline.form(
-                text=str(text)[:200] or "Help",
-                message=message,
+            try:
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=markup,
+                    silent=True,
+                    title=str(text)[:64] or "Help",
+                    description="Hikkari Help",
+                )
+            except Exception:
+                return False
+
+        # Fresh open — same as config: inline.rich(..., reply_markup=...)
+        try:
+            return await self.inline.rich(
+                message,
+                html,
                 reply_markup=markup,
-                rich_message=body,
                 silent=True,
-                **banner_kw,
+                title=str(text)[:64] or "Help",
+                description="Hikkari Help",
+                **({"thumbnail_url": burl} if burl else {}),
             )
-            if m:
-                return m
-        return False
+        except Exception:
+            try:
+                full_html, _ = _prepare(html, None, markup)
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=markup,
+                    silent=True,
+                    title=str(text)[:64] or "Help",
+                    description="Hikkari Help",
+                )
+            except Exception:
+                return False
 
 
     async def client_ready(self):
