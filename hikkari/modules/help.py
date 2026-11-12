@@ -713,7 +713,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     _row.append({
                         "text": "◀️ Назад",
                         "callback": self.inline__help_show_list,
-                        "_callback_data": "hhelp|list",
                     })
                 # Config only when module actually has configurable options
                 _has_cfg = False
@@ -721,29 +720,22 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     _mc = getattr(module, "config", None)
                     if _mc is not None:
                         try:
-                            _has_cfg = len(list(_mc)) > 0
+                            _has_cfg = bool(len(_mc))
                         except Exception:
-                            _has_cfg = bool(_mc)
+                            _has_cfg = True
                 if _has_cfg:
+                    _mod_key = module.strings.get("name", module.__class__.__name__)
                     _row.append({
                         "text": "⚙️ Config",
                         "callback": self.inline__help_open_cfg,
                         "args": (_mod_key,),
-                        "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
                     })
                 _row.append({
                     "text": "🔻 Закрыть",
                     "action": "close",
-                    "_callback_data": "hhelp|close",
                 })
                 close_mk = [_row]
                 # Rich shows tg-buttons in HTML; classic also gets reply_markup
-                with contextlib.suppress(Exception):
-                    from ..utils.rich_api import markup_to_tg_rows
-                    _tb = markup_to_tg_rows(close_mk, "") or ""
-                    if _tb:
-                        html = f"{html}\n{_tb}"
-
                 if getattr(self.inline, "init_complete", False):
                     try:
                         m = await self._help_form(
@@ -811,43 +803,37 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open config for a module (from help). Always edit current form."""
+        """Open module config — same as first working implementation."""
         with contextlib.suppress(Exception):
             await call.answer()
         try:
-            cfg = (
-                self.lookup("HikkariConfig")
-                or self.lookup("HikkariConfigMod")
-                or self.lookup("ConfigMod")
-                or self.lookup("config")
-            )
+            cfg = None
+            for m in list(getattr(self.allmodules, "modules", []) or []):
+                cn = m.__class__.__name__.lower()
+                if "config" in cn and hasattr(m, "inline__configure"):
+                    cfg = m
+                    break
             if cfg is None:
-                for m in list(getattr(self.allmodules, "modules", []) or []):
-                    if hasattr(m, "inline__configure"):
-                        cfg = m
-                        break
+                cfg = (
+                    self.lookup("HikkariConfig")
+                    or self.lookup("HikkariConfigMod")
+                    or self.lookup("config")
+                )
             if cfg is None or not hasattr(cfg, "inline__configure"):
                 with contextlib.suppress(Exception):
                     await call.answer("Config unavailable", show_alert=True)
                 return
 
             key = (mod_name or "").strip()
-            mod = None
-            if key:
-                mod = self.lookup(key)
-                if mod is None:
-                    # fuzzy: class name / strings name
-                    for m in list(getattr(self.allmodules, "modules", []) or []):
-                        names = {
-                            m.__class__.__name__,
-                            getattr(m, "name", None),
-                        }
-                        with contextlib.suppress(Exception):
-                            names.add(str(m.strings.get("name", "")))
-                        names = {str(x) for x in names if x}
-                        if key in names or key.lower() in {x.lower() for x in names}:
-                            mod = m
-                            break
+            mod = self.lookup(key) if key else None
+            if mod is None and key:
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    names = {m.__class__.__name__}
+                    with contextlib.suppress(Exception):
+                        names.add(str(m.strings.get("name", "")))
+                    if key in names or key.lower() in {x.lower() for x in names if x}:
+                        mod = m
+                        break
             if mod is None:
                 with contextlib.suppress(Exception):
                     await call.answer("Module not found", show_alert=True)
@@ -857,7 +843,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     await call.answer("No config", show_alert=True)
                 return
 
-            # Prefer strings name then class name for configure lookup
             key = mod.__class__.__name__
             with contextlib.suppress(Exception):
                 key = str(mod.strings.get("name", key)) or key
@@ -872,6 +857,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):
                 await call.answer(str(e)[:80], show_alert=True)
+
 
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
