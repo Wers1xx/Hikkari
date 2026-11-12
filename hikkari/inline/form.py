@@ -1001,15 +1001,21 @@ class Form(InlineUnit):
                 ok = False
                 if token and qid is not None:
                     _bot_kb = None
-                    with contextlib.suppress(Exception):
-                        _rows = None
+                    # Config pure-rich already embeds <tg-button-row> in HTML.
+                    # Attaching Bot API keyboard on top of that duplicates buttons.
+                    _has_tg_btn = "<tg-button" in (html or "").lower()
+                    if not _has_tg_btn:
                         with contextlib.suppress(Exception):
-                            _rows = self.buttons_to_bot_api_keyboard(uid)
-                        if not _rows:
+                            _rows = None
                             with contextlib.suppress(Exception):
-                                _rows = self.buttons_to_bot_api_keyboard(form.get("buttons") or [])
-                        if _rows:
-                            _bot_kb = {"inline_keyboard": _rows}
+                                _rows = self.buttons_to_bot_api_keyboard(uid)
+                            if not _rows:
+                                with contextlib.suppress(Exception):
+                                    _rows = self.buttons_to_bot_api_keyboard(
+                                        form.get("buttons") or []
+                                    )
+                            if _rows:
+                                _bot_kb = {"inline_keyboard": _rows}
                     ok = await answer_inline_rich(
                         str(token),
                         qid,

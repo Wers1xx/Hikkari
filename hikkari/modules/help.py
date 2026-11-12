@@ -111,6 +111,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
 
 
+
     async def _help_form(
         self,
         text: str,
@@ -120,10 +121,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         rich_html: str | None = None,
         banner_url: str | None = None,
     ):
-        """Help buttons: classic form keyboard (config first-open path).
+        """Help UI: pure Rich body (details / banners) + buttons in HTML after generate_markup.
 
-        Pure Rich article + tg-button does not reliably show clickable buttons.
-        Config works on first open via inline.form(..., reply_markup=...) without rich_message.
+        Config first-open embeds <tg-button> in HTML and that works. Classic form
+        without rich_message flattens details into a wall of text — do not do that.
+        form.py must NOT also attach Bot API keyboard when HTML already has tg-button.
         """
         import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
@@ -134,9 +136,43 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             from ..utils.rich_api import to_rich_compatible
             body = to_rich_compatible(body)
 
+        if banner_url and str(banner_url).startswith(("http://", "https://")):
+            with contextlib.suppress(Exception):
+                from ..utils.rich_api import inject_banner_html
+                body = inject_banner_html(body, str(banner_url), force=True)
+
         banner_kw = {}
         if banner_url and str(banner_url).startswith(("http://", "https://")):
             banner_kw["photo"] = str(banner_url)
+
+        def _prepare(html_body, unit_id, buttons):
+            btns = buttons or []
+            if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                self.inline._units[unit_id]["buttons"] = btns
+                self.inline._units[unit_id]["text"] = text
+                with contextlib.suppress(Exception):
+                    self.inline.generate_markup(unit_id)
+                btns = self.inline._units[unit_id].get("buttons") or btns
+            btn_html = ""
+            with contextlib.suppress(Exception):
+                from ..utils.rich_api import markup_to_tg_rows
+                # strip old rows then append
+                import re as _re
+                base = _re.sub(
+                    r"<tg-button-row\b[^>]*>.*?</tg-button-row>",
+                    "",
+                    str(html_body or ""),
+                    flags=_re.I | _re.S,
+                )
+                btn_html = markup_to_tg_rows(btns, unit_id or "") if btns else ""
+                full = base.rstrip() + (("\n" + btn_html) if btn_html else "")
+            else:
+                full = str(html_body or "")
+            if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                self.inline._units[unit_id]["rich_message"] = full
+                self.inline._units[unit_id]["rich_html"] = full
+                self.inline._units[unit_id]["buttons"] = btns
+            return full, btns
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
@@ -152,23 +188,33 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                                 message.unit_id = uid
                             break
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = markup
-                self.inline._units[unit_id]["text"] = body
-                with contextlib.suppress(Exception):
-                    self.inline.generate_markup(unit_id)
-                markup = self.inline._units[unit_id].get("buttons") or markup
+                full, markup = _prepare(body, unit_id, markup)
+                mid = getattr(message, "inline_message_id", None) or self.inline._units[unit_id].get(
+                    "inline_message_id"
+                )
+                if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
+                    try:
+                        await self.inline.bot.edit_rich_message(
+                            html=full,
+                            inline_message_id=mid,
+                            reply_markup=None,
+                        )
+                        return True
+                    except Exception as e:
+                        logger.debug("help edit_rich: %s", e)
                 try:
-                    ok = await message.edit(body, reply_markup=markup)
+                    ok = await message.edit(text, reply_markup=None, rich_message=full)
                     if ok is not False:
                         return ok
                 except Exception as e:
-                    logger.debug("help nav edit: %s", e)
+                    logger.debug("help edit: %s", e)
 
             with contextlib.suppress(Exception):
                 m = await self.inline.form(
-                    text=body,
+                    text=str(text)[:200] or "Help",
                     message=message,
                     reply_markup=markup,
+                    rich_message=body,
                     silent=True,
                     **banner_kw,
                 )
@@ -176,26 +222,20 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return m
             return False
 
+        # first open: form with rich_message; form handler embeds buttons after generate_markup
         with contextlib.suppress(Exception):
             await self.inline.ensure_inline_ready()
         with contextlib.suppress(Exception):
             m = await self.inline.form(
-                text=body,
+                text=str(text)[:200] or "Help",
                 message=message,
                 reply_markup=markup,
+                rich_message=body,
                 silent=True,
                 **banner_kw,
             )
             if m:
                 return m
-        with contextlib.suppress(Exception):
-            return await self.inline.form(
-                text=str(text)[:3500] or "Help",
-                message=message,
-                reply_markup=markup,
-                silent=True,
-                **banner_kw,
-            )
         return False
 
 
