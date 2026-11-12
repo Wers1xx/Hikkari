@@ -110,6 +110,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
 
 
+
     async def _help_form(
         self,
         text: str,
@@ -119,56 +120,29 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         rich_html: str | None = None,
         banner_url: str | None = None,
     ):
-        """Config-style pure Rich form: generate_markup → markup_to_tg_rows → edit/send."""
+        """Help buttons: classic form keyboard (config first-open path).
+
+        Pure Rich article + tg-button does not reliably show clickable buttons.
+        Config works on first open via inline.form(..., reply_markup=...) without rich_message.
+        """
         import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         markup = reply_markup or []
-        body = rich_html if rich_html is not None else str(text or "")
-
+        body = str(rich_html if rich_html is not None else text or "")
         with contextlib.suppress(Exception):
             from ..utils.rich_api import to_rich_compatible
             body = to_rich_compatible(body)
 
-        # Banner in HTML (photo/video url) — same idea as config
-        if banner_url and str(banner_url).startswith(("http://", "https://")):
-            with contextlib.suppress(Exception):
-                from ..utils.rich_api import inject_banner_html
-                body = inject_banner_html(body, str(banner_url), force=True)
-
         banner_kw = {}
         if banner_url and str(banner_url).startswith(("http://", "https://")):
             banner_kw["photo"] = str(banner_url)
-
-        def _prepare(html_body, unit_id, buttons):
-            """Register callbacks on unit then build official <tg-button-row> HTML."""
-            btns = buttons or []
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = btns
-                self.inline._units[unit_id]["text"] = text
-                with contextlib.suppress(Exception):
-                    # assigns _callback_data + registers handlers on unit / custom_map
-                    self.inline.generate_markup(unit_id)
-                btns = self.inline._units[unit_id].get("buttons") or btns
-            btn_html = ""
-            with contextlib.suppress(Exception):
-                from ..utils.rich_api import markup_to_tg_rows
-                btn_html = markup_to_tg_rows(btns, unit_id or "") if btns else ""
-            full = str(html_body or "")
-            if btn_html:
-                full = full.rstrip() + "\n" + btn_html
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["rich_message"] = full
-                self.inline._units[unit_id]["rich_html"] = full
-                self.inline._units[unit_id]["buttons"] = btns
-            return full, btns
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
         if is_nav:
             unit_id = getattr(message, "unit_id", None)
             if not unit_id:
-                # recover unit by inline_message_id
                 mid0 = getattr(message, "inline_message_id", None)
                 if mid0:
                     for uid, unit in list(getattr(self.inline, "_units", {}).items()):
@@ -177,36 +151,24 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                             with contextlib.suppress(Exception):
                                 message.unit_id = uid
                             break
-
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                full, markup = _prepare(body, unit_id, markup)
-                mid = getattr(message, "inline_message_id", None) or self.inline._units[unit_id].get(
-                    "inline_message_id"
-                )
-                if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                    try:
-                        await self.inline.bot.edit_rich_message(
-                            html=full,
-                            inline_message_id=mid,
-                            reply_markup=None,  # pure rich: buttons live in HTML
-                        )
-                        return True
-                    except Exception as e:
-                        logger.debug("help edit_rich_message: %s", e)
+                self.inline._units[unit_id]["buttons"] = markup
+                self.inline._units[unit_id]["text"] = body
+                with contextlib.suppress(Exception):
+                    self.inline.generate_markup(unit_id)
+                markup = self.inline._units[unit_id].get("buttons") or markup
                 try:
-                    ok = await message.edit(text, reply_markup=markup, rich_message=full)
+                    ok = await message.edit(body, reply_markup=markup)
                     if ok is not False:
                         return ok
                 except Exception as e:
-                    logger.debug("help message.edit: %s", e)
+                    logger.debug("help nav edit: %s", e)
 
-            # no unit → create form unit (handler will generate_markup + embed buttons)
             with contextlib.suppress(Exception):
                 m = await self.inline.form(
-                    text=str(text)[:200] or "Help",
+                    text=body,
                     message=message,
                     reply_markup=markup,
-                    rich_message=body,
                     silent=True,
                     **banner_kw,
                 )
@@ -214,15 +176,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return m
             return False
 
-        # First open (command message): form creates unit; handler embeds tg-buttons
         with contextlib.suppress(Exception):
             await self.inline.ensure_inline_ready()
         with contextlib.suppress(Exception):
             m = await self.inline.form(
-                text=str(text)[:200] or "Help",
+                text=body,
                 message=message,
                 reply_markup=markup,
-                rich_message=body,
                 silent=True,
                 **banner_kw,
             )
@@ -230,7 +190,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 return m
         with contextlib.suppress(Exception):
             return await self.inline.form(
-                text=str(text)[:200] or "Help",
+                text=str(text)[:3500] or "Help",
                 message=message,
                 reply_markup=markup,
                 silent=True,
@@ -766,10 +726,9 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         logger.debug("help form rich failed: %s", e)
                     # fallback rich without form unit
                     with contextlib.suppress(Exception):
-                        m = await self.inline.rich(
-                            message,
-                            html,
-                            title=str(_name)[:64],
+                        m = await self.inline.form(
+                            text=html,
+                            message=message,
                             reply_markup=close_mk,
                             silent=True,
                         )
