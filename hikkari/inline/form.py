@@ -1000,6 +1000,16 @@ class Form(InlineUnit):
 
                 ok = False
                 if token and qid is not None:
+                    _bot_kb = None
+                    with contextlib.suppress(Exception):
+                        _rows = None
+                        with contextlib.suppress(Exception):
+                            _rows = self.buttons_to_bot_api_keyboard(uid)
+                        if not _rows:
+                            with contextlib.suppress(Exception):
+                                _rows = self.buttons_to_bot_api_keyboard(form.get("buttons") or [])
+                        if _rows:
+                            _bot_kb = {"inline_keyboard": _rows}
                     ok = await answer_inline_rich(
                         str(token),
                         qid,
@@ -1007,7 +1017,7 @@ class Form(InlineUnit):
                         title=form.get("title") or "Hikkari",
                         description=form.get("description") or "Rich",
                         result_id=(form.get("uid") or utils.rand(16))[:64],
-                        reply_markup=None,
+                        reply_markup=_bot_kb,
                         thumbnail_url=thumb,
                     )
                 else:
