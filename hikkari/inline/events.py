@@ -499,6 +499,64 @@ class Events(InlineUnit):
 
 
 
+
+        # --- Help module: hmod|Name opens modhelp; hhelp|close closes ---
+        if isinstance(call_data, str) and (
+            call_data.startswith("hmod|")
+            or call_data.strip() in ("hhelp|close", "hhelp|list")
+            or call_data.startswith("hhelp|")
+        ):
+            try:
+                if not self._inline_user_allowed(user_id):
+                    with contextlib.suppress(Exception):
+                        await call.answer("⛔", show_alert=True)
+                    return
+                with contextlib.suppress(Exception):
+                    await call.answer()
+                help_mod = None
+                for m in getattr(self._allmodules, "modules", []) or []:
+                    with contextlib.suppress(Exception):
+                        if m.__class__.__name__ in ("Help", "HelpMod") or (
+                            getattr(m, "strings", None)
+                            and m.strings.get("name") == "Help"
+                        ):
+                            help_mod = m
+                            break
+                if help_mod is None:
+                    await call.answer("Help module not found", show_alert=True)
+                    return
+                unit_id = None
+                with contextlib.suppress(Exception):
+                    unit_id = getattr(call, "unit_id", None)
+                icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+                    call, self, unit_id
+                )
+                data = call_data.strip()
+                if data == "hhelp|close" or data.startswith("hhelp|c"):
+                    with contextlib.suppress(Exception):
+                        await self._close_unit_handler(icall)
+                    with contextlib.suppress(Exception):
+                        if hasattr(call, "delete"):
+                            await call.delete()
+                    return
+                if data == "hhelp|list" or data.startswith("hhelp|list"):
+                    if hasattr(help_mod, "inline__help_show_list"):
+                        await help_mod.inline__help_show_list(icall)
+                    return
+                if data.startswith("hmod|"):
+                    mod_name = data.split("|", 1)[1].strip()
+                    if not mod_name:
+                        await call.answer("Empty module", show_alert=True)
+                        return
+                    # from_list=True → Back button when available
+                    await help_mod.modhelp(icall, mod_name, from_list=True)
+                    return
+            except Exception:
+                logger.exception("help hmod/hhelp callback failed")
+                with contextlib.suppress(Exception):
+                    await call.answer("Error", show_alert=True)
+                return
+
         # Config close (tg-button callback_data fixed)
         if isinstance(call_data, str) and (call_data.strip() == "hcfg|close" or call_data.strip().startswith("hcfg|c|")):
             with contextlib.suppress(Exception):

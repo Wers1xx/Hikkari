@@ -806,6 +806,8 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 close_mk = [[{
                     "text": "🔻 Закрыть",
                     "action": "close",
+                    "style": "danger",
+                    "_callback_data": "hhelp|close",
                 }]]
                 # Rich shows tg-buttons in HTML; classic also gets reply_markup
                 if getattr(self.inline, "init_complete", False):
@@ -1205,11 +1207,20 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                # Footer Close only
+                # Footer Close — both classic action AND fixed tg-button callback
                 close_mk = [[{
                     "text": "🔻 Закрыть",
                     "action": "close",
+                    "style": "danger",
+                    "_callback_data": "hhelp|close",
                 }]]
+                try:
+                    from ..utils.rich_api import tg_button as _tgb, tg_button_row as _tgbr
+                    rich_message = rich_message + "\n" + _tgbr([
+                        _tgb("🔻 Закрыть", type="callback_data", data="hhelp|close", style="danger")
+                    ])
+                except Exception:
+                    pass
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
@@ -1336,6 +1347,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return "\n".join(parts)
 
                 full_html = _build_html(section_rows, with_banner=True)
+                try:
+                    from ..utils.rich_api import tg_button as _tgb, tg_button_row as _tgbr
+                    full_html = full_html + "\n" + _tgbr([
+                        _tgb("🔻 Закрыть", type="callback_data", data="hhelp|close", style="danger")
+                    ])
+                except Exception:
+                    pass
 
                 # Under limit → ONE message, no nav buttons at all
                 if len(full_html) <= RICH_LIMIT:
@@ -1345,7 +1363,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                     )
@@ -1434,7 +1452,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger", "_callback_data": "hhelp|close"}]],
                         silent=True,
                         pages=None,
                         page=0,
