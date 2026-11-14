@@ -34,10 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class Help(loader.Module):
+class Help(loader.Module):  # HELP_BANNER_REGEX_OK
     """Shows help for modules and commands"""
 
-    strings = {"name": "Help"}
+    strings = {"close_btn": "🔻 Закрыть",
+        "name": "Help"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -100,6 +101,226 @@ class Help(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
         )
+
+
+    @staticmethod
+    def _is_out(message) -> bool:
+        """True if outgoing Message; False for InlineCall/BotInlineCall/incoming."""
+        return bool(getattr(message, "out", False))
+
+
+
+
+
+
+    async def _help_form(
+        self,
+        text: str,
+        message,
+        reply_markup=None,
+        *,
+        rich_html: str | None = None,
+        banner_url: str | None = None,
+    ):
+        """Same path as HikkariConfig._cfg_form — pure Rich + tg-buttons via inline.rich."""
+        import contextlib
+        from ..inline.types import InlineCall, InlineMessage, BotInlineCall
+
+        markup = reply_markup or []
+        banner_kw = {}
+        if banner_url and str(banner_url).startswith(("http://", "https://")):
+            banner_kw["photo"] = str(banner_url)
+
+        client = getattr(self, "_client", None) or getattr(self, "client", None)
+        use_rich = False
+        with contextlib.suppress(Exception):
+            from ..utils.rich import can_use_rich
+            use_rich = bool(can_use_rich(client, self._db))
+        # Help module-local flag: still try pure-rich when global gate is on
+        if not use_rich:
+            with contextlib.suppress(Exception):
+                if bool(self.config.get("rich_mode", True)):
+                    from ..utils.rich import is_rich_enabled
+                    # respect global Settings.rich_mode + Premium via can_use_rich only;
+                    # log why we stayed classic
+                    import logging as _log
+                    _log.getLogger(__name__).info(
+                        "help pure-rich skipped: can_use_rich=False "
+                        "(need Settings.rich_mode + Telegram Premium)"
+                    )
+
+        with contextlib.suppress(Exception):
+            await self.inline.ensure_inline_ready()
+
+        body = str(rich_html if rich_html is not None else text or "")
+
+        if not use_rich:
+            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+                try:
+                    return await message.edit(
+                        body,
+                        reply_markup=markup,
+                        **{k: banner_kw[k] for k in ("photo", "video", "gif") if k in banner_kw},
+                    )
+                except Exception:
+                    pass
+                try:
+                    return await message.edit(body, reply_markup=markup)
+                except Exception:
+                    pass
+            return await self.inline.form(
+                body,
+                message=message,
+                reply_markup=markup,
+                silent=True,
+                **banner_kw,
+            )
+
+        # ── Pure Rich (identical idea to config) ──
+        from ..utils.rich_api import (
+            inject_banner_html,
+            to_rich_compatible,
+            pick_banner_url,
+            markup_to_tg_rows,
+        )
+
+        html = body
+        with contextlib.suppress(Exception):
+            html = to_rich_compatible(body)
+
+        burl = None
+        if banner_url and str(banner_url).startswith(("http://", "https://")):
+            burl = str(banner_url)
+        if not burl:
+            with contextlib.suppress(Exception):
+                burl = pick_banner_url(self.config.get("banner_url"))
+        if burl:
+            with contextlib.suppress(Exception):
+                html = inject_banner_html(html, burl, force=True)
+
+        def _prepare(h, unit_id, buttons):
+            # Always register handlers / assign _callback_data (Hotaru-style reliable nav)
+            if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                self.inline._units[unit_id]["buttons"] = buttons
+                self.inline._units[unit_id]["text"] = text
+                with contextlib.suppress(Exception):
+                    self.inline.generate_markup(unit_id)
+                buttons = self.inline._units[unit_id].get("buttons") or buttons
+            else:
+                with contextlib.suppress(Exception):
+                    # Process list in-place even without unit yet
+                    self.inline._generate_markup(buttons)
+            btn_html = ""
+            with contextlib.suppress(Exception):
+                btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
+            full = h + ("\n" + btn_html if btn_html else "")
+            if unit_id and unit_id in getattr(self.inline, "_units", {}):
+                self.inline._units[unit_id]["rich_message"] = full
+                self.inline._units[unit_id]["rich_html"] = full
+            return full, buttons
+
+        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
+
+        if is_nav:
+            unit_id = getattr(message, "unit_id", None)
+            if not unit_id:
+                mid0 = getattr(message, "inline_message_id", None)
+                if mid0:
+                    for uid, unit in list(getattr(self.inline, "_units", {}).items()):
+                        if unit.get("inline_message_id") == mid0:
+                            unit_id = uid
+                            with contextlib.suppress(Exception):
+                                message.unit_id = uid
+                            break
+            if not unit_id:
+                with contextlib.suppress(Exception):
+                    return await self.inline.rich(
+                        message,
+                        html,
+                        reply_markup=markup,
+                        silent=True,
+                        title=str(text)[:64] or "Help",
+                        description="Hikkari Help",
+                        **({"thumbnail_url": burl} if burl else {}),
+                    )
+                with contextlib.suppress(Exception):
+                    return await self.inline.form(
+                        text,
+                        message=message,
+                        reply_markup=markup,
+                        rich_message=html,
+                        silent=True,
+                        **banner_kw,
+                    )
+            full_html, buttons = _prepare(html, unit_id, markup)
+            mid = getattr(message, "inline_message_id", None)
+            if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
+                mid = self.inline._units[unit_id].get("inline_message_id")
+
+            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
+                try:
+                    await self.inline.bot.edit_rich_message(
+                        html=full_html,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    return True
+                except Exception as e:
+                    logger.debug("help edit_rich_message: %s", e)
+
+            try:
+                ok = await message.edit(
+                    text,
+                    reply_markup=None,
+                    rich_message=full_html,
+                )
+                if ok is not False:
+                    return ok
+            except Exception:
+                pass
+
+            try:
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=markup,
+                    silent=True,
+                    title=str(text)[:64] or "Help",
+                    description="Hikkari Help",
+                )
+            except Exception:
+                return False
+
+        # Fresh open — embed tg-buttons into HTML first (Hotaru pure-rich).
+        # If HTML already has <tg-button>, do NOT attach classic reply_markup
+        # (avoids duplicate / classic keyboard under Rich).
+        try:
+            full_html, _ = _prepare(html, None, markup)
+            _rm = None if "<tg-button" in (full_html or "").lower() else markup
+            return await self.inline.rich(
+                message,
+                full_html,
+                reply_markup=_rm,
+                silent=True,
+                title=str(text)[:64] or "Help",
+                description="Hikkari Help",
+                **({"thumbnail_url": burl} if burl else {}),
+            )
+        except Exception:
+            try:
+                full_html, _ = _prepare(html, None, markup)
+                _rm = None if "<tg-button" in (full_html or "").lower() else markup
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=_rm,
+                    silent=True,
+                    title=str(text)[:64] or "Help",
+                    description="Hikkari Help",
+                )
+            except Exception:
+                return False
+
 
     async def client_ready(self):
         # Overwrite stale Help config from old installs (▪️ / 🪐)
@@ -262,7 +483,11 @@ class Help(loader.Module):
             return base
         return f"{base} ({', '.join(al)})"
 
-    async def modhelp(self, message: Message, args: str):
+    async def modhelp(self, message: Message, args: str, from_list: bool = False):
+        if not from_list:
+            self._help_nav_from_list = False
+        else:
+            self._help_nav_from_list = True
         exact = True
         if not (module := self.lookup(args)):
             if method := self.allmodules.dispatch(
@@ -398,6 +623,33 @@ class Help(loader.Module):
                                 )
                                 break
                 banner_url = self._get_banner_url(source) if source else None
+                # Module attrs / strings before Help config banner
+                if not banner_url and module is not None:
+                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
+                        with contextlib.suppress(Exception):
+                            v = getattr(module, attr, None)
+                            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                banner_url = v.strip()
+                                break
+                    if not banner_url:
+                        with contextlib.suppress(Exception):
+                            for sk in ("banner", "banner_url", "meta_banner"):
+                                v = module.strings.get(sk) if hasattr(module, "strings") else None
+                                if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                    banner_url = v.strip()
+                                    break
+                    if not banner_url:
+                        with contextlib.suppress(Exception):
+                            cfg = getattr(module, "config", None)
+                            if cfg is not None:
+                                for ck in ("banner", "banner_url", "meta_banner"):
+                                    try:
+                                        v = cfg[ck]
+                                    except Exception:
+                                        v = None
+                                    if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                        banner_url = v.strip()
+                                        break
                 if not banner_url:
                     banner_url = str(self.config.get("banner_url") or "").strip() or None
                 if banner_url and str(banner_url).startswith(("http://", "https://")):
@@ -417,38 +669,49 @@ class Help(loader.Module):
         if getattr(module, "__origin__", "").startswith("<core"):
             dev_text = None
 
-        # Rich single-module help (commands in <details>)
+        # Rich single-module help (same card as loader)
         try:
             from ..utils.rich import can_use_rich
-            from ..utils.rich_api import html_table, pick_banner_url, inject_banner_html
+            from ..utils.rich_api import (
+                html_table,
+                pick_banner_url,
+                inject_banner_html,
+                to_rich_compatible,
+                try_send_rich,
+                markup_to_tg_rows,
+            )
             import html as html_mod
 
-            if can_use_rich(self._client, self._db) and getattr(
-                self.inline, "init_complete", False
-            ):
+            if can_use_rich(self._client, self._db):
                 undoc = self._plain_doc(self.strings.get("undoc"), "—")
                 rows = []
-                for name, fun in commands.items():
-                    doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
-                    rows.append(
-                        (
-                            html_mod.escape(
-                                self._cmd_label(name, with_prefix=True)
-                            ),
-                            html_mod.escape(doc),
-                        )
-                    )
-                if hasattr(module, "inline_handlers"):
-                    for name, fun in module.inline_handlers.items():
+                for name, fun in list(commands.items())[:50]:
+                    try:
                         doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
                         rows.append(
                             (
                                 html_mod.escape(
-                                    f"@{self.inline.bot_username} {name}"
+                                    self._cmd_label(name, with_prefix=True)
                                 ),
                                 html_mod.escape(doc),
                             )
                         )
+                    except Exception:
+                        continue
+                if hasattr(module, "inline_handlers"):
+                    for name, fun in list(module.inline_handlers.items())[:20]:
+                        try:
+                            doc = self._plain_doc(inspect.getdoc(fun), undoc)[:120]
+                            rows.append(
+                                (
+                                    html_mod.escape(
+                                        f"@{self.inline.bot_username} {name}"
+                                    ),
+                                    html_mod.escape(doc),
+                                )
+                            )
+                        except Exception:
+                            continue
                 parts = [f"<h2>{html_mod.escape(str(_name))}</h2>"]
                 if module.__doc__:
                     mdoc = self._plain_doc(inspect.getdoc(module), "")[:400]
@@ -457,83 +720,125 @@ class Help(loader.Module):
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        "<details>"
-                        f"<summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        f"<details>\n<summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n"
-                        "</details>"
+                        f"</details>"
                     )
                 if placeholders:
                     ph = self._plain_doc(placeholders, "")
                     if ph:
                         parts.append(
-                            f"<details><summary>Placeholders</summary>"
-                            f"<p>{html_mod.escape(ph)}</p></details>"
+                            f"<b>Placeholders</b>\n"
+                            f"<p>{html_mod.escape(ph[:500])}</p>"
                         )
                 if dev_text:
-                    # plain developer line (no nested broken HTML)
                     parts.append(
-                        f"<p>{self.strings.get('developer', '🧑‍💻 Developer: {}').format(self._linkify_dev(str(dev_text)))}</p>"
+                        f"<p>\u2764\ufe0f Developer: "
+                        f"{self._linkify_dev(str(dev_text))}</p>"
                     )
-                if getattr(module, "__origin__", "").startswith("<core"):
-                    core_n = self._plain_doc(
-                        self.strings.get("core_notice"),
-                        "Built-in module",
-                    )
-                    parts.append(f"<p>🛡 {html_mod.escape(core_n)}</p>")
+                html = "\n".join(parts)
+                with contextlib.suppress(Exception):
+                    html = to_rich_compatible(html)
 
-                # Meta banner of THIS module first, then Help config banner
+                # Module banner (# meta banner:) first; else help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    src = getattr(module, "__source__", None) or ""
-                    if not src or "# meta banner" not in src.lower():
-                        # Fallback: read persisted / origin file
-                        for attr in ("__file__", "_file"):
-                            fp = getattr(module, attr, None)
-                            if fp and Path(str(fp)).is_file():
-                                src = Path(str(fp)).read_text(
-                                    encoding="utf-8", errors="ignore"
-                                )
-                                break
-                        if not src:
-                            origin = str(getattr(module, "__origin__", "") or "")
-                            if origin.endswith(".py") and Path(origin).is_file():
-                                src = Path(origin).read_text(
-                                    encoding="utf-8", errors="ignore"
-                                )
-                    meta_b = self._get_banner_url(src)
-                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
-                html = "\n".join(parts)
-                html = inject_banner_html(html, burl, force=True)
-                m = await self.inline.rich(
-                    message,
-                    html,
-                    title=str(_name)[:64],
-                    description=self._plain_doc(inspect.getdoc(module), "Module help")[
-                        :80
-                    ],
-                    thumbnail_url=burl,
-                    reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
-                    silent=True,
-                )
-                if m:
-                    return
-                # Fallback: Bot API sendRichMessage (works even with 1–2 commands)
-                with contextlib.suppress(Exception):
-                    from ..utils.rich_api import try_send_rich
-                    chat = utils.get_chat_id(message)
-                    if chat and await try_send_rich(self._client, chat, html):
+                    src_head = ""
+                    from pathlib import Path as _P
+                    # try all known paths to module source
+                    candidates = []
+                    for attr in ("__origin__", "__file__", "_source_path"):
                         with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        return
+                            v = getattr(module, attr, None)
+                            if v and not str(v).startswith("<"):
+                                candidates.append(str(v))
+                    with contextlib.suppress(Exception):
+                        import inspect as _ins
+                        f = _ins.getfile(module.__class__)
+                        if f and not f.startswith("<"):
+                            candidates.append(f)
+                    for path in candidates:
+                        pth = _P(path)
+                        if pth.is_file():
+                            with open(pth, "r", encoding="utf-8", errors="ignore") as _bf:
+                                src_head = _bf.read(16384)
+                            if src_head:
+                                break
+                    if not src_head:
+                        with contextlib.suppress(Exception):
+                            import inspect as _ins
+                            src_head = (_ins.getsource(module.__class__) or "")[:16384]
+                    if not src_head:
+                        with contextlib.suppress(Exception):
+                            src_head = (inspect.getdoc(module) or "")[:4000]
+                    if src_head:
+                        # Help's own parser
+                        with contextlib.suppress(Exception):
+                            meta_b = self._get_banner_url(src_head)
+                        if not meta_b:
+                            loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                            if loader_mod and hasattr(loader_mod, "_get_banner_url"):
+                                meta_b = loader_mod._get_banner_url(src_head)
+                        if not meta_b:
+                            import re as _re
+                            for pat in (
+                                r"#\s*meta\s+banner:\s*(\S+)",
+                                r"#\s*banner:\s*(\S+)",
+                            ):
+                                _m = _re.search(pat, src_head, _re.I)
+                                if _m:
+                                    meta_b = _m.group(1).strip().strip(chr(34) + chr(39))
+                                    break
+
+                burl = meta_b or banner_url or pick_banner_url(self.config.get("banner_url"))
+                if not burl and module is not None:
+                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
+                        with contextlib.suppress(Exception):
+                            v = getattr(module, attr, None)
+                            if isinstance(v, str) and v.startswith(("http://", "https://")):
+                                burl = v.strip()
+                                break
+                if burl:
+                    html = inject_banner_html(html, burl, force=True)
+
+                _mod_key = module.strings.get("name", module.__class__.__name__)
+                # Only Close — Back/Config removed (unreliable callbacks)
+                close_mk = [[{
+                    "text": "🔻 Закрыть",
+                    "action": "close",
+                }]]
+                # Rich shows tg-buttons in HTML; classic also gets reply_markup
+                if getattr(self.inline, "init_complete", False):
+                    try:
+                        m = await self._help_form(
+                            str(_name)[:120] or "Help",
+                            message,
+                            reply_markup=close_mk,
+                            rich_html=html,
+                            banner_url=locals().get("banner_url"),
+                        )
+                        if m:
+                            return
+                    except Exception as e:
+                        logger.debug("help form rich failed: %s", e)
+                    # fallback rich without form unit
+                    with contextlib.suppress(Exception):
+                        m = await self.inline.form(
+                            text=html,
+                            message=message,
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        if m:
+                            return
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
         await utils.answer(
             message,
-            f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
+            f"{reply}<blockquote>{cmds}{inline_cmd}</blockquote>"
             + (
-                f"<blockquote expandable>\n{placeholders}</blockquote>"
+                f"<blockquote>\n{placeholders}</blockquote>"
                 if placeholders
                 else ""
             )
@@ -548,6 +853,83 @@ class Help(loader.Module):
             **banner_kwargs,
         )
 
+    async def inline__help_show_list(self, call):
+        """Back → modules list. Always EDIT current form, never send a new one."""
+        with contextlib.suppress(Exception):
+            await call.answer()
+        self._help_nav_from_list = False
+        try:
+            await self.help(call)
+        except Exception as e:
+            logger.exception("inline__help_show_list: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer("Back failed", show_alert=True)
+
+    async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
+        try:
+            # Do NOT treat as list-nav unless we came from list originally
+            fl = bool(getattr(self, "_help_nav_from_list", False))
+            await self.modhelp(call, mod_name or "", from_list=fl)
+        except Exception as e:
+            logger.debug("help back from cfg: %s", e)
+
+    async def inline__help_open_cfg(self, call, mod_name: str = ""):
+        """Open module config — same as first working implementation."""
+        with contextlib.suppress(Exception):
+            await call.answer()
+        try:
+            cfg = None
+            for m in list(getattr(self.allmodules, "modules", []) or []):
+                cn = m.__class__.__name__.lower()
+                if "config" in cn and hasattr(m, "inline__configure"):
+                    cfg = m
+                    break
+            if cfg is None:
+                cfg = (
+                    self.lookup("HikkariConfig")
+                    or self.lookup("HikkariConfigMod")
+                    or self.lookup("config")
+                )
+            if cfg is None or not hasattr(cfg, "inline__configure"):
+                with contextlib.suppress(Exception):
+                    await call.answer("Config unavailable", show_alert=True)
+                return
+
+            key = (mod_name or "").strip()
+            mod = self.lookup(key) if key else None
+            if mod is None and key:
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    names = {m.__class__.__name__}
+                    with contextlib.suppress(Exception):
+                        names.add(str(m.strings.get("name", "")))
+                    if key in names or key.lower() in {x.lower() for x in names if x}:
+                        mod = m
+                        break
+            if mod is None:
+                with contextlib.suppress(Exception):
+                    await call.answer("Module not found", show_alert=True)
+                return
+            if not getattr(mod, "config", None):
+                with contextlib.suppress(Exception):
+                    await call.answer("No config", show_alert=True)
+                return
+
+            key = mod.__class__.__name__
+            with contextlib.suppress(Exception):
+                key = str(mod.strings.get("name", key)) or key
+
+            with contextlib.suppress(Exception):
+                cfg._help_return_mod = key
+                cfg._help_return_help = self
+                cfg._help_from_list = bool(getattr(self, "_help_nav_from_list", False))
+
+            await cfg.inline__configure(call, str(key))
+        except Exception as e:
+            logger.exception("help open cfg: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer(str(e)[:80], show_alert=True)
+
+
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
         ua_doc="[args] | допоможіть з вашими модулями!",
@@ -556,7 +938,20 @@ class Help(loader.Module):
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        args = utils.get_args_raw(message)
+        # Form callbacks pass InlineCall — body text is NOT command args
+        _tn = type(message).__name__
+        if _tn in ("InlineCall", "BotInlineCall") or getattr(message, "inline_message_id", None):
+            args = ""
+        else:
+            try:
+                args = utils.get_args_raw(message) or ""
+            except Exception:
+                args = ""
+            if args is False:
+                args = ""
+        _is_form_edit = _tn in ("InlineCall", "BotInlineCall") or bool(
+            getattr(message, "inline_message_id", None)
+        )
 
         raw_banner = str(self.config["banner_url"] or "").strip()
         # Reject garbage saved from broken inline input (transfer msg, etc.)
@@ -673,9 +1068,12 @@ class Help(loader.Module):
 
             core = mod.__origin__.startswith("<core")
 
-            tmp += "\n{} <code>{}</code>".format(
-                ("<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>" if core else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"), name
+            emoji = (
+                "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>"
+                if core
+                else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"
             )
+            tmp += f"\n{emoji} <code>{name}</code>"
             first = True
 
             commands = [
@@ -702,7 +1100,7 @@ class Help(loader.Module):
                             func=func,
                             user=(
                                 message.sender_id
-                                if not message.out
+                                if not self._is_out(message)
                                 else self._client.tg_id
                             ),
                         )
@@ -732,6 +1130,17 @@ class Help(loader.Module):
 
             if commands or icommands or placeholders:
                 tmp += " )"
+                try:
+                    from ..utils.rich_api import tg_button as _tg_btn
+                    _hb = _tg_btn(
+                        "Help",
+                        type="callback_data",
+                        data=("hmod|" + str(name))[:64],
+                        style="primary",
+                    )
+                    tmp += " " + _hb
+                except Exception:
+                    pass
                 if core:
                     core_ += [tmp]
                 else:
@@ -785,8 +1194,9 @@ class Help(loader.Module):
                     sections = [("Модули", rich_modules)]
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
+                # closed by default (no open attr)
                 rich_message += "".join(
-                    f"<details><summary>{title}</summary>{content}</details>"
+                    f"<details>\n<summary>{title}</summary>\n{content}\n</details>"
                     for title, content in sections
                     if content
                 )
@@ -795,25 +1205,37 @@ class Help(loader.Module):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                # Footer Close only
+                close_mk = [[{
+                    "text": "🔻 Закрыть",
+                    "action": "close",
+                }]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
-                        from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                        html = to_rich_compatible(
-                            rich_message
-                            + "\n"
-                            + (markup_to_tg_rows(close_mk, "") or "")
-                        )
-                        m = await self.inline.form(
-                            text=str(reply)[:200] or "Hikkari Help",
-                            message=message,
-                            rich_message=html,
+                        from ..utils.rich_api import to_rich_compatible
+                        html = to_rich_compatible(rich_message)
+                        m = await self._help_form(
+                            str(reply)[:200] or "Hikkari Help",
+                            message,
                             reply_markup=close_mk,
-                            silent=True,
+                            rich_html=html,
                         )
                         sent = bool(m)
                     if not sent:
+                        # Back/list from existing form: never open a second message
+                        if _is_form_edit:
+                            with contextlib.suppress(Exception):
+                                from ..utils.rich_api import to_rich_compatible
+                                html2 = to_rich_compatible(rich_message)
+                                if hasattr(message, "edit"):
+                                    await message.edit(
+                                        text=str(reply)[:200] or "Hikkari Help",
+                                        reply_markup=close_mk,
+                                    )
+                                    sent = True
+                            if sent:
+                                return
                         with contextlib.suppress(Exception):
                             m = await self.inline.rich(
                                 message,
@@ -873,12 +1295,11 @@ class Help(loader.Module):
                 def _details_block(title: str, rows: list[tuple[str, str]]) -> str:
                     if not rows:
                         return ""
-                    table = html_table(rows, header=("Module", "Commands"))
-                    # closed by default (no open attribute)
+                    body = "\n".join(f"{name} {cmds}" for name, cmds in rows)
                     return (
                         f"<details>"
-                        f"<summary><b>{title}</b> ({len(rows)})</summary>\n"
-                        f"{table}\n"
+                        f"<summary>{title}</summary>"
+                        f"{body}"
                         f"</details>"
                     )
 
@@ -924,7 +1345,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                     )
@@ -1013,7 +1434,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                         page=0,
@@ -1071,7 +1492,7 @@ class Help(loader.Module):
                     return (
                         f"{text_header}\n"
                         f"<i>{page + 1}/{total_pages}</i>\n"
-                        f"<blockquote expandable>{body}</blockquote>"
+                        f"<blockquote>{body}</blockquote>"
                     )
 
                 async def goto(call, page: int):
@@ -1084,7 +1505,7 @@ class Help(loader.Module):
                     if page < total_pages - 1:
                         nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
                     btns.append(nav)
-                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    btns.append([{"text": "🔻 Закрыть", "action": "close", "style": "danger"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
                 if not getattr(self.inline, "init_complete", False):
@@ -1095,10 +1516,10 @@ class Help(loader.Module):
                 if total_pages > 1:
                     nav.append({"text": "▶️", "callback": goto, "args": (1,)})
                 first_btns.append(nav)
-                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                first_btns.append([{"text": "🔻 Закрыть", "action": "close", "style": "danger"}])
                 await self.inline.form(
                     page_text(0),
-                    message=message if message.out else utils.get_chat_id(message),
+                    message=message if self._is_out(message) else utils.get_chat_id(message),
                     reply_markup=first_btns,
                     silent=True,
                 )
@@ -1117,7 +1538,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),
@@ -1139,7 +1560,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(plain_ + (no_commands_ if force else [])),
@@ -1161,7 +1582,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),

@@ -66,6 +66,33 @@ class Placeholder:
 
 class Form(InlineUnit):
 
+    def _safe_inline_text(self, text, fallback: str = "\u2728") -> str:
+        """Never return empty / invalid UTF-8 text for SetInlineBotResultsRequest."""
+        if text is None:
+            return fallback
+        if not isinstance(text, str):
+            try:
+                text = str(text)
+            except Exception:
+                return fallback
+        text = text.replace(chr(0), "")
+        try:
+            text = text.encode("utf-8", "surrogatepass").decode("utf-8", "replace")
+        except Exception:
+            try:
+                text = text.encode("utf-8", "replace").decode("utf-8", "replace")
+            except Exception:
+                return fallback
+        text = text.strip()
+        if not text:
+            return fallback
+        plain = re.sub(r"<[^>]+>", "", text)
+        plain = re.sub(r"\s+", "", plain, flags=0)
+        if not plain:
+            return fallback
+        return text
+
+
     def _inline_query_id(self, inline_query) -> str | int | None:
         """Resolve query_id from Telethon/hikkaritl InlineQuery event variants."""
         for attr in ("id", "query_id"):
@@ -237,24 +264,32 @@ class Form(InlineUnit):
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             try:
+                edit_kw = {
+                    k: v
+                    for k, v in {
+                        "photo": photo,
+                        "gif": gif,
+                        "file": file,
+                        "video": locals().get("video"),
+                        "silent": silent,
+                        "rich_message": rich_message,
+                    }.items()
+                    if v is not None
+                }
                 return await message.edit(
                     text,
                     reply_markup=reply_markup,
-                    **{
-                        k: v
-                        for k, v in {
-                            "photo": photo,
-                            "gif": gif,
-                            "file": file,
-                            "video": locals().get("video"),
-                            "silent": silent,
-                        }.items()
-                        if v is not None and k in ("photo", "gif", "file", "video")
-                    },
+                    **edit_kw,
                 )
             except TypeError:
-                # edit() may not accept media kwargs
+                # edit() may not accept media/rich kwargs on older path
                 try:
+                    if rich_message is not None:
+                        return await message.edit(
+                            text,
+                            reply_markup=reply_markup,
+                            rich_message=rich_message,
+                        )
                     return await message.edit(text, reply_markup=reply_markup)
                 except Exception:
                     logger.exception("InlineCall.edit failed")
@@ -263,12 +298,26 @@ class Form(InlineUnit):
                 logger.exception("InlineCall.edit failed")
                 return False
 
-        if not isinstance(message, (Message, int)):
-            logger.error(
-                "Invalid type for `message`. Expected `Message`, `int` or InlineCall, got `%s`",
-                type(message),
-            )
-            return False
+        # Accept Message, int, InlineCall, or CallbackQuery.Event
+        if message is not None and not isinstance(message, (Message, int)):
+            cls_name = type(message).__name__
+            mod_name = (getattr(type(message), "__module__", "") or "").lower()
+            if cls_name == "Event" or "callbackquery" in mod_name:
+                underlying = getattr(message, "message", None)
+                if underlying is not None and isinstance(underlying, Message):
+                    message = underlying
+                elif not (getattr(message, "inline_message_id", None) or hasattr(message, "edit")):
+                    logger.error(
+                        "Invalid type for `message`. Expected Message/int/InlineCall, got %s",
+                        type(message),
+                    )
+                    return False
+            elif not (hasattr(message, "edit") or hasattr(message, "inline_message_id")):
+                logger.error(
+                    "Invalid type for `message`. Expected Message/int/InlineCall, got %s",
+                    type(message),
+                )
+                return False
 
         if not isinstance(reply_markup, (list, dict)):
             logger.error(
@@ -622,6 +671,52 @@ class Form(InlineUnit):
             logger.error("inline.rich: no bot username")
             return False
 
+        # Navigation: InlineCall / InlineMessage → edit existing unit, never Peer cast
+        try:
+            from .types import InlineCall, InlineMessage, BotInlineCall
+        except Exception:
+            InlineCall = InlineMessage = BotInlineCall = ()  # type: ignore
+
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            markup = self._validate_markup(reply_markup) if reply_markup else []
+            unit_id = getattr(message, "unit_id", None)
+            try:
+                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                body = to_rich_compatible(html)
+                if unit_id and unit_id in self._units:
+                    self._units[unit_id]["buttons"] = markup
+                    with contextlib.suppress(Exception):
+                        self.generate_markup(unit_id)
+                    markup = self._units[unit_id].get("buttons") or markup
+                elif markup:
+                    with contextlib.suppress(Exception):
+                        self._generate_markup(markup)
+                btn_html = markup_to_tg_rows(markup, unit_id or "") if markup else ""
+                if btn_html:
+                    body = body + "\n" + btn_html
+                if unit_id and unit_id in self._units:
+                    self._units[unit_id]["rich_message"] = body
+                    self._units[unit_id]["rich_html"] = body
+                    self._units[unit_id]["text"] = body
+                mid = getattr(message, "inline_message_id", None)
+                if mid is None and unit_id and unit_id in self._units:
+                    mid = self._units[unit_id].get("inline_message_id")
+                if mid and hasattr(getattr(self, "bot", None), "edit_rich_message"):
+                    await self.bot.edit_rich_message(
+                        html=body,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    return True
+                return await message.edit(
+                    body,
+                    reply_markup=None,
+                    rich_message=body,
+                )
+            except Exception:
+                logger.exception("inline.rich: InlineCall edit failed")
+                return False
+
         unit_id = utils.rand(16)
         markup = self._validate_markup(reply_markup) if reply_markup else []
         # Official Rich buttons inside HTML (<tg-button-row>), not only reply_markup
@@ -651,11 +746,19 @@ class Form(InlineUnit):
                 if cur < len(page_list) - 1:
                     nav_row.append({"text": "▶", "data": f"hk|{unit_id}|p|{cur + 1}"})
                 markup = [nav_row] + (markup or [])
-            else:
-                # URL / custom buttons only → official in-body <tg-button-row>
+            # CRITICAL: register action=close / callbacks BEFORE embedding tg-buttons,
+            # otherwise markup_to_tg_rows emits data="noop" and Close does nothing.
+            if markup:
+                with contextlib.suppress(Exception):
+                    self._generate_markup(markup)
+            if not page_list:
+                # URL / custom buttons → official in-body <tg-button-row>
                 btn_html = markup_to_tg_rows(markup, unit_id) if markup else ""
                 if btn_html:
                     body = body + "\n" + btn_html
+            else:
+                # multi-page: keep classic keyboard for nav+close
+                pass
             html = body
         except Exception:
             logger.debug("rich button embed failed", exc_info=True)
@@ -665,8 +768,8 @@ class Form(InlineUnit):
             "type": "rich",
             "rich_html": html,
             "text": html,  # fallback if client ignores rich
-            "title": title,
-            "description": description,
+            "title": (str(title).strip() if title else None) or "Hikkari",
+            "description": (str(description).strip() if description else None) or "Hikkari",
             "buttons": markup or [],
             "pages": page_list,
             "page": cur if page_list else 0,
@@ -908,6 +1011,22 @@ class Form(InlineUnit):
 
                 ok = False
                 if token and qid is not None:
+                    _bot_kb = None
+                    # Config pure-rich already embeds <tg-button-row> in HTML.
+                    # Attaching Bot API keyboard on top of that duplicates buttons.
+                    _has_tg_btn = "<tg-button" in (html or "").lower()
+                    if not _has_tg_btn:
+                        with contextlib.suppress(Exception):
+                            _rows = None
+                            with contextlib.suppress(Exception):
+                                _rows = self.buttons_to_bot_api_keyboard(uid)
+                            if not _rows:
+                                with contextlib.suppress(Exception):
+                                    _rows = self.buttons_to_bot_api_keyboard(
+                                        form.get("buttons") or []
+                                    )
+                            if _rows:
+                                _bot_kb = {"inline_keyboard": _rows}
                     ok = await answer_inline_rich(
                         str(token),
                         qid,
@@ -915,7 +1034,7 @@ class Form(InlineUnit):
                         title=form.get("title") or "Hikkari",
                         description=form.get("description") or "Rich",
                         result_id=(form.get("uid") or utils.rand(16))[:64],
-                        reply_markup=None,
+                        reply_markup=_bot_kb,
                         thumbnail_url=thumb,
                     )
                 else:
@@ -975,12 +1094,15 @@ class Form(InlineUnit):
                     )
                 return
 
-        form_text = form.get("text") or "✨"
+        form_text = self._safe_inline_text(form.get("text"), "✨")
         # Caption limits: media results → 1024, article → 4096
         _has_media = any(
             k in form for k in ("photo", "gif", "video", "file", "audio")
         )
-        form_text = self._clip_inline_text(form_text, has_media=_has_media) or "✨"
+        form_text = self._safe_inline_text(
+            self._clip_inline_text(form_text, has_media=_has_media),
+            "✨",
+        )
 
         try:
             match True:
@@ -1404,8 +1526,41 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
         except Exception as e:
-            # Caption over limit → hard-clip and retry once
+            # Caption over limit / empty message → hard-clip or safe text and retry once
             ename = type(e).__name__
+            if "MessageEmpty" in ename or "MESSAGE_EMPTY" in str(e).upper():
+                try:
+                    safe = self._safe_inline_text(form.get("text"), "✨ Hikkari")
+                    await inline_query.answer(
+                        [
+                            await inline_query.builder.article(
+                                title="Hikkari",
+                                text=safe,
+                                parse_mode="HTML",
+                                link_preview=False,
+                                buttons=self.generate_markup(
+                                    form.get("uid") or inline_query.query
+                                ),
+                                id=utils.rand(20),
+                            )
+                        ],
+                        cache_time=0,
+                    )
+                    return
+                except Exception as e2:
+                    e = e2
+                    with contextlib.suppress(Exception):
+                        await inline_query.answer(
+                            [
+                                await inline_query.builder.article(
+                                    title="Hikkari",
+                                    text="✨",
+                                    id=utils.rand(16),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                        return
             if "CaptionTooLong" in ename or "MEDIA_CAPTION_TOO_LONG" in str(e):
                 try:
                     form_text2 = self._clip_inline_text(
