@@ -105,7 +105,6 @@ class Form(InlineUnit):
                 v = getattr(q, attr, None)
                 if v is not None and not callable(v):
                     return v
-        # some wrappers expose original update
         for path in (
             ("_event", "query", "query_id"),
             ("original_update", "query_id"),
@@ -148,7 +147,6 @@ class Form(InlineUnit):
             if ok:
                 return True
 
-        # MTProto fallback (always works for forms)
         await inline_query.answer(
             [
                 await inline_query.builder.article(
@@ -171,7 +169,7 @@ class Form(InlineUnit):
         message: Message | int,
         reply_markup: HikkariReplyMarkup | None = None,
         *,
-        force_me: bool = False,  # Heroku default
+        force_me: bool = False,
         always_allow: list[int] | None = None,
         manual_security: bool = False,
         disable_security: bool = False,
@@ -217,7 +215,7 @@ class Form(InlineUnit):
         :return: If form is sent, returns :obj:`InlineMessage`, otherwise returns `False`
         """
         with contextlib.suppress(AttributeError):
-            _hikkari_client_id_logging_tag = copy.copy(self._client.tg_id)  # noqa: F841
+            _hikkari_client_id_logging_tag = copy.copy(self._client.tg_id)
 
         if reply_markup is None:
             reply_markup = []
@@ -256,11 +254,10 @@ class Form(InlineUnit):
             )
             return False
 
-        # Heroku-style: callback → edit existing unit, never require Message
         try:
             from .types import InlineCall, InlineMessage, BotInlineCall
         except Exception:
-            InlineCall = InlineMessage = BotInlineCall = ()  # type: ignore
+            InlineCall = InlineMessage = BotInlineCall = ()
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             try:
@@ -282,7 +279,6 @@ class Form(InlineUnit):
                     **edit_kw,
                 )
             except TypeError:
-                # edit() may not accept media/rich kwargs on older path
                 try:
                     if rich_message is not None:
                         return await message.edit(
@@ -298,7 +294,6 @@ class Form(InlineUnit):
                 logger.exception("InlineCall.edit failed")
                 return False
 
-        # Accept Message, int, InlineCall, or CallbackQuery.Event
         if message is not None and not isinstance(message, (Message, int)):
             cls_name = type(message).__name__
             mod_name = (getattr(type(message), "__module__", "") or "").lower()
@@ -545,8 +540,6 @@ class Form(InlineUnit):
                 or "No query results" in str(e)
             )
             if "WebpageCurl" in ename or "WebpageCurl" in str(e):
-                # Telegram could not download this URL → never offer it again
-                # in this run (config falls back to the built-in banner)
                 unit = self._units.get(unit_id) or {}
                 for media_key in ("photo", "gif", "video", "file"):
                     bad_url = unit.get(media_key)
@@ -559,7 +552,6 @@ class Form(InlineUnit):
                 del self._units[unit_id]
 
             if soft:
-                # Caller (e.g. config) retries text-only; do not spam the chat
                 logger.warning("Can't send form (media rejected): %s", ename)
                 return False
 
@@ -584,24 +576,19 @@ class Form(InlineUnit):
 
             return False
 
-        # Save chat/msg immediately from clicked result
         self._units[unit_id]["chat"] = utils.get_chat_id(m)
         self._units[unit_id]["message_id"] = m.id
 
-        # Delete original command / status ASAP (do not wait for chosen feedback)
         if isinstance(message, Message) and message.out:
             with contextlib.suppress(Exception):
                 await message.delete()
         if status_message is not None:
             with contextlib.suppress(Exception):
                 await status_message.delete()
-            # if status was an edit of inbound reply path, also try delete original
             if isinstance(message, Message) and not message.out:
                 with contextlib.suppress(Exception):
                     await message.delete()
 
-        # Wait for UpdateBotInlineSend to get inline_message_id (needed for edit)
-        # Timeout: without BotFather /setinlinefeedback this never arrives
         try:
             await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=2)
         except (asyncio.TimeoutError, KeyError):
@@ -620,8 +607,6 @@ class Form(InlineUnit):
             inline_manager=self, unit_id=unit_id, inline_message_id=inline_message_id
         )
 
-        # Optional post-edit (premium emoji / markup refresh).
-        # Do NOT delete the form if edit fails — content already in the article.
         if inline_message_id and (
             needs_premium_emoji_pre_edit or not isinstance(base_reply_markup, Placeholder)
         ):
@@ -671,11 +656,10 @@ class Form(InlineUnit):
             logger.error("inline.rich: no bot username")
             return False
 
-        # Navigation: InlineCall / InlineMessage → edit existing unit, never Peer cast
         try:
             from .types import InlineCall, InlineMessage, BotInlineCall
         except Exception:
-            InlineCall = InlineMessage = BotInlineCall = ()  # type: ignore
+            InlineCall = InlineMessage = BotInlineCall = ()
 
         if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
             markup = self._validate_markup(reply_markup) if reply_markup else []
@@ -688,6 +672,9 @@ class Form(InlineUnit):
                     with contextlib.suppress(Exception):
                         self.generate_markup(unit_id)
                     markup = self._units[unit_id].get("buttons") or markup
+                elif markup:
+                    with contextlib.suppress(Exception):
+                        self._generate_markup(markup)
                 btn_html = markup_to_tg_rows(markup, unit_id or "") if markup else ""
                 if btn_html:
                     body = body + "\n" + btn_html
@@ -716,7 +703,6 @@ class Form(InlineUnit):
 
         unit_id = utils.rand(16)
         markup = self._validate_markup(reply_markup) if reply_markup else []
-        # Official Rich buttons inside HTML (<tg-button-row>), not only reply_markup
         try:
             from ..utils.rich_api import (
                 markup_to_tg_rows,
@@ -732,8 +718,6 @@ class Form(InlineUnit):
                 page_list = [to_rich_compatible(p) for p in page_list]
                 cur = max(0, min(cur, len(page_list) - 1))
                 body = page_list[cur]
-                # Reliable nav: classic InlineKeyboard under the message (not tg-button).
-                # Same hk|uid|p|N callbacks — events.py answers + editMessageText(rich).
                 nav_row = []
                 if cur > 0:
                     nav_row.append({"text": "◀", "data": f"hk|{unit_id}|p|{cur - 1}"})
@@ -743,11 +727,15 @@ class Form(InlineUnit):
                 if cur < len(page_list) - 1:
                     nav_row.append({"text": "▶", "data": f"hk|{unit_id}|p|{cur + 1}"})
                 markup = [nav_row] + (markup or [])
-            else:
-                # URL / custom buttons only → official in-body <tg-button-row>
+            if markup:
+                with contextlib.suppress(Exception):
+                    self._generate_markup(markup)
+            if not page_list:
                 btn_html = markup_to_tg_rows(markup, unit_id) if markup else ""
                 if btn_html:
                     body = body + "\n" + btn_html
+            else:
+                pass
             html = body
         except Exception:
             logger.debug("rich button embed failed", exc_info=True)
@@ -756,7 +744,7 @@ class Form(InlineUnit):
         self._units[unit_id] = {
             "type": "rich",
             "rich_html": html,
-            "text": html,  # fallback if client ignores rich
+            "text": html,
             "title": (str(title).strip() if title else None) or "Hikkari",
             "description": (str(description).strip() if description else None) or "Hikkari",
             "buttons": markup or [],
@@ -860,7 +848,7 @@ class Form(InlineUnit):
                     (unit or {}).get("uid") if isinstance(unit, dict) else None,
                     list(button.get("args") or []),
                     dict(button.get("kwargs") or {}),
-                    _time.time(),  # TTL for PM fallback
+                    _time.time(),
                 )
             title = button.get("input") or "Enter value"
             try:
@@ -892,7 +880,6 @@ class Form(InlineUnit):
                 cache_time=0,
             )
 
-        # 1) Unit buttons (classic)
         for unit_id, unit in self._units.copy().items():
             if not isinstance(unit, dict):
                 continue
@@ -908,7 +895,6 @@ class Form(InlineUnit):
                     await _answer_input(button, unit)
                     return
 
-        # 2) input_map fallback (rich config sticky)
         imap = getattr(self, "_input_map", None) or {}
         entry = imap.get(str(query).strip()) or imap.get(query)
         if entry and entry.get("handler") and _allowed(inline_query.from_user.id):
@@ -919,7 +905,6 @@ class Form(InlineUnit):
                 "kwargs": entry.get("kwargs") or {},
                 "_switch_query": query,
             }
-            # Prefer title from stored button
             if isinstance(entry.get("button"), dict):
                 fake_btn["input"] = entry["button"].get("input") or fake_btn["input"]
             unit = None
@@ -937,12 +922,10 @@ class Form(InlineUnit):
 
 
         form = self._units[inline_query.query]
-        # --- Native Rich Message via answerInlineQuery (via @bot) ---
         if form.get("type") == "rich":
             try:
                 from ..utils.rich_api import answer_inline_rich, _find_bot_token
                 token = _find_bot_token(self._client) or getattr(self, "_token", None)
-                # Deep extract query_id (hikkaritl / telethon / wrappers)
                 qid = None
                 for obj in (
                     inline_query,
@@ -966,11 +949,9 @@ class Form(InlineUnit):
                 except Exception:
                     pass
 
-                # Soft length guard — oversized HTML breaks answerInlineQuery
                 if len(html) > 28000:
                     html = html[:27900] + "\n<p>…</p>"
 
-                # CRITICAL: assign _callback_data + register handlers BEFORE embedding
                 uid = form.get("uid") or inline_query.query
                 with contextlib.suppress(Exception):
                     self.generate_markup(uid)
@@ -1001,8 +982,6 @@ class Form(InlineUnit):
                 ok = False
                 if token and qid is not None:
                     _bot_kb = None
-                    # Config pure-rich already embeds <tg-button-row> in HTML.
-                    # Attaching Bot API keyboard on top of that duplicates buttons.
                     _has_tg_btn = "<tg-button" in (html or "").lower()
                     if not _has_tg_btn:
                         with contextlib.suppress(Exception):
@@ -1032,11 +1011,8 @@ class Form(InlineUnit):
                         bool(token),
                         qid,
                     )
-                # NEVER leave query unanswered — empty results = classic text fallback
                 if not ok:
                     try:
-                        # Plain article ONLY — unsupported Rich tags with parse_mode=HTML
-                        # make Telegram return zero results (classic path then kicks in)
                         plain = re.sub(r"<[^>]+>", " ", html)
                         plain = re.sub(r"\s+", " ", plain).strip()[:900] or "Hikkari"
                         await inline_query.answer(
@@ -1069,7 +1045,6 @@ class Form(InlineUnit):
                     with contextlib.suppress(Exception):
                         ev.set()
                     self._error_events[form["uid"]] = e
-                # last chance: empty answer avoidance
                 with contextlib.suppress(Exception):
                     await inline_query.answer(
                         [
@@ -1084,7 +1059,6 @@ class Form(InlineUnit):
                 return
 
         form_text = self._safe_inline_text(form.get("text"), "✨")
-        # Caption limits: media results → 1024, article → 4096
         _has_media = any(
             k in form for k in ("photo", "gif", "video", "file", "audio")
         )
@@ -1107,7 +1081,6 @@ class Form(InlineUnit):
                         from ..utils.rich_api import strip_external_media_for_inline
                         rich_value = strip_external_media_for_inline(str(rich_value))
                     except Exception:
-                        # Keep first <figure><img> banner — only drop video/audio
                         import re as _re
                         def _keep_img_banner(m):
                             b = m.group(0).lower()
@@ -1121,13 +1094,11 @@ class Form(InlineUnit):
                             flags=_re.I | _re.S,
                         )
 
-                    # 1) Finalize callbacks on unit buttons (must be before embed)
                     uid = form.get("uid")
                     btns = None
                     with contextlib.suppress(Exception):
                         btns = self.generate_markup(uid)
 
-                    # 2) Embed tg-buttons with the SAME _callback_data as handlers
                     try:
                         from ..utils.rich_api import markup_to_tg_rows
                         import re as _re
@@ -1156,7 +1127,6 @@ class Form(InlineUnit):
                             break
 
                     try:
-                        # Prefer Bot API answerInlineQuery with pure rich + no classic kb
                         from ..utils.rich_api import answer_inline_rich, _find_bot_token
                         token = _find_bot_token(self._client) or getattr(
                             self, "_token", None
@@ -1285,7 +1255,6 @@ class Form(InlineUnit):
                         and not str(video_url).startswith(("http://", "https://"))
                         and _Path(str(video_url)).is_file()
                     )
-                    # Local file: MTProto upload only (Bot API needs public URL)
                     if is_local:
                         try:
                             await inline_query.answer(
@@ -1312,7 +1281,6 @@ class Form(InlineUnit):
                                 "MTProto local video form failed",
                                 exc_info=True,
                             )
-                    # Remote HTTP URL: Bot API first, then MTProto
                     if not answered and not is_local:
                         try:
                             token = getattr(self, "_token", None) or getattr(
@@ -1515,7 +1483,6 @@ class Form(InlineUnit):
                         cache_time=0,
                     )
         except Exception as e:
-            # Caption over limit / empty message → hard-clip or safe text and retry once
             ename = type(e).__name__
             if "MessageEmpty" in ename or "MESSAGE_EMPTY" in str(e).upper():
                 try:

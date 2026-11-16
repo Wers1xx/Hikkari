@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class Help(loader.Module):  # HELP_BANNER_REGEX_OK
+class Help(loader.Module):
     """Shows help for modules and commands"""
 
     strings = {"close_btn": "🔻 Закрыть",
@@ -136,6 +136,15 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         with contextlib.suppress(Exception):
             from ..utils.rich import can_use_rich
             use_rich = bool(can_use_rich(client, self._db))
+        if not use_rich:
+            with contextlib.suppress(Exception):
+                if bool(self.config.get("rich_mode", True)):
+                    from ..utils.rich import is_rich_enabled
+                    import logging as _log
+                    _log.getLogger(__name__).info(
+                        "help pure-rich skipped: can_use_rich=False "
+                        "(need Settings.rich_mode + Telegram Premium)"
+                    )
 
         with contextlib.suppress(Exception):
             await self.inline.ensure_inline_ready()
@@ -164,7 +173,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 **banner_kw,
             )
 
-        # ── Pure Rich (identical idea to config) ──
         from ..utils.rich_api import (
             inject_banner_html,
             to_rich_compatible,
@@ -193,6 +201,9 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 with contextlib.suppress(Exception):
                     self.inline.generate_markup(unit_id)
                 buttons = self.inline._units[unit_id].get("buttons") or buttons
+            else:
+                with contextlib.suppress(Exception):
+                    self.inline._generate_markup(buttons)
             btn_html = ""
             with contextlib.suppress(Exception):
                 btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
@@ -274,12 +285,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             except Exception:
                 return False
 
-        # Fresh open — same as config: inline.rich(..., reply_markup=...)
         try:
+            full_html, _ = _prepare(html, None, markup)
+            _rm = None if "<tg-button" in (full_html or "").lower() else markup
             return await self.inline.rich(
                 message,
-                html,
-                reply_markup=markup,
+                full_html,
+                reply_markup=_rm,
                 silent=True,
                 title=str(text)[:64] or "Help",
                 description="Hikkari Help",
@@ -288,10 +300,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         except Exception:
             try:
                 full_html, _ = _prepare(html, None, markup)
+                _rm = None if "<tg-button" in (full_html or "").lower() else markup
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=markup,
+                    reply_markup=_rm,
                     silent=True,
                     title=str(text)[:64] or "Help",
                     description="Hikkari Help",
@@ -301,7 +314,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
 
     async def client_ready(self):
-        # Overwrite stale Help config from old installs (▪️ / 🪐)
         with contextlib.suppress(Exception):
             self.config["core_emoji"] = "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>"
             self.config["plain_emoji"] = "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"
@@ -364,7 +376,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         if not text:
             return fallback or ""
         s = str(text)
-        # <tg-emoji …>X</tg-emoji> / <emoji …>X</emoji> → X
         s = re.sub(
             r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>",
             r"\1",
@@ -377,10 +388,8 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             s,
             flags=re.I | re.S,
         )
-        # drop remaining tags
         s = re.sub(r"<[^>]+>", "", s)
         s = html_mod.unescape(s)
-        # collapse whitespace
         s = re.sub(r"[ \t]+", " ", s).strip()
         return s or (fallback or "")
 
@@ -579,7 +588,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         dev_text = developer.group(1).strip() if developer else None
         if not dev_text:
             dev_text = self._get_module_developer(module)
-        # never show author from license on built-in modules
         if str(getattr(module, "__origin__", "") or "").startswith("<core"):
             dev_text = None
         placeholders = "\n".join(
@@ -601,7 +609,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                                 )
                                 break
                 banner_url = self._get_banner_url(source) if source else None
-                # Module attrs / strings before Help config banner
                 if not banner_url and module is not None:
                     for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
                         with contextlib.suppress(Exception):
@@ -639,15 +646,12 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 pass
 
 
-        # Prefer meta developer if regex missed
         if not dev_text:
             dev_text = self._get_module_developer(module)
 
-        # Built-in modules never show developer/author from license headers
         if getattr(module, "__origin__", "").startswith("<core"):
             dev_text = None
 
-        # Rich single-module help (same card as loader)
         try:
             from ..utils.rich import can_use_rich
             from ..utils.rich_api import (
@@ -718,12 +722,10 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 with contextlib.suppress(Exception):
                     html = to_rich_compatible(html)
 
-                # Module banner (# meta banner:) first; else help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
                     src_head = ""
                     from pathlib import Path as _P
-                    # try all known paths to module source
                     candidates = []
                     for attr in ("__origin__", "__file__", "_source_path"):
                         with contextlib.suppress(Exception):
@@ -750,7 +752,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         with contextlib.suppress(Exception):
                             src_head = (inspect.getdoc(module) or "")[:4000]
                     if src_head:
-                        # Help's own parser
                         with contextlib.suppress(Exception):
                             meta_b = self._get_banner_url(src_head)
                         if not meta_b:
@@ -780,38 +781,10 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     html = inject_banner_html(html, burl, force=True)
 
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # from_list: explicit flag from hmod callback (not type-guess)
-                _from_list = bool(from_list) or bool(getattr(self, "_help_nav_from_list", False))
-                _row = []
-                if _from_list:
-                    _row.append({
-                        "text": "◀️ Назад",
-                        "callback": self.inline__help_show_list,
-                        "_callback_data": "hhelp|list",
-                    })
-                _has_cfg = False
-                with contextlib.suppress(Exception):
-                    _mc = getattr(module, "config", None)
-                    if _mc is not None:
-                        try:
-                            _has_cfg = bool(len(_mc))
-                        except Exception:
-                            _has_cfg = True
-                if _has_cfg:
-                    _mod_key = module.strings.get("name", module.__class__.__name__)
-                    _row.append({
-                        "text": "⚙️ Config",
-                        "callback": self.inline__help_open_cfg,
-                        "args": (_mod_key,),
-                        "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
-                    })
-                _row.append({
+                close_mk = [[{
                     "text": "🔻 Закрыть",
                     "action": "close",
-                    "_callback_data": "hhelp|close",
-                })
-                close_mk = [_row]
-                # Rich shows tg-buttons in HTML; classic also gets reply_markup
+                }]]
                 if getattr(self.inline, "init_complete", False):
                     try:
                         m = await self._help_form(
@@ -825,7 +798,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                             return
                     except Exception as e:
                         logger.debug("help form rich failed: %s", e)
-                    # fallback rich without form unit
                     with contextlib.suppress(Exception):
                         m = await self.inline.form(
                             text=html,
@@ -871,7 +843,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
-            # Do NOT treat as list-nav unless we came from list originally
             fl = bool(getattr(self, "_help_nav_from_list", False))
             await self.modhelp(call, mod_name or "", from_list=fl)
         except Exception as e:
@@ -942,7 +913,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        # Form callbacks pass InlineCall — body text is NOT command args
         _tn = type(message).__name__
         if _tn in ("InlineCall", "BotInlineCall") or getattr(message, "inline_message_id", None):
             args = ""
@@ -958,7 +928,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         )
 
         raw_banner = str(self.config["banner_url"] or "").strip()
-        # Reject garbage saved from broken inline input (transfer msg, etc.)
         def _valid_banner(u: str) -> bool:
             if not u:
                 return False
@@ -973,7 +942,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 return False
 
         if raw_banner and not _valid_banner(raw_banner):
-            # Auto-heal corrupted config
             with contextlib.suppress(Exception):
                 self.config["banner_url"] = None
             raw_banner = ""
@@ -981,7 +949,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         banner_url_str = raw_banner or None
         banner = None
         if banner_url_str:
-            # Local path / file → send as file (supports large video >20MB)
             local_path = None
             try:
                 from pathlib import Path as _P
@@ -1032,7 +999,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         core_ = []
         no_commands_ = []
 
-        # Deduplicate by class name — prevents phantom double modules in help
         seen_cls: set[str] = set()
         mods_iter = []
         for mod in self.allmodules.modules:
@@ -1166,7 +1132,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         )
         reply = self.strings["all_header"].format(shown_count, hidden_count)
 
-        # === Heroku 2.2 native Rich help (details sections) ===
         if self.config.get("rich_mode", True):
             try:
                 from .. import utils as _u
@@ -1198,7 +1163,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     sections = [("Модули", rich_modules)]
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
-                # closed by default (no open attr)
                 rich_message += "".join(
                     f"<details>\n<summary>{title}</summary>\n{content}\n</details>"
                     for title, content in sections
@@ -1207,10 +1171,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
                 if loader_mod and not getattr(loader_mod, "fully_loaded", True):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
-                # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                # Close via classic keyboard only — avoids empty/broken tg-button under list
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = [[{
+                    "text": "🔻 Закрыть",
+                    "action": "close",
+                }]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
@@ -1224,7 +1189,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         )
                         sent = bool(m)
                     if not sent:
-                        # Back/list from existing form: never open a second message
                         if _is_form_edit:
                             with contextlib.suppress(Exception):
                                 from ..utils.rich_api import to_rich_compatible
@@ -1272,7 +1236,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return False
 
                 banner_url = pick_banner_url(self.config.get("banner_url"))
-                RICH_LIMIT = 28000  # under Bot API rich max 32768
+                RICH_LIMIT = 28000
 
                 def _rows_from_joined(joined: str) -> list[tuple[str, str]]:
                     rows: list[tuple[str, str]] = []
@@ -1304,7 +1268,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         f"</details>"
                     )
 
-                # Keep section order: typically Core then Loaded
                 section_rows: list[tuple[str, list[tuple[str, str]]]] = []
                 for sec_title, joined in sections:
                     rows = _rows_from_joined(joined)
@@ -1326,7 +1289,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     if with_banner and banner_url:
                         parts.append(f'<figure><img src="{banner_url}"/></figure>')
                     head = f"<h2>{text_header}</h2>"
-                    # Header already has module count — only show page when multi-page
                     if pages_total and pages_total > 1 and page is not None:
                         head += f"<p><i>{page + 1}/{pages_total}</i></p>"
                     parts.append(head)
@@ -1338,7 +1300,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
                 full_html = _build_html(section_rows, with_banner=True)
 
-                # Under limit → ONE message, no nav buttons at all
                 if len(full_html) <= RICH_LIMIT:
                     m = await self.inline.rich(
                         message,
@@ -1346,14 +1307,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                     )
                     return bool(m)
 
 
-                # Over limit → split into pages that each stay under RICH_LIMIT
                 flat: list[tuple[str, str, str]] = []
                 for title, rows in section_rows:
                     for name, cmds in rows:
@@ -1401,7 +1361,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         for pi, html in enumerate(pages)
                     ]
 
-                # Always put config banner into first page (random local/http works)
                 if banner_url:
                     pages[0] = inject_banner_html(pages[0], banner_url, force=True)
                     if real_total > 1:
@@ -1417,7 +1376,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     pages=pages if real_total > 1 else None,
                     page=0,
                 )
-                # Large video banner can break Rich → retry without media
                 if not m and banner_url:
                     plain_html = pages[0]
                     if plain_html.lower().startswith("<figure"):
@@ -1435,7 +1393,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "Закрыть", "action": "close", "_callback_data": "hhelp|close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                         page=0,
@@ -1460,29 +1418,24 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if not entries:
                     return False
 
-                # Prefer Rich when enabled (own limit ~28k; nav only if multi-page inside rich)
                 if await _send_help_rich(
                     text_header,
                     [(s, "\n".join(ls)) for s, ls in sections],
                 ):
                     return True
 
-                # Build full classic body (same structure as utils.answer fallback)
                 bodies = []
                 for sec, lines in sections:
                     joined = "".join(lines)
                     if joined.strip():
                         bodies.append(joined)
-                # Approximate plain length (strip tags for limit check)
                 raw_html = text_header + "\n" + "\n".join(bodies)
                 plain_approx = re.sub(r"<[^>]+>", "", raw_html)
-                TG_LIMIT = 4000  # leave margin under 4096
+                TG_LIMIT = 4000
 
-                # Under limit → let caller send normal message (no inline, no fake pages)
                 if len(plain_approx) <= TG_LIMIT:
                     return False
 
-                # Over limit → paginated inline form
                 per_page = 12
                 total_pages = max(1, (len(entries) + per_page - 1) // per_page)
 
@@ -1506,7 +1459,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     if page < total_pages - 1:
                         nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
                     btns.append(nav)
-                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    btns.append([{"text": "🔻 Закрыть", "action": "close", "style": "danger"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
                 if not getattr(self.inline, "init_complete", False):
@@ -1517,7 +1470,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if total_pages > 1:
                     nav.append({"text": "▶️", "callback": goto, "args": (1,)})
                 first_btns.append(nav)
-                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                first_btns.append([{"text": "🔻 Закрыть", "action": "close", "style": "danger"}])
                 await self.inline.form(
                     page_text(0),
                     message=message if self._is_out(message) else utils.get_chat_id(message),
