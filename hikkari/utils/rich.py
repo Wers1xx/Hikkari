@@ -39,12 +39,14 @@ def is_rich_enabled(db: Any = None) -> bool:
             ("Settings", "rich_mode"),
             ("HikkariSettings", "rich_mode"),
             ("CoreMod", "rich_mode"),
+            ("Help", "rich_mode"),
+            ("HelpMod", "rich_mode"),
         ):
             with contextlib.suppress(Exception):
                 val = db.get(mod, key, None)
                 if val is not None:
                     return bool(val)
-        for mod in ("Settings", "CoreMod", "HikkariSettings", "TestMod"):
+        for mod in ("Settings", "CoreMod", "HikkariSettings", "TestMod", "Help", "HelpMod"):
             with contextlib.suppress(Exception):
                 conf = db.get(mod, "config", None)
                 if isinstance(conf, dict) and "rich_mode" in conf:
@@ -55,25 +57,64 @@ def is_rich_enabled(db: Any = None) -> bool:
 
 
 def can_use_rich(client: Any = None, db: Any = None) -> bool:
-    """
-    Rich Messages require:
-      1) rich_mode enabled in Settings
-      2) account has Telegram Premium
-    """
     if not is_rich_enabled(db):
         return False
     if client is None:
         return False
     try:
-        me = getattr(client, "hikkari_me", None) or getattr(client, "hikka_me", None)
-        if me is not None and bool(getattr(me, "premium", False)):
-            return True
-        # some builds stash premium on client
-        if bool(getattr(client, "premium", False)):
-            return True
+        me = (
+            getattr(client, "hikkari_me", None)
+            or getattr(client, "hikka_me", None)
+            or getattr(client, "_me", None)
+            or getattr(client, "me", None)
+        )
+        if me is not None:
+            return bool(getattr(me, "premium", False))
+        if hasattr(client, "premium"):
+            return bool(getattr(client, "premium", False))
+        with contextlib.suppress(Exception):
+            ent = getattr(client, "hikkari_entity", None)
+            if ent is not None:
+                return bool(getattr(ent, "premium", False))
         return False
     except Exception:
         return False
+
+
+def to_classic_text(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return text
+    return strip_rich(text)
+
+
+_API_GATES: dict[str, Any] = {}
+_API_LAST: dict[str, float] = {}
+
+
+async def api_gate(client: Any = None, *, min_interval: float = 0.35) -> None:
+    """Serialize and space out client API bursts to reduce session risk."""
+    import asyncio
+    import time
+
+    key = "main"
+    with contextlib.suppress(Exception):
+        tid = getattr(client, "tg_id", None) if client is not None else None
+        if tid is None and client is not None:
+            me = getattr(client, "hikkari_me", None) or getattr(client, "hikka_me", None)
+            tid = getattr(me, "id", None)
+        if tid is not None:
+            key = str(tid)
+    gate = _API_GATES.get(key)
+    if gate is None:
+        gate = asyncio.Lock()
+        _API_GATES[key] = gate
+    async with gate:
+        now = time.monotonic()
+        last = _API_LAST.get(key, 0.0)
+        wait = min_interval - (now - last)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _API_LAST[key] = time.monotonic()
 
 
 def get_rich_template(db: Any = None) -> str:
