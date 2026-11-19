@@ -815,11 +815,42 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     html = inject_banner_html(html, burl, force=True)
 
                 _mod_key = module.strings.get("name", module.__class__.__name__)
-                # Only Close — Back/Config removed (unreliable callbacks)
-                close_mk = [[{
+                # Hotaru: Config row (if any) + footer Back/Close
+                _from_list = bool(from_list) or bool(
+                    getattr(self, "_help_nav_from_list", False)
+                    or self._acct_get("help_nav_from_list", False)
+                )
+                _has_cfg = False
+                with contextlib.suppress(Exception):
+                    _mc = getattr(module, "config", None)
+                    if _mc is not None:
+                        try:
+                            _has_cfg = bool(len(_mc))
+                        except Exception:
+                            _has_cfg = True
+                close_mk = []
+                if _has_cfg:
+                    close_mk.append([{
+                        "text": "⚙️ Config",
+                        "callback": self.inline__help_open_cfg,
+                        "args": (_mod_key,),
+                        "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
+                        "style": "primary",
+                    }])
+                _footer = []
+                if _from_list:
+                    _footer.append({
+                        "text": "◀️ Назад",
+                        "callback": self.inline__help_show_list,
+                        "_callback_data": "hhelp|list",
+                    })
+                _footer.append({
                     "text": "🔻 Закрыть",
                     "action": "close",
-                }]]
+                    "_callback_data": "hhelp|close",
+                    "style": "danger",
+                })
+                close_mk.append(_footer)
                 # Rich shows tg-buttons in HTML; classic also gets reply_markup
                 if getattr(self.inline, "init_complete", False):
                     try:
@@ -1269,10 +1300,12 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                # Footer Close only
+                # Footer Close (special route hhelp|close)
                 close_mk = [[{
                     "text": "🔻 Закрыть",
                     "action": "close",
+                    "_callback_data": "hhelp|close",
+                    "style": "danger",
                 }]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):

@@ -156,8 +156,10 @@ class Utils(InlineUnit):
                             text=button["message"],
                         )
 
-                if "callback" in button and "_callback_data" not in button:
-                    button["_callback_data"] = utils.rand(30)
+                if "callback" in button:
+                    if "_callback_data" not in button:
+                        button["_callback_data"] = utils.rand(30)
+                    # Always register handler, even when _callback_data was pre-set
                     setup_callbacks = True
 
                 if "input" in button and "_switch_query" not in button:
