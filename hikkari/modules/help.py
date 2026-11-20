@@ -277,7 +277,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     await self.inline.bot.edit_rich_message(
                         html=full_html,
                         inline_message_id=mid,
-                        reply_markup=None,
+                        reply_markup=markup,
                     )
                     return True
                 except Exception as e:
@@ -286,7 +286,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             try:
                 ok = await message.edit(
                     text,
-                    reply_markup=None,
+                    reply_markup=markup,
                     rich_message=full_html,
                 )
                 if ok is not False:
@@ -306,16 +306,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             except Exception:
                 return False
 
-        # Fresh open — embed tg-buttons into HTML first (Hotaru pure-rich).
-        # If HTML already has <tg-button>, do NOT attach classic reply_markup
-        # (avoids duplicate / classic keyboard under Rich).
+        # Fresh open — always attach reply_markup (like 4a096d9). Buttons must work.
         try:
-            full_html, _ = _prepare(html, None, markup)
-            _rm = None if "<tg-button" in (full_html or "").lower() else markup
+            full_html, buttons = _prepare(html, None, markup)
             return await self.inline.rich(
                 message,
                 full_html,
-                reply_markup=_rm,
+                reply_markup=buttons or markup,
                 silent=True,
                 title=str(text)[:64] or "Help",
                 description="Hikkari Help",
@@ -323,12 +320,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             )
         except Exception:
             try:
-                full_html, _ = _prepare(html, None, markup)
-                _rm = None if "<tg-button" in (full_html or "").lower() else markup
+                full_html, buttons = _prepare(html, None, markup)
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=_rm,
+                    reply_markup=buttons or markup,
                     silent=True,
                     title=str(text)[:64] or "Help",
                     description="Hikkari Help",
@@ -896,7 +892,13 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         """Back → modules list. Always EDIT current form, never send a new one."""
         with contextlib.suppress(Exception):
             await call.answer()
+        # InlineCall may lack chat flags — security.py AttributeError otherwise
+        for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
+            if not hasattr(call, attr):
+                with contextlib.suppress(Exception):
+                    setattr(call, attr, val)
         self._help_nav_from_list = False
+        self._acct_set("help_nav_from_list", False)
         try:
             await self.help(call)
         except Exception as e:
@@ -916,6 +918,10 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         """Open module config — same as first working implementation."""
         with contextlib.suppress(Exception):
             await call.answer()
+        for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
+            if not hasattr(call, attr):
+                with contextlib.suppress(Exception):
+                    setattr(call, attr, val)
         try:
             cfg = None
             for m in list(getattr(self.allmodules, "modules", []) or []):
@@ -1300,7 +1306,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     "text": "🔻 Закрыть",
                     "action": "close",
                     "_callback_data": "hhelp|close",
-                    "style": "danger",
                 }]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
