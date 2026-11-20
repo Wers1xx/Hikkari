@@ -469,11 +469,39 @@ class UpdaterMod(loader.Module):
                 else "ru"
             ),
         )
-        caption = (
-            f"⚜️ <b>Hikkari update</b>\n"
-            f"<code>{(current or '')[:7]}</code> → <code>{(pending or '')[:7]}</code>\n"
-            f"Открой виджет, чтобы увидеть полный список изменений."
-        )
+        lang_code = str(
+            (
+                self._db.get("hikkari.translations", "lang", None)
+                or self._db.get("Settings", "lang", None)
+                or "ru"
+            )
+            if getattr(self, "_db", None)
+            else "ru"
+        ).lower()[:2]
+        _cap = {
+            "ru": (
+                "⚜️ <b>Доступно обновление Hikkari</b>\n"
+                "<code>{c}</code> → <code>{p}</code>\n"
+                "Нажми виджет ниже, чтобы увидеть список изменений."
+            ),
+            "en": (
+                "⚜️ <b>Hikkari update available</b>\n"
+                "<code>{c}</code> → <code>{p}</code>\n"
+                "Tap the widget below to see the changelog."
+            ),
+            "uk": (
+                "⚜️ <b>Доступне оновлення Hikkari</b>\n"
+                "<code>{c}</code> → <code>{p}</code>\n"
+                "Натисни віджет нижче, щоб побачити список змін."
+            ),
+            "uz": (
+                "⚜️ <b>Hikkari yangilanishi mavjud</b>\n"
+                "<code>{c}</code> → <code>{p}</code>\n"
+                "O'zgarishlar ro'yxatini ko'rish uchun vidjetni bosing."
+            ),
+        }
+        cap_tpl = _cap.get(lang_code) or _cap["en"]
+        caption = cap_tpl.format(c=(current or "")[:7], p=(pending or "")[:7])
         ikb = {"inline_keyboard": self._markup_rows()}
         result = await send_widget(
             token,

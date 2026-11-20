@@ -103,18 +103,42 @@ def build_changelog_widget_html(
             .replace('"', "&quot;")
         )
 
-    _ru = (lang or "ru").lower().startswith("ru")
-    labels = {
-        "added": "Добавлено" if _ru else "Added",
-        "changed": "Изменено" if _ru else "Changed",
-        "fixed": "Исправлено" if _ru else "Fixed",
-        "removed": "Удалено" if _ru else "Removed",
-        "docs": "Документация" if _ru else "Docs",
-        "other": "Прочее" if _ru else "Other",
+    _lang = (lang or "ru").lower().split()[0][:2]
+    _I18N = {
+        "ru": {
+            "added": "Добавлено", "changed": "Изменено", "fixed": "Исправлено",
+            "removed": "Удалено", "docs": "Документация", "other": "Прочее",
+            "title": "Обновление Hikkari", "empty": "Пока пусто",
+            "hint": "Нажми вкладку, чтобы посмотреть изменения",
+            "open": "Открыть изменения", "branch": "Ветка",
+        },
+        "en": {
+            "added": "Added", "changed": "Changed", "fixed": "Fixed",
+            "removed": "Removed", "docs": "Docs", "other": "Other",
+            "title": "Hikkari Update", "empty": "Empty",
+            "hint": "Tap a tab to view changes",
+            "open": "Open changelog", "branch": "Branch",
+        },
+        "uk": {
+            "added": "Додано", "changed": "Змінено", "fixed": "Виправлено",
+            "removed": "Видалено", "docs": "Документація", "other": "Інше",
+            "title": "Оновлення Hikkari", "empty": "Поки порожньо",
+            "hint": "Натисни вкладку, щоб переглянути зміни",
+            "open": "Відкрити зміни", "branch": "Гілка",
+        },
+        "uz": {
+            "added": "Qo\'shildi", "changed": "O\'zgartirildi", "fixed": "Tuzatildi",
+            "removed": "O\'chirildi", "docs": "Hujjatlar", "other": "Boshqa",
+            "title": "Hikkari yangilanishi", "empty": "Bo\'sh",
+            "hint": "O\'zgarishlarni ko\'rish uchun tabni bosing",
+            "open": "O\'zgarishlarni ochish", "branch": "Tarmoq",
+        },
     }
-    title = "Обновление Hikkari" if _ru else "Hikkari Update"
-    empty = "Пока пусто" if _ru else "Empty"
-    hint = "Нажми вкладку, чтобы посмотреть изменения" if _ru else "Tap a tab to view changes"
+    L = _I18N.get(_lang) or _I18N.get("en") or _I18N["ru"]
+    labels = {k: L[k] for k in ("added", "changed", "fixed", "removed", "docs", "other")}
+    title = L["title"]
+    empty = L["empty"]
+    hint = L["hint"]
 
     cur = esc((current or "")[:7])
     pend = esc((pending or "")[:7])

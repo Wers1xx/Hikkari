@@ -440,10 +440,16 @@ class Events(InlineUnit):
                             help_inst = m
                             break
                 try:
-                    via = bool(getattr(call, "via_inline", False))
+                    via = bool(getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None))
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
+                    if not hasattr(icall, _a):
+                        try:
+                            setattr(icall, _a, _v)
+                        except Exception:
+                            pass
                 if help_inst is not None:
                     if hasattr(help_inst, "inline__help_show_list"):
                         await help_inst.inline__help_show_list(icall)
@@ -460,10 +466,16 @@ class Events(InlineUnit):
             with contextlib.suppress(Exception):
                 await call.answer()
             try:
-                via = bool(getattr(call, "via_inline", False))
+                via = bool(getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None))
                 icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
             except Exception:
                 icall = call
+                for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
+                    if not hasattr(icall, _a):
+                        try:
+                            setattr(icall, _a, _v)
+                        except Exception:
+                            pass
             with contextlib.suppress(Exception):
                 await self._close_unit_handler(icall)
             return
@@ -496,10 +508,16 @@ class Events(InlineUnit):
                             help_inst = m
                             break
                 try:
-                    via = bool(getattr(call, "via_inline", False))
+                    via = bool(getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None))
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
+                    if not hasattr(icall, _a):
+                        try:
+                            setattr(icall, _a, _v)
+                        except Exception:
+                            pass
                 if help_inst is not None:
                     await help_inst.inline__help_open_cfg(icall, mod_name)
                 return
@@ -540,10 +558,16 @@ class Events(InlineUnit):
                             help_inst = m
                             break
                 try:
-                    via = bool(getattr(call, "via_inline", False))
+                    via = bool(getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None))
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
+                    if not hasattr(icall, _a):
+                        try:
+                            setattr(icall, _a, _v)
+                        except Exception:
+                            pass
                 with contextlib.suppress(Exception):
                     await call.answer(("Help · " + mod_name)[:60])
                 if help_inst is not None:
@@ -673,7 +697,7 @@ class Events(InlineUnit):
         if isinstance(call_data, str) and (call_data.strip() == "hcfg|close" or call_data.strip().startswith("hcfg|c|")):
             with contextlib.suppress(Exception):
                 await call.answer()
-            icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+            icall = (InlineCall if (getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None)) else BotInlineCall)(
                 call, self, getattr(self, "_cfg_unit_id", None)
             )
             with contextlib.suppress(Exception):
@@ -708,7 +732,7 @@ class Events(InlineUnit):
                     await call.answer("Config module not found", show_alert=True)
                     return
                 # Use module-level imports (local import would shadow InlineCall for whole fn)
-                icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+                icall = (InlineCall if (getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None)) else BotInlineCall)(
                     call, self, None
                 )
                 if action == "builtin":
@@ -738,7 +762,7 @@ class Events(InlineUnit):
             if await self.check_inline_security(func=func, user=user_id):
                 try:
                     await func(
-                        (InlineCall if call.via_inline else BotInlineCall)(
+                        (InlineCall if (getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None)) else BotInlineCall)(
                             call, self, None
                         ),
                     )
@@ -784,7 +808,7 @@ class Events(InlineUnit):
 
                     try:
                         result = await button["callback"](
-                            (InlineCall if call.via_inline else BotInlineCall)(
+                            (InlineCall if (getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None)) else BotInlineCall)(
                                 call, self, unit_id
                             ),
                             *button.get("args", []),
@@ -849,7 +873,7 @@ class Events(InlineUnit):
             if not isinstance(kwargs, dict):
                 kwargs = {}
 
-            icall = (InlineCall if getattr(call, "via_inline", False) else BotInlineCall)(
+            icall = (InlineCall if (getattr(call, "via_inline", False) or getattr(call, "inline_message_id", None) or getattr(call, "inlineMessageId", None)) else BotInlineCall)(
                 call, self, self._unit_id_from_call(call)
             )
             # attach unit_id if handler is list/gallery partial

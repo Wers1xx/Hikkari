@@ -260,35 +260,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             return None
 
         async def _edit_rich_same(full_html: str, mid) -> bool:
-            """Edit existing via-message. Rich works via Bot API token only."""
+            """Edit existing via-message in place."""
             if not mid:
                 return False
-            # 1) HTTP Bot API (official rich path)
-            try:
-                from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                client = getattr(self, "_client", None) or getattr(self, "client", None)
-                token = _find_bot_token(client)
-                if not token and hasattr(self.inline, "bot"):
-                    token = getattr(self.inline.bot, "token", None) or getattr(
-                        getattr(self.inline, "_token", None), "__str__", lambda: None
-                    )()
-                if not token:
-                    # try common attrs
-                    for obj in (self.inline, getattr(self.inline, "bot", None)):
-                        if obj is None:
-                            continue
-                        for attr in ("token", "_token", "bot_token"):
-                            t = getattr(obj, attr, None)
-                            if isinstance(t, str) and ":" in t:
-                                token = t
-                                break
-                if token:
-                    ok = await _erm(str(token), full_html, inline_message_id=str(mid))
-                    if ok:
-                        return True
-            except Exception as e:
-                logger.warning("help bot-api edit failed: %s", e)
-            # 2) MTProto bot session
+            logger.warning("help edit try imid type=%s repr=%r", type(mid).__name__, mid if isinstance(mid, str) else type(mid))
+            # 1) MTProto first — works with InputBotInlineMessageID objects
             try:
                 if hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                     await self.inline.bot.edit_rich_message(
@@ -299,6 +275,36 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return True
             except Exception as e:
                 logger.warning("help mtproto edit_rich failed: %s", e)
+            # 2) Bot API only when imid is a real base64-ish string
+            imid_str = mid if isinstance(mid, str) else None
+            if imid_str is None:
+                # try pack from MTProto object
+                try:
+                    from hikkaritl import utils as tl_utils
+                    if hasattr(tl_utils, "pack_bot_inline_message_id"):
+                        imid_str = tl_utils.pack_bot_inline_message_id(mid)
+                except Exception:
+                    pass
+            if imid_str and isinstance(imid_str, str) and len(imid_str) > 8:
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    client = getattr(self, "_client", None) or getattr(self, "client", None)
+                    token = _find_bot_token(client)
+                    if not token:
+                        for obj in (self.inline, getattr(self.inline, "bot", None)):
+                            if obj is None:
+                                continue
+                            for attr in ("token", "_token", "bot_token"):
+                                t = getattr(obj, attr, None)
+                                if isinstance(t, str) and ":" in t:
+                                    token = t
+                                    break
+                    if token:
+                        ok = await _erm(str(token), full_html, inline_message_id=str(imid_str))
+                        if ok:
+                            return True
+                except Exception as e:
+                    logger.warning("help bot-api edit failed: %s", e)
             return False
 
         # Pure rich: buttons ONLY as <tg-button> in HTML — never classic reply_markup
@@ -1341,12 +1347,19 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                # Footer Close (special route hhelp|close)
+                # Footer Close (special route hhelp|close) — embed in HTML so pure-rich shows it
                 close_mk = [[{
                     "text": "🔻 Закрыть",
                     "action": "close",
                     "_callback_data": "hhelp|close",
+                    "disable_security": True,
+                    "style": "danger",
                 }]]
+                with contextlib.suppress(Exception):
+                    from ..utils.rich_api import markup_to_tg_rows as _m2tg
+                    _btn = _m2tg(close_mk, "")
+                    if _btn and _btn not in rich_message:
+                        rich_message = rich_message + "\n" + _btn
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
