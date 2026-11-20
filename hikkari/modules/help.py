@@ -236,69 +236,67 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
+        def _imid(msg):
+            mid = getattr(msg, "inline_message_id", None)
+            if mid:
+                return mid
+            oc = getattr(msg, "original_call", None)
+            if oc is not None:
+                mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
+                if mid:
+                    return mid
+            return None
+
         if is_nav:
             unit_id = getattr(message, "unit_id", None)
-            if not unit_id:
-                mid0 = getattr(message, "inline_message_id", None)
-                if mid0:
-                    for uid, unit in list(getattr(self.inline, "_units", {}).items()):
-                        if unit.get("inline_message_id") == mid0:
-                            unit_id = uid
-                            with contextlib.suppress(Exception):
-                                message.unit_id = uid
-                            break
-            if not unit_id:
-                with contextlib.suppress(Exception):
-                    return await self.inline.rich(
-                        message,
-                        html,
-                        reply_markup=markup,
-                        silent=True,
-                        title=str(text)[:64] or "Help",
-                        description="Hikkari Help",
-                        **({"thumbnail_url": burl} if burl else {}),
-                    )
-                with contextlib.suppress(Exception):
-                    return await self.inline.form(
-                        text,
-                        message=message,
-                        reply_markup=markup,
-                        rich_message=html,
-                        silent=True,
-                        **banner_kw,
-                    )
+            mid = _imid(message)
+            if not unit_id and mid:
+                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
+                    if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
+                        unit_id = uid
+                        with contextlib.suppress(Exception):
+                            message.unit_id = uid
+                        break
             full_html, buttons = _prepare(html, unit_id, markup)
-            mid = getattr(message, "inline_message_id", None)
-            if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
-                mid = self.inline._units[unit_id].get("inline_message_id")
-
+            # 1) Edit same via-message by inline_message_id (works even without unit)
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
                     await self.inline.bot.edit_rich_message(
                         html=full_html,
                         inline_message_id=mid,
-                        reply_markup=markup,
+                        reply_markup=buttons or markup,
                     )
                     return True
                 except Exception as e:
-                    logger.debug("help edit_rich_message: %s", e)
-
+                    logger.warning("help edit_rich_message failed: %s", e)
+            # 2) rich_api token path (same as events hk| pagination)
+            if mid:
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
+                    if token:
+                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        if ok:
+                            return True
+                except Exception as e:
+                    logger.warning("help rich_api edit failed: %s", e)
+            # 3) message.edit
             try:
                 ok = await message.edit(
                     text,
-                    reply_markup=markup,
+                    reply_markup=buttons or markup,
                     rich_message=full_html,
                 )
                 if ok is not False:
                     return ok
-            except Exception:
-                pass
-
+            except Exception as e:
+                logger.warning("help message.edit failed: %s", e)
+            # 4) last resort — new rich
             try:
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=markup,
+                    reply_markup=buttons or markup,
                     silent=True,
                     title=str(text)[:64] or "Help",
                     description="Hikkari Help",
@@ -810,15 +808,20 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
-                _mod_key = module.strings.get("name", module.__class__.__name__)
+                _cls_key = module.__class__.__name__
+                _mod_key = module.strings.get("name", _cls_key)
                 # from_list: explicit flag from hmod callback (not type-guess)
-                _from_list = bool(from_list) or bool(getattr(self, "_help_nav_from_list", False))
+                _from_list = bool(from_list) or bool(
+                    getattr(self, "_help_nav_from_list", False)
+                    or self._acct_get("help_nav_from_list", False)
+                )
                 _row = []
                 if _from_list:
                     _row.append({
                         "text": "◀️ Назад",
                         "callback": self.inline__help_show_list,
                         "_callback_data": "hhelp|list",
+                        "disable_security": True,
                     })
                 _has_cfg = False
                 with contextlib.suppress(Exception):
@@ -829,17 +832,20 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                         except Exception:
                             _has_cfg = True
                 if _has_cfg:
-                    _mod_key = module.strings.get("name", module.__class__.__name__)
+                    # Prefer class name in callback — lookup is reliable
+                    _cfg_key = _cls_key
                     _row.append({
                         "text": "⚙️ Config",
                         "callback": self.inline__help_open_cfg,
-                        "args": (_mod_key,),
-                        "_callback_data": ("hcfgmod|" + str(_mod_key))[:64],
+                        "args": (_cfg_key,),
+                        "_callback_data": ("hcfgmod|" + str(_cfg_key))[:64],
+                        "disable_security": True,
                     })
                 _row.append({
                     "text": "🔻 Закрыть",
                     "action": "close",
                     "_callback_data": "hhelp|close",
+                    "disable_security": True,
                 })
                 close_mk = [_row]
                 # Rich shows tg-buttons in HTML; classic also gets reply_markup
@@ -889,16 +895,22 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         )
 
     async def inline__help_show_list(self, call):
-        """Back → modules list. Always EDIT current form, never send a new one."""
+        """Back → modules list. Edit current via-message in place."""
         with contextlib.suppress(Exception):
-            await call.answer()
-        # InlineCall may lack chat flags — security.py AttributeError otherwise
+            await call.answer("← Список")
         for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
-            if not hasattr(call, attr):
+            with contextlib.suppress(Exception):
+                setattr(call, attr, val)
+        # Preserve imid from original Telegram callback
+        oc = getattr(call, "original_call", None)
+        if oc is not None and not getattr(call, "inline_message_id", None):
+            mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
+            if mid:
                 with contextlib.suppress(Exception):
-                    setattr(call, attr, val)
+                    call.inline_message_id = mid
         self._help_nav_from_list = False
-        self._acct_set("help_nav_from_list", False)
+        with contextlib.suppress(Exception):
+            self._acct_set("help_nav_from_list", False)
         try:
             await self.help(call)
         except Exception as e:
@@ -908,33 +920,38 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
     async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
         try:
-            # Do NOT treat as list-nav unless we came from list originally
-            fl = bool(getattr(self, "_help_nav_from_list", False))
+            fl = bool(
+                getattr(self, "_help_nav_from_list", False)
+                or self._acct_get("help_nav_from_list", False)
+            )
             await self.modhelp(call, mod_name or "", from_list=fl)
         except Exception as e:
             logger.debug("help back from cfg: %s", e)
 
     async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open module config — same as first working implementation."""
+        """Open module config — edit same message."""
         with contextlib.suppress(Exception):
-            await call.answer()
+            await call.answer("Config…")
         for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
-            if not hasattr(call, attr):
+            with contextlib.suppress(Exception):
+                setattr(call, attr, val)
+        oc = getattr(call, "original_call", None)
+        if oc is not None and not getattr(call, "inline_message_id", None):
+            mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
+            if mid:
                 with contextlib.suppress(Exception):
-                    setattr(call, attr, val)
+                    call.inline_message_id = mid
         try:
-            cfg = None
-            for m in list(getattr(self.allmodules, "modules", []) or []):
-                cn = m.__class__.__name__.lower()
-                if "config" in cn and hasattr(m, "inline__configure"):
-                    cfg = m
-                    break
+            cfg = (
+                self.lookup("HikkariConfig")
+                or self.lookup("HikkariConfigMod")
+                or self.lookup("config")
+            )
             if cfg is None:
-                cfg = (
-                    self.lookup("HikkariConfig")
-                    or self.lookup("HikkariConfigMod")
-                    or self.lookup("config")
-                )
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    if hasattr(m, "inline__configure") and "config" in m.__class__.__name__.lower():
+                        cfg = m
+                        break
             if cfg is None or not hasattr(cfg, "inline__configure"):
                 with contextlib.suppress(Exception):
                     await call.answer("Config unavailable", show_alert=True)
@@ -959,19 +976,15 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     await call.answer("No config", show_alert=True)
                 return
 
-            key = mod.__class__.__name__
+            conf_key = mod.__class__.__name__
             with contextlib.suppress(Exception):
-                key = str(mod.strings.get("name", key)) or key
-
-            with contextlib.suppress(Exception):
-                cfg._help_return_mod = key
+                cfg._help_return_mod = conf_key
                 cfg._help_return_help = self
                 cfg._help_from_list = bool(
                     self._acct_get("help_nav_from_list", False)
                     or getattr(self, "_help_nav_from_list", False)
                 )
-
-            await cfg.inline__configure(call, str(key))
+            await cfg.inline__configure(call, str(conf_key))
         except Exception as e:
             logger.exception("help open cfg: %s", e)
             with contextlib.suppress(Exception):

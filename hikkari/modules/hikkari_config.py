@@ -202,63 +202,59 @@ class HikkariConfigMod(loader.Module):
 
         if is_nav:
             unit_id = getattr(message, "unit_id", None)
-            # Without unit, button callbacks become noop — create form unit
-            if not unit_id:
-                with contextlib.suppress(Exception):
-                    return await self.inline.form(
-                        text,
-                        message=message,
-                        reply_markup=markup,
-                        rich_message=html,
-                        silent=True,
-                        **banner_kw,
-                    )
-                with contextlib.suppress(Exception):
-                    return await self.inline.form(
-                        text,
-                        message=message,
-                        reply_markup=markup,
-                        silent=True,
-                        **banner_kw,
-                    )
-            full_html, buttons = _prepare(html, unit_id, markup)
             mid = getattr(message, "inline_message_id", None)
-            if mid is None and unit_id and unit_id in getattr(self.inline, "_units", {}):
-                mid = self.inline._units[unit_id].get("inline_message_id")
-
-            # 1) Official edit_rich_message (same bubble, pure rich)
+            if not mid:
+                oc = getattr(message, "original_call", None)
+                if oc is not None:
+                    mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
+            if not unit_id and mid:
+                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
+                    if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
+                        unit_id = uid
+                        with contextlib.suppress(Exception):
+                            message.unit_id = uid
+                        break
+            full_html, buttons = _prepare(html, unit_id, markup)
+            # 1) edit same bubble
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
                     await self.inline.bot.edit_rich_message(
                         html=full_html,
                         inline_message_id=mid,
-                        reply_markup=None,
+                        reply_markup=buttons or markup,
                     )
                     return True
                 except Exception as e:
                     import logging
-                    logging.getLogger(__name__).debug(
+                    logging.getLogger(__name__).warning(
                         "cfg edit_rich_message failed: %s", e, exc_info=True
                     )
-
-            # 2) message.edit with rich_message only (no classic kb)
+            if mid:
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
+                    if token:
+                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        if ok:
+                            return True
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning("cfg rich_api edit: %s", e)
             try:
                 ok = await message.edit(
                     text,
-                    reply_markup=None,
+                    reply_markup=buttons or markup,
                     rich_message=full_html,
                 )
                 if ok is not False:
                     return ok
             except Exception:
                 pass
-
-            # 3) Open a NEW pure-rich unit (still not classic form)
             try:
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=markup,
+                    reply_markup=buttons or markup,
                     silent=True,
                     title="HikkariConfig",
                     description="Config",
