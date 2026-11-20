@@ -685,6 +685,22 @@ class Form(InlineUnit):
                 mid = getattr(message, "inline_message_id", None)
                 if mid is None and unit_id and unit_id in self._units:
                     mid = self._units[unit_id].get("inline_message_id")
+                # Prefer Bot API token edit for official rich
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    token = _find_bot_token(getattr(self, "_client", None))
+                    if not token:
+                        for attr in ("token", "_token", "bot_token"):
+                            t = getattr(self, attr, None) or getattr(getattr(self, "bot", None), attr, None)
+                            if isinstance(t, str) and ":" in t:
+                                token = t
+                                break
+                    if token and mid:
+                        ok = await _erm(str(token), body, inline_message_id=str(mid))
+                        if ok:
+                            return True
+                except Exception:
+                    logger.debug("rich bot-api edit failed", exc_info=True)
                 if mid and hasattr(getattr(self, "bot", None), "edit_rich_message"):
                     await self.bot.edit_rich_message(
                         html=body,

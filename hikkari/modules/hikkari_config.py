@@ -215,13 +215,38 @@ class HikkariConfigMod(loader.Module):
                             message.unit_id = uid
                         break
             full_html, buttons = _prepare(html, unit_id, markup)
-            # 1) edit same bubble
+            # register callbacks, but do NOT attach classic keyboard (tg-buttons in HTML only)
+            with contextlib.suppress(Exception):
+                if markup:
+                    self.inline._generate_markup(markup)
+            # 0) Bot API token edit (official rich)
+            if mid:
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
+                    if not token:
+                        for obj in (self.inline, getattr(self.inline, "bot", None)):
+                            if obj is None:
+                                continue
+                            for attr in ("token", "_token", "bot_token"):
+                                t = getattr(obj, attr, None)
+                                if isinstance(t, str) and ":" in t:
+                                    token = t
+                                    break
+                    if token:
+                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        if ok:
+                            return True
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning("cfg bot-api edit: %s", e)
+            # 1) edit same bubble (mtproto)
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
                     await self.inline.bot.edit_rich_message(
                         html=full_html,
                         inline_message_id=mid,
-                        reply_markup=buttons or markup,
+                        reply_markup=None,
                     )
                     return True
                 except Exception as e:
@@ -264,10 +289,14 @@ class HikkariConfigMod(loader.Module):
 
         # Fresh open
         try:
+            full_html, _ = _prepare(html, None, markup)
+            with contextlib.suppress(Exception):
+                if markup:
+                    self.inline._generate_markup(markup)
             return await self.inline.rich(
                 message,
-                html,
-                reply_markup=markup,
+                full_html,
+                reply_markup=None,
                 silent=True,
                 title="HikkariConfig",
                 description="Config",
@@ -278,7 +307,7 @@ class HikkariConfigMod(loader.Module):
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=markup,
+                    reply_markup=None,
                     silent=True,
                     title="HikkariConfig",
                     description="Config",
