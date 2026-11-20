@@ -444,6 +444,20 @@ class Events(InlineUnit):
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                
+                # Force imid onto icall (Config-style nav needs this)
+                try:
+                    _mid = (
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "inlineMessageId", None)
+                        or getattr(getattr(call, "query", None), "msg_id", None)
+                    )
+                    if _mid is not None:
+                        icall.inline_message_id = _mid
+                        if getattr(icall, "original_call", None) is None:
+                            icall.original_call = call
+                except Exception:
+                    pass
                 for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
                     if not hasattr(icall, _a):
                         try:
@@ -470,6 +484,20 @@ class Events(InlineUnit):
                 icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
             except Exception:
                 icall = call
+                
+                # Force imid onto icall (Config-style nav needs this)
+                try:
+                    _mid = (
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "inlineMessageId", None)
+                        or getattr(getattr(call, "query", None), "msg_id", None)
+                    )
+                    if _mid is not None:
+                        icall.inline_message_id = _mid
+                        if getattr(icall, "original_call", None) is None:
+                            icall.original_call = call
+                except Exception:
+                    pass
                 for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
                     if not hasattr(icall, _a):
                         try:
@@ -512,6 +540,20 @@ class Events(InlineUnit):
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                
+                # Force imid onto icall (Config-style nav needs this)
+                try:
+                    _mid = (
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "inlineMessageId", None)
+                        or getattr(getattr(call, "query", None), "msg_id", None)
+                    )
+                    if _mid is not None:
+                        icall.inline_message_id = _mid
+                        if getattr(icall, "original_call", None) is None:
+                            icall.original_call = call
+                except Exception:
+                    pass
                 for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
                     if not hasattr(icall, _a):
                         try:
@@ -562,6 +604,20 @@ class Events(InlineUnit):
                     icall = (InlineCall if via else BotInlineCall)(call, self, self._unit_id_from_call(call))
                 except Exception:
                     icall = call
+                
+                # Force imid onto icall (Config-style nav needs this)
+                try:
+                    _mid = (
+                        getattr(call, "inline_message_id", None)
+                        or getattr(call, "inlineMessageId", None)
+                        or getattr(getattr(call, "query", None), "msg_id", None)
+                    )
+                    if _mid is not None:
+                        icall.inline_message_id = _mid
+                        if getattr(icall, "original_call", None) is None:
+                            icall.original_call = call
+                except Exception:
+                    pass
                 for _a, _v in (("is_channel", False), ("is_private", True), ("is_group", False)):
                     if not hasattr(icall, _a):
                         try:

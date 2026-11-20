@@ -191,7 +191,8 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 **banner_kw,
             )
 
-        # ── Pure Rich (identical idea to config) ──
+
+        # ── Pure Rich — same flow as HikkariConfig._cfg_form (do not diverge) ──
         from ..utils.rich_api import (
             inject_banner_html,
             to_rich_compatible,
@@ -204,17 +205,17 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             html = to_rich_compatible(body)
 
         burl = None
-        if banner_url and str(banner_url).startswith(("http://", "https://")):
-            burl = str(banner_url)
-        if not burl:
-            with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):
+            if banner_url:
+                burl = str(banner_url)
+            if not burl:
                 burl = pick_banner_url(self.config.get("banner_url"))
         if burl:
             with contextlib.suppress(Exception):
-                html = inject_banner_html(html, burl, force=True)
+                html = inject_banner_html(html, burl)
 
         def _prepare(h, unit_id, buttons):
-            # Always register handlers / assign _callback_data (Hotaru-style reliable nav)
+            """Register callbacks + embed tg-buttons into HTML (config-identical)."""
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["buttons"] = buttons
                 self.inline._units[unit_id]["text"] = text
@@ -223,7 +224,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 buttons = self.inline._units[unit_id].get("buttons") or buttons
             else:
                 with contextlib.suppress(Exception):
-                    # Process list in-place even without unit yet
                     self.inline._generate_markup(buttons)
             btn_html = ""
             with contextlib.suppress(Exception):
@@ -234,98 +234,44 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 self.inline._units[unit_id]["rich_html"] = full
             return full, buttons
 
-
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
-        def _imid(msg):
-            mid = getattr(msg, "inline_message_id", None)
-            if mid:
-                return mid
-            oc = getattr(msg, "original_call", None)
-            if oc is not None:
-                mid = (
-                    getattr(oc, "inline_message_id", None)
-                    or getattr(oc, "inlineMessageId", None)
-                )
-                if mid:
-                    return mid
-            return None
-
-        def _find_unit(mid):
-            if not mid:
-                return None
-            for uid, unit in list(getattr(self.inline, "_units", {}).items()):
-                if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
-                    return uid
-            return None
-
-        async def _edit_rich_same(full_html: str, mid) -> bool:
-            """Edit existing via-message in place."""
-            if not mid:
-                return False
-            logger.warning("help edit try imid type=%s repr=%r", type(mid).__name__, mid if isinstance(mid, str) else type(mid))
-            # 1) MTProto first — works with InputBotInlineMessageID objects
-            try:
-                if hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                    await self.inline.bot.edit_rich_message(
-                        html=full_html,
-                        inline_message_id=mid,
-                        reply_markup=None,
-                    )
-                    return True
-            except Exception as e:
-                logger.warning("help mtproto edit_rich failed: %s", e)
-            # 2) Bot API only when imid is a real base64-ish string
-            imid_str = mid if isinstance(mid, str) else None
-            if imid_str is None:
-                # try pack from MTProto object
-                try:
-                    from hikkaritl import utils as tl_utils
-                    if hasattr(tl_utils, "pack_bot_inline_message_id"):
-                        imid_str = tl_utils.pack_bot_inline_message_id(mid)
-                except Exception:
-                    pass
-            if imid_str and isinstance(imid_str, str) and len(imid_str) > 8:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    client = getattr(self, "_client", None) or getattr(self, "client", None)
-                    token = _find_bot_token(client)
-                    if not token:
-                        for obj in (self.inline, getattr(self.inline, "bot", None)):
-                            if obj is None:
-                                continue
-                            for attr in ("token", "_token", "bot_token"):
-                                t = getattr(obj, attr, None)
-                                if isinstance(t, str) and ":" in t:
-                                    token = t
-                                    break
-                    if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(imid_str))
-                        if ok:
-                            return True
-                except Exception as e:
-                    logger.warning("help bot-api edit failed: %s", e)
-            return False
-
-        # Pure rich: buttons ONLY as <tg-button> in HTML — never classic reply_markup
-        # (classic kb under rich = duplicate buttons on screen)
-        full_html, _buttons = _prepare(html, None, markup)
-        # register callbacks for pre-set data without attaching classic kb
-        with contextlib.suppress(Exception):
-            if markup:
-                self.inline._generate_markup(markup)
-
         if is_nav:
-            mid = _imid(message)
-            unit_id = getattr(message, "unit_id", None) or _find_unit(mid)
-            if unit_id and mid:
-                with contextlib.suppress(Exception):
-                    self.inline._units[unit_id]["rich_message"] = full_html
-                    self.inline._units[unit_id]["rich_html"] = full_html
-                    self.inline._units[unit_id]["inline_message_id"] = mid
-            if await _edit_rich_same(full_html, mid):
-                return True
-            # fallback message.edit without classic kb
+            unit_id = getattr(message, "unit_id", None)
+            mid = getattr(message, "inline_message_id", None)
+            if not mid:
+                oc = getattr(message, "original_call", None)
+                if oc is not None:
+                    mid = (
+                        getattr(oc, "inline_message_id", None)
+                        or getattr(oc, "inlineMessageId", None)
+                    )
+            if not unit_id and mid:
+                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
+                    if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
+                        unit_id = uid
+                        with contextlib.suppress(Exception):
+                            message.unit_id = uid
+                        break
+            # also match by object identity / string form
+            if not unit_id and mid is not None:
+                mid_s = str(mid)
+                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
+                    if not isinstance(unit, dict):
+                        continue
+                    um = unit.get("inline_message_id")
+                    if um is mid or (um is not None and str(um) == mid_s):
+                        unit_id = uid
+                        with contextlib.suppress(Exception):
+                            message.unit_id = uid
+                        break
+
+            full_html, buttons = _prepare(html, unit_id, markup)
+            with contextlib.suppress(Exception):
+                if markup:
+                    self.inline._generate_markup(markup)
+
+            # 1) Prefer message.edit → _edit_unit (same path config uses via form)
             try:
                 ok = await message.edit(
                     text,
@@ -336,10 +282,61 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return ok
             except Exception as e:
                 logger.warning("help message.edit failed: %s", e)
-            return False
 
-        # Fresh open — pure rich, no classic keyboard
+            # 2) MTProto bot.edit_rich_message with raw imid object
+            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
+                try:
+                    await self.inline.bot.edit_rich_message(
+                        html=full_html,
+                        inline_message_id=mid,
+                        reply_markup=None,
+                    )
+                    return True
+                except Exception as e:
+                    logger.warning("help mtproto edit_rich failed: %s", e)
+
+            # 3) Bot API only with str imid (never str(TL object))
+            if isinstance(mid, str) and len(mid) > 8:
+                try:
+                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
+                    token = _find_bot_token(
+                        getattr(self, "_client", None) or getattr(self, "client", None)
+                    )
+                    if not token:
+                        for obj in (self.inline, getattr(self.inline, "bot", None)):
+                            if obj is None:
+                                continue
+                            for attr in ("token", "_token", "bot_token"):
+                                t = getattr(obj, attr, None)
+                                if isinstance(t, str) and ":" in t:
+                                    token = t
+                                    break
+                    if token:
+                        ok = await _erm(str(token), full_html, inline_message_id=mid)
+                        if ok:
+                            return True
+                except Exception as e:
+                    logger.warning("help bot-api edit failed: %s", e)
+
+            # 4) last resort: open new rich (still better than freeze)
+            try:
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=None,
+                    silent=True,
+                    title=str(text)[:64] or "Help",
+                    description="Hikkari Help",
+                )
+            except Exception:
+                return False
+
+        # Fresh open — pure rich, tg-buttons only (no classic kb)
         try:
+            full_html, _ = _prepare(html, None, markup)
+            with contextlib.suppress(Exception):
+                if markup:
+                    self.inline._generate_markup(markup)
             return await self.inline.rich(
                 message,
                 full_html,
@@ -351,6 +348,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             )
         except Exception:
             try:
+                full_html, _ = _prepare(html, None, markup)
                 return await self.inline.rich(
                     message,
                     full_html,
