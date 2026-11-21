@@ -170,6 +170,9 @@ class HikkariConfigMod(loader.Module):
             pick_banner_url,
             markup_to_tg_rows,
         )
+        import logging as _logging
+        import re as _re
+        _log = _logging.getLogger(__name__)
 
         body = str(text or "")
         html = body
@@ -185,25 +188,56 @@ class HikkariConfigMod(loader.Module):
                 if isinstance(v, str) and v.startswith(("http://", "https://")):
                     burl = v
                     break
-        if burl:
-            with contextlib.suppress(Exception):
-                html = inject_banner_html(html, burl, force=True)
+        # Do NOT inject external banner into rich HTML — causes
+        # EXTERNAL_MEDIA_NOT_SUPPORTED and answerInlineQuery drops ALL results
+        # (buttons included). Banner stays available for classic photo fallback.
 
         def _prepare(h, unit_id, buttons):
+            buttons = buttons or []
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["buttons"] = buttons
                 self.inline._units[unit_id]["text"] = text
                 with contextlib.suppress(Exception):
                     self.inline.generate_markup(unit_id)
                 buttons = self.inline._units[unit_id].get("buttons") or buttons
+            else:
+                with contextlib.suppress(Exception):
+                    self.inline._generate_markup(buttons)
             btn_html = ""
             with contextlib.suppress(Exception):
                 btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
+            if buttons and not btn_html:
+                _log.warning("cfg _prepare: %s buttons but empty btn_html", len(buttons))
             full = h + ("\n" + btn_html if btn_html else "")
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["rich_message"] = full
                 self.inline._units[unit_id]["rich_html"] = full
             return full, buttons
+
+        async def _classic_with_buttons(msg, body_text, buttons):
+            try:
+                return await self.inline.form(
+                    body_text,
+                    message=msg,
+                    reply_markup=buttons or markup,
+                    silent=True,
+                    **{
+                        k: banner_kw[k]
+                        for k in ("photo", "video", "gif")
+                        if k in banner_kw and banner_kw[k] is not None
+                    },
+                )
+            except Exception:
+                try:
+                    return await self.inline.form(
+                        body_text,
+                        message=msg,
+                        reply_markup=buttons or markup,
+                        silent=True,
+                    )
+                except Exception as e:
+                    _log.warning("cfg classic fallback failed: %s", e)
+                    return False
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
@@ -213,7 +247,9 @@ class HikkariConfigMod(loader.Module):
             if not mid:
                 oc = getattr(message, "original_call", None)
                 if oc is not None:
-                    mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
+                    mid = getattr(oc, "inline_message_id", None) or getattr(
+                        oc, "inlineMessageId", None
+                    )
             if not unit_id and mid:
                 for uid, unit in list(getattr(self.inline, "_units", {}).items()):
                     if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
@@ -222,32 +258,10 @@ class HikkariConfigMod(loader.Module):
                             message.unit_id = uid
                         break
             full_html, buttons = _prepare(html, unit_id, markup)
-            # register callbacks, but do NOT attach classic keyboard (tg-buttons in HTML only)
             with contextlib.suppress(Exception):
                 if markup:
                     self.inline._generate_markup(markup)
-            # 0) Bot API token edit (official rich)
-            if mid:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
-                    if not token:
-                        for obj in (self.inline, getattr(self.inline, "bot", None)):
-                            if obj is None:
-                                continue
-                            for attr in ("token", "_token", "bot_token"):
-                                t = getattr(obj, attr, None)
-                                if isinstance(t, str) and ":" in t:
-                                    token = t
-                                    break
-                    if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
-                        if ok:
-                            return True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("cfg bot-api edit: %s", e)
-            # 1) edit same bubble (mtproto)
+
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
                     await self.inline.bot.edit_rich_message(
@@ -257,50 +271,77 @@ class HikkariConfigMod(loader.Module):
                     )
                     return True
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "cfg edit_rich_message failed: %s", e, exc_info=True
-                    )
-            if mid:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
-                    if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
-                        if ok:
-                            return True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("cfg rich_api edit: %s", e)
+                    _log.warning("cfg mtproto edit: %s", e)
+
+            try:
+                from ..utils.rich_api import (
+                    edit_rich_message as _erm,
+                    _find_bot_token,
+                    pack_inline_message_id,
+                )
+                token = _find_bot_token(
+                    getattr(self, "_client", None) or getattr(self, "client", None)
+                )
+                packed = pack_inline_message_id(mid) if mid is not None else None
+                if token and packed:
+                    if await _erm(str(token), full_html, inline_message_id=packed):
+                        return True
+            except Exception as e:
+                _log.warning("cfg bot-api edit: %s", e)
+
             try:
                 ok = await message.edit(
-                    text,
-                    reply_markup=buttons or markup,
-                    rich_message=full_html,
+                    text, reply_markup=None, rich_message=full_html
                 )
                 if ok is not False:
                     return ok
             except Exception:
                 pass
-            try:
-                return await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=buttons or markup,
-                    silent=True,
-                    title="HikkariConfig",
-                    description="Config",
-                )
-            except Exception:
-                return False
 
-        # Fresh open
+            chat = getattr(message, "chat_id", None) or getattr(
+                message, "sender_id", None
+            )
+            client = getattr(self, "_client", None) or getattr(self, "client", None)
+            if client is not None and chat is not None:
+                try:
+                    ph = await client.send_message(int(chat), "\u2060")
+                    try:
+                        m = await self.inline.rich(
+                            ph,
+                            full_html,
+                            reply_markup=None,
+                            silent=True,
+                            title="HikkariConfig",
+                            description="Config",
+                        )
+                    finally:
+                        with contextlib.suppress(Exception):
+                            await ph.delete()
+                    with contextlib.suppress(Exception):
+                        if hasattr(message, "delete"):
+                            await message.delete()
+                    if m:
+                        return m
+                except Exception as e:
+                    _log.warning("cfg resend rich: %s", e)
+
+            return await _classic_with_buttons(message, text, markup)
+
+        # Fresh open — generate callbacks BEFORE building HTML
+        with contextlib.suppress(Exception):
+            if markup:
+                self.inline._generate_markup(markup)
+        full_html, buttons = _prepare(html, None, markup)
+        if not buttons and markup:
+            buttons = markup
+        _log.warning(
+            "cfg fresh rich: rows=%s has_tg_btn=%s",
+            len(markup) if markup else 0,
+            "<tg-button" in full_html,
+        )
+
         try:
-            full_html, _ = _prepare(html, None, markup)
-            with contextlib.suppress(Exception):
-                if markup:
-                    self.inline._generate_markup(markup)
-            return await self.inline.rich(
+            m = await self.inline.rich(
                 message,
                 full_html,
                 reply_markup=None,
@@ -308,19 +349,31 @@ class HikkariConfigMod(loader.Module):
                 title="HikkariConfig",
                 description="Config",
             )
-        except Exception:
-            try:
-                full_html, _ = _prepare(html, None, markup)
-                return await self.inline.rich(
+            if m:
+                return m
+        except Exception as e:
+            _log.warning("cfg fresh rich failed: %s", e)
+
+        try:
+            no_fig = _re.sub(
+                r"<figure\b[^>]*>.*?</figure>", "", full_html, flags=_re.I | _re.S
+            ).strip()
+            if no_fig != full_html:
+                m = await self.inline.rich(
                     message,
-                    full_html,
+                    no_fig,
                     reply_markup=None,
                     silent=True,
                     title="HikkariConfig",
                     description="Config",
                 )
-            except Exception:
-                return False
+                if m:
+                    return m
+        except Exception as e:
+            _log.warning("cfg fresh rich no-banner failed: %s", e)
+
+        return await _classic_with_buttons(message, text, markup)
+
 
 
     async def _cfg_edit(self, call, text, reply_markup=None, **kwargs):
