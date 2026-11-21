@@ -215,23 +215,6 @@ class HikkariConfigMod(loader.Module):
                             message.unit_id = uid
                         break
             full_html, buttons = _prepare(html, unit_id, markup)
-            # From Help pure-rich: classic edit/form (rich via edit is no-op for ID64)
-            if isinstance(full_html, str) and "<tg-button" in full_html:
-                try:
-                    ok = await message.edit(text, reply_markup=buttons or markup)
-                    if ok is not False:
-                        return ok
-                except Exception:
-                    pass
-                try:
-                    return await self.inline.form(
-                        text,
-                        message=message,
-                        reply_markup=buttons or markup,
-                        silent=True,
-                    )
-                except Exception:
-                    return False
             # register callbacks, but do NOT attach classic keyboard (tg-buttons in HTML only)
             with contextlib.suppress(Exception):
                 if markup:
@@ -251,9 +234,7 @@ class HikkariConfigMod(loader.Module):
                                     token = t
                                     break
                     if token:
-                        from ..utils.rich_api import pack_inline_message_id as _pack_imid
-                        _p = _pack_imid(mid)
-                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
+                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
                         if ok:
                             return True
                 except Exception as e:
@@ -278,9 +259,7 @@ class HikkariConfigMod(loader.Module):
                     from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
                     token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
                     if token:
-                        from ..utils.rich_api import pack_inline_message_id as _pack_imid
-                        _p = _pack_imid(mid)
-                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
+                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
                         if ok:
                             return True
                 except Exception as e:
@@ -300,22 +279,7 @@ class HikkariConfigMod(loader.Module):
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=None,
-                    silent=True,
-                    title="HikkariConfig",
-                    description="Config",
-                )
-            except Exception:
-                pass
-            # delete+resend fallback
-            with contextlib.suppress(Exception):
-                if hasattr(message, "delete"):
-                    await message.delete()
-            try:
-                return await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=None,
+                    reply_markup=buttons or markup,
                     silent=True,
                     title="HikkariConfig",
                     description="Config",
