@@ -215,6 +215,34 @@ class HikkariConfigMod(loader.Module):
                             message.unit_id = uid
                         break
             full_html, buttons = _prepare(html, unit_id, markup)
+            # CONFIG_FORCE_RESEND: Rich via-inline edit is broken for ID64 (uid>2^31).
+            # Always replace the message so Config opened from Help actually shows.
+            if isinstance(full_html, str) and "<tg-button" in full_html:
+                with contextlib.suppress(Exception):
+                    if hasattr(message, "delete"):
+                        await message.delete()
+                with contextlib.suppress(Exception):
+                    if unit_id and hasattr(self.inline, "_unload_unit"):
+                        await self.inline._unload_unit(unit_id=unit_id)
+                try:
+                    return await self.inline.rich(
+                        message,
+                        full_html,
+                        reply_markup=None,
+                        silent=True,
+                        title="HikkariConfig",
+                        description="Config",
+                    )
+                except Exception:
+                    try:
+                        return await self.inline.form(
+                            text,
+                            message=message,
+                            reply_markup=buttons or markup,
+                            silent=True,
+                        )
+                    except Exception:
+                        return False
             # register callbacks, but do NOT attach classic keyboard (tg-buttons in HTML only)
             with contextlib.suppress(Exception):
                 if markup:

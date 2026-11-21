@@ -192,7 +192,12 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             )
 
 
-        # ── Pure Rich — same flow as HikkariConfig._cfg_form (do not diverge) ──
+
+        # ── Rich display + reliable navigation ──
+        # Reality (2026-11): EditInlineBotMessageRequest returns True for
+        # InputBotInlineMessageID64 but the client does NOT update Rich HTML.
+        # Bot API pack is impossible for owner_id > 2^31.
+        # So for navigation we ALWAYS delete the old via-message and send a new one.
         from ..utils.rich_api import (
             inject_banner_html,
             to_rich_compatible,
@@ -215,7 +220,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 html = inject_banner_html(html, burl)
 
         def _prepare(h, unit_id, buttons):
-            """Register callbacks + embed tg-buttons into HTML (config-identical)."""
             if unit_id and unit_id in getattr(self.inline, "_units", {}):
                 self.inline._units[unit_id]["buttons"] = buttons
                 self.inline._units[unit_id]["text"] = text
@@ -236,138 +240,52 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
+        full_html, buttons = _prepare(html, getattr(message, "unit_id", None), markup)
+        with contextlib.suppress(Exception):
+            if markup:
+                self.inline._generate_markup(markup)
+
         if is_nav:
-            unit_id = getattr(message, "unit_id", None)
-            mid = getattr(message, "inline_message_id", None)
-            if not mid:
-                oc = getattr(message, "original_call", None)
-                if oc is not None:
-                    mid = (
-                        getattr(oc, "inline_message_id", None)
-                        or getattr(oc, "inlineMessageId", None)
-                    )
-            if not unit_id and mid:
-                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
-                    if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
-                        unit_id = uid
-                        with contextlib.suppress(Exception):
-                            message.unit_id = uid
-                        break
-            # also match by object identity / string form
-            if not unit_id and mid is not None:
-                mid_s = str(mid)
-                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
-                    if not isinstance(unit, dict):
-                        continue
-                    um = unit.get("inline_message_id")
-                    if um is mid or (um is not None and str(um) == mid_s):
-                        unit_id = uid
-                        with contextlib.suppress(Exception):
-                            message.unit_id = uid
-                        break
-
-            full_html, buttons = _prepare(html, unit_id, markup)
-            with contextlib.suppress(Exception):
-                if markup:
-                    self.inline._generate_markup(markup)
-
-
-            # ── Edit same bubble (MTProto first — Bot API pack broken for uid>2^31) ──
-            edited = False
-
-            # 1) MTProto EditInlineBotMessageRequest with TL imid object
-            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                try:
-                    res = await self.inline.bot.edit_rich_message(
-                        html=full_html,
-                        inline_message_id=mid,
-                        reply_markup=None,
-                    )
-                    logger.warning("help mtproto edit ok type=%s res=%r", type(mid).__name__, type(res).__name__ if res is not None else None)
-                    edited = True
-                except Exception as e:
-                    logger.warning("help mtproto edit_rich failed: %s", e, exc_info=True)
-
-            # 2) Bot API only if pack works (owner fits i32)
-            if not edited and mid is not None:
-                try:
-                    from ..utils.rich_api import (
-                        edit_rich_message as _erm,
-                        _find_bot_token,
-                        pack_inline_message_id,
-                    )
-                    token = _find_bot_token(
-                        getattr(self, "_client", None) or getattr(self, "client", None)
-                    )
-                    if not token:
-                        token = getattr(self.inline, "_token", None) or getattr(
-                            getattr(self.inline, "bot", None), "token", None
-                        )
-                    packed = pack_inline_message_id(mid)
-                    logger.warning(
-                        "help bot-api try packed=%s token=%s",
-                        (packed[:20] + "…") if packed and len(packed) > 20 else packed,
-                        bool(token),
-                    )
-                    if token and packed:
-                        ok = await _erm(str(token), full_html, inline_message_id=packed)
-                        if ok:
-                            edited = True
-                except Exception as e:
-                    logger.warning("help bot-api edit failed: %s", e)
-
-            # 3) message.edit → _edit_unit
-            if not edited:
-                try:
-                    ok = await message.edit(
-                        text,
-                        reply_markup=None,
-                        rich_message=full_html,
-                    )
-                    if ok is not False:
-                        logger.warning("help message.edit ok")
-                        edited = True
-                except Exception as e:
-                    logger.warning("help message.edit failed: %s", e)
-
-            if edited:
-                return True
-
-            # 4) HARD FALLBACK: delete old via-msg and send a fresh one
-            #    (edit is broken for this imid / client — still better than dead buttons)
-            logger.warning("help edit all failed — delete+resend fallback")
+            # Kill old message first so user always sees the new screen
             with contextlib.suppress(Exception):
                 if hasattr(message, "delete"):
                     await message.delete()
+            with contextlib.suppress(Exception):
+                # also try unload unit so callbacks do not target dead msg
+                uid = getattr(message, "unit_id", None)
+                if uid and hasattr(self.inline, "_unload_unit"):
+                    await self.inline._unload_unit(unit_id=uid)
+
+            # Prefer pure rich with tg-buttons
             try:
-                return await self.inline.rich(
+                m = await self.inline.rich(
                     message,
                     full_html,
                     reply_markup=None,
                     silent=True,
                     title=str(text)[:64] or "Help",
                     description="Hikkari Help",
+                    **({"thumbnail_url": burl} if burl else {}),
+                )
+                if m:
+                    return m
+            except Exception as e:
+                logger.warning("help nav resend rich failed: %s", e)
+
+            # Classic form fallback (reply_markup under message — always editable later)
+            try:
+                return await self.inline.form(
+                    text,
+                    message=message,
+                    reply_markup=markup,
+                    silent=True,
                 )
             except Exception as e:
-                logger.warning("help resend rich failed: %s", e)
-                try:
-                    return await self.inline.form(
-                        text,
-                        message=message,
-                        reply_markup=markup,
-                        silent=True,
-                    )
-                except Exception as e2:
-                    logger.warning("help resend form failed: %s", e2)
-                    return False
+                logger.warning("help nav resend form failed: %s", e)
+                return False
 
-
-        # Fresh open — pure rich, tg-buttons only (no classic kb)
+        # Fresh open
         try:
-            full_html, _ = _prepare(html, None, markup)
-            with contextlib.suppress(Exception):
-                if markup:
-                    self.inline._generate_markup(markup)
             return await self.inline.rich(
                 message,
                 full_html,
@@ -379,14 +297,11 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             )
         except Exception:
             try:
-                full_html, _ = _prepare(html, None, markup)
-                return await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=None,
+                return await self.inline.form(
+                    text,
+                    message=message,
+                    reply_markup=markup,
                     silent=True,
-                    title=str(text)[:64] or "Help",
-                    description="Hikkari Help",
                 )
             except Exception:
                 return False
