@@ -395,6 +395,47 @@ class LoaderMod(loader.Module):
                     return v
         return ""
 
+
+    async def _inline_open_mod_config(self, call, modname: str = ""):
+        """Open module config from loader 'module loaded' card."""
+        import contextlib
+        with contextlib.suppress(Exception):
+            await call.answer("Config…")
+        try:
+            cfg = (
+                self.lookup("HikkariConfig")
+                or self.lookup("HikkariConfigMod")
+                or self.lookup("config")
+            )
+            if cfg is None:
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    if hasattr(m, "inline__configure") and "config" in m.__class__.__name__.lower():
+                        cfg = m
+                        break
+            if cfg is None or not hasattr(cfg, "inline__configure"):
+                with contextlib.suppress(Exception):
+                    await call.answer("Config unavailable", show_alert=True)
+                return
+            key = (modname or "").strip()
+            mod = self.lookup(key) if key else None
+            if mod is None and key:
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    names = {m.__class__.__name__}
+                    with contextlib.suppress(Exception):
+                        names.add(str(m.strings.get("name", "")))
+                    if key in names or key.lower() in {x.lower() for x in names if x}:
+                        mod = m
+                        break
+            if mod is None or not getattr(mod, "config", None):
+                with contextlib.suppress(Exception):
+                    await call.answer("No config", show_alert=True)
+                return
+            await cfg.inline__configure(call, mod.__class__.__name__)
+        except Exception as e:
+            logger.exception("loader open mod config: %s", e)
+            with contextlib.suppress(Exception):
+                await call.answer(str(e)[:80], show_alert=True)
+
     async def _rich_module_loaded(
         self,
         message: Message,

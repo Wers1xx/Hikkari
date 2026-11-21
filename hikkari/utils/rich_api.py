@@ -398,6 +398,67 @@ def parse_rich_url_buttons(spec: str) -> str:
     return "\n".join(rows)
 
 
+
+def pack_inline_message_id(mid) -> str | None:
+    """TL InputBotInlineMessageID/64 → Bot API inline_message_id string."""
+    if mid is None:
+        return None
+    if isinstance(mid, str):
+        s = mid.strip()
+        # Reject useless str(TL object) representations
+        if not s or s.startswith("<") or "InputBotInlineMessage" in s:
+            return None
+        return s
+    try:
+        import struct
+        from hikkaritl.tl import types as tl_types
+        try:
+            from hikkaritl.utils import _encode_telegram_base64
+        except Exception:
+            import base64
+            def _encode_telegram_base64(b: bytes):
+                return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+        if isinstance(mid, tl_types.InputBotInlineMessageID):
+            return _encode_telegram_base64(
+                struct.pack("<iiiq", int(mid.dc_id), int(mid.id), 0, int(mid.access_hash))
+            )
+        if isinstance(mid, tl_types.InputBotInlineMessageID64):
+            # Same wire format as resolve_inline_message_id inverse:
+            # dc_id:i32, message_id:i32, owner/peer:i32, access_hash:i64
+            # owner_id may exceed i32 — clamp into signed 32 range via low bits
+            owner = int(mid.owner_id)
+            # Prefer fitting owner into i32 (Telegram user ids currently fit)
+            if owner > 0x7FFFFFFF or owner < -0x80000000:
+                # try full 64-bit layout used by some clients
+                try:
+                    return _encode_telegram_base64(
+                        struct.pack(
+                            "<iqqq",
+                            int(mid.dc_id),
+                            int(mid.owner_id),
+                            int(mid.id),
+                            int(mid.access_hash),
+                        )
+                    )
+                except Exception:
+                    owner = int(owner & 0xFFFFFFFF)
+                    if owner >= 0x80000000:
+                        owner -= 0x100000000
+            return _encode_telegram_base64(
+                struct.pack(
+                    "<iiiq",
+                    int(mid.dc_id),
+                    int(mid.id),
+                    int(owner),
+                    int(mid.access_hash),
+                )
+            )
+    except Exception as e:
+        logger.debug("pack_inline_message_id failed: %s", e)
+    return None
+
+
 async def edit_rich_message(
     token: str,
     html: str,
@@ -417,8 +478,16 @@ async def edit_rich_message(
             "skip_entity_detection": True,
         },
     }
-    if inline_message_id:
-        payload["inline_message_id"] = str(inline_message_id)
+    if inline_message_id is not None:
+        packed = pack_inline_message_id(inline_message_id)
+        if packed:
+            payload["inline_message_id"] = packed
+        elif chat_id is None or message_id is None:
+            logger.warning(
+                "editMessageText(rich): cannot pack imid type=%s",
+                type(inline_message_id).__name__,
+            )
+            return False
     elif chat_id is not None and message_id is not None:
         payload["chat_id"] = chat_id
         payload["message_id"] = int(message_id)

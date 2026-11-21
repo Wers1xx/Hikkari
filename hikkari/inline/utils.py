@@ -726,16 +726,32 @@ class Utils(InlineUnit):
                             reply_markup=None if pure else kb,
                         )
                         return True
-                    except Exception:
-                        logger.debug(
-                            "edit_rich_message failed, classic path",
+                    except Exception as e:
+                        logger.warning(
+                            "edit_rich_message failed, classic path: %s",
+                            e,
                             exc_info=True,
                         )
 
                 if mid:
                     pure = isinstance(rm, str) and "<tg-button" in rm
                     if pure:
-                        logger.debug("pure rich edit failed; skip classic fallback")
+                        # Try Bot API pack path before giving up
+                        try:
+                            from ..utils.rich_api import (
+                                edit_rich_message as _erm,
+                                _find_bot_token,
+                                pack_inline_message_id,
+                            )
+                            token = _find_bot_token(getattr(self, "_client", None))
+                            packed = pack_inline_message_id(mid)
+                            if token and packed and isinstance(rm, str):
+                                ok = await _erm(str(token), rm, inline_message_id=packed)
+                                if ok:
+                                    return True
+                        except Exception as e:
+                            logger.warning("pure rich bot-api fallback failed: %s", e)
+                        logger.warning("pure rich edit failed; skip classic fallback mid=%r", type(mid).__name__)
                         return False
 
                     try:

@@ -271,17 +271,38 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if markup:
                     self.inline._generate_markup(markup)
 
-            # 1) Prefer message.edit → _edit_unit (same path config uses via form)
+            # 1) Bot API with packed imid (same path as working hk| pagination)
             try:
-                ok = await message.edit(
-                    text,
-                    reply_markup=None,
-                    rich_message=full_html,
+                from ..utils.rich_api import (
+                    edit_rich_message as _erm,
+                    _find_bot_token,
+                    pack_inline_message_id,
                 )
-                if ok is not False:
-                    return ok
+                token = _find_bot_token(
+                    getattr(self, "_client", None) or getattr(self, "client", None)
+                )
+                if not token:
+                    for obj in (self.inline, getattr(self.inline, "bot", None)):
+                        if obj is None:
+                            continue
+                        for attr in ("token", "_token", "bot_token"):
+                            t = getattr(obj, attr, None)
+                            if isinstance(t, str) and ":" in t:
+                                token = t
+                                break
+                packed = pack_inline_message_id(mid) if mid is not None else None
+                logger.warning(
+                    "help edit: mid_type=%s packed=%s token=%s",
+                    type(mid).__name__ if mid is not None else None,
+                    (packed[:16] + "…") if packed and len(packed) > 16 else packed,
+                    bool(token),
+                )
+                if token and packed:
+                    ok = await _erm(str(token), full_html, inline_message_id=packed)
+                    if ok:
+                        return True
             except Exception as e:
-                logger.warning("help message.edit failed: %s", e)
+                logger.warning("help bot-api edit failed: %s", e)
 
             # 2) MTProto bot.edit_rich_message with raw imid object
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
@@ -295,28 +316,17 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 except Exception as e:
                     logger.warning("help mtproto edit_rich failed: %s", e)
 
-            # 3) Bot API only with str imid (never str(TL object))
-            if isinstance(mid, str) and len(mid) > 8:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    token = _find_bot_token(
-                        getattr(self, "_client", None) or getattr(self, "client", None)
-                    )
-                    if not token:
-                        for obj in (self.inline, getattr(self.inline, "bot", None)):
-                            if obj is None:
-                                continue
-                            for attr in ("token", "_token", "bot_token"):
-                                t = getattr(obj, attr, None)
-                                if isinstance(t, str) and ":" in t:
-                                    token = t
-                                    break
-                    if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=mid)
-                        if ok:
-                            return True
-                except Exception as e:
-                    logger.warning("help bot-api edit failed: %s", e)
+            # 3) message.edit → _edit_unit
+            try:
+                ok = await message.edit(
+                    text,
+                    reply_markup=None,
+                    rich_message=full_html,
+                )
+                if ok is not False:
+                    return ok
+            except Exception as e:
+                logger.warning("help message.edit failed: %s", e)
 
             # 4) last resort: open new rich (still better than freeze)
             try:
