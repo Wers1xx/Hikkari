@@ -193,118 +193,93 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
 
 
-        # ── Rich display + reliable navigation ──
-        # Reality (2026-11): EditInlineBotMessageRequest returns True for
-        # InputBotInlineMessageID64 but the client does NOT update Rich HTML.
-        # Bot API pack is impossible for owner_id > 2^31.
-        # So for navigation we ALWAYS delete the old via-message and send a new one.
-        from ..utils.rich_api import (
-            inject_banner_html,
-            to_rich_compatible,
-            pick_banner_url,
-            markup_to_tg_rows,
-        )
 
-        html = body
-        with contextlib.suppress(Exception):
-            html = to_rich_compatible(body)
-
-        burl = None
-        with contextlib.suppress(Exception):
-            if banner_url:
-                burl = str(banner_url)
-            if not burl:
-                burl = pick_banner_url(self.config.get("banner_url"))
-        if burl:
-            with contextlib.suppress(Exception):
-                html = inject_banner_html(html, burl)
-
-        def _prepare(h, unit_id, buttons):
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = buttons
-                self.inline._units[unit_id]["text"] = text
-                with contextlib.suppress(Exception):
-                    self.inline.generate_markup(unit_id)
-                buttons = self.inline._units[unit_id].get("buttons") or buttons
-            else:
-                with contextlib.suppress(Exception):
-                    self.inline._generate_markup(buttons)
-            btn_html = ""
-            with contextlib.suppress(Exception):
-                btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
-            full = h + ("\n" + btn_html if btn_html else "")
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["rich_message"] = full
-                self.inline._units[unit_id]["rich_html"] = full
-            return full, buttons
-
+        # ── CLASSIC FORM ONLY ──
+        # Pure Rich via-inline CANNOT be edited for accounts with id > 2^31:
+        # - Bot API imid pack invalid
+        # - MTProto EditInlineBotMessageRequest returns True but UI does not change
+        # - form/rich on InlineCall never fall through to send a new message
+        # Classic form + reply_markup is the only reliable navigation path.
         is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
 
-        full_html, buttons = _prepare(html, getattr(message, "unit_id", None), markup)
+        # Prefer plain-ish text for classic form (strip rich-only tags if needed)
+        show = body
+        with contextlib.suppress(Exception):
+            from ..utils.rich import strip_rich
+            # Keep basic HTML that classic form supports; strip tg-button etc.
+            show = strip_rich(body) if (rich_html is not None) else body
+
+        # Ensure handlers registered for buttons
         with contextlib.suppress(Exception):
             if markup:
                 self.inline._generate_markup(markup)
 
         if is_nav:
-            # Kill old message first so user always sees the new screen
-            with contextlib.suppress(Exception):
-                if hasattr(message, "delete"):
-                    await message.delete()
-            with contextlib.suppress(Exception):
-                # also try unload unit so callbacks do not target dead msg
-                uid = getattr(message, "unit_id", None)
-                if uid and hasattr(self.inline, "_unload_unit"):
-                    await self.inline._unload_unit(unit_id=uid)
-
-            # Prefer pure rich with tg-buttons
+            # Classic edit — works with unit_id / imid for non-rich content
             try:
-                m = await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=None,
-                    silent=True,
-                    title=str(text)[:64] or "Help",
-                    description="Hikkari Help",
-                    **({"thumbnail_url": burl} if burl else {}),
-                )
-                if m:
-                    return m
+                ok = await message.edit(show, reply_markup=markup)
+                if ok is not False:
+                    return ok
             except Exception as e:
-                logger.warning("help nav resend rich failed: %s", e)
+                logger.warning("help classic edit failed: %s", e)
 
-            # Classic form fallback (reply_markup under message — always editable later)
+            # If edit failed: try form() which also edits InlineCall
             try:
-                return await self.inline.form(
-                    text,
+                ok = await self.inline.form(
+                    show,
                     message=message,
                     reply_markup=markup,
                     silent=True,
                 )
+                if ok is not False:
+                    return ok
             except Exception as e:
-                logger.warning("help nav resend form failed: %s", e)
-                return False
+                logger.warning("help classic form-edit failed: %s", e)
 
-        # Fresh open
-        try:
-            return await self.inline.rich(
-                message,
-                full_html,
-                reply_markup=None,
-                silent=True,
-                title=str(text)[:64] or "Help",
-                description="Hikkari Help",
-                **({"thumbnail_url": burl} if burl else {}),
+            # Last resort: send NEW form into bot PM / chat via sender_id
+            chat = (
+                getattr(message, "chat_id", None)
+                or getattr(message, "sender_id", None)
+                or getattr(getattr(message, "from_user", None), "id", None)
             )
-        except Exception:
-            try:
-                return await self.inline.form(
-                    text,
-                    message=message,
-                    reply_markup=markup,
-                    silent=True,
-                )
-            except Exception:
-                return False
+            if chat:
+                try:
+                    # form accepts Message; build minimal shim using userbot respond
+                    client = getattr(self, "_client", None) or getattr(self, "client", None)
+                    if client is not None:
+                        # Place a short placeholder then attach form to it
+                        placeholder = await client.send_message(int(chat), "\u2060")
+                        try:
+                            m = await self.inline.form(
+                                show,
+                                message=placeholder,
+                                reply_markup=markup,
+                                silent=True,
+                            )
+                            with contextlib.suppress(Exception):
+                                await placeholder.delete()
+                            if m:
+                                return m
+                        except Exception as e:
+                            logger.warning("help new form via placeholder failed: %s", e)
+                            with contextlib.suppress(Exception):
+                                await placeholder.delete()
+                except Exception as e:
+                    logger.warning("help last-resort send failed: %s", e)
+            return False
+
+        # Fresh open — classic form with buttons under the message
+        try:
+            return await self.inline.form(
+                show,
+                message=message,
+                reply_markup=markup,
+                silent=True,
+                **banner_kw,
+            )
+        except Exception as e:
+            logger.warning("help fresh form failed: %s", e)
+            return False
 
 
 
