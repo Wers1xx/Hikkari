@@ -119,6 +119,14 @@ class HikkariConfigMod(loader.Module):
         banner_kw = self._cfg_banner_kwargs()
         markup = reply_markup or []
 
+        # _send_initial_config_form uses _InlineFormDraft: it only captures
+        # text/markup via draft.edit(). Must NOT try inline.rich on the draft.
+        if type(message).__name__ == "_InlineFormDraft" or isinstance(
+            message, _InlineFormDraft
+        ):
+            await message.edit(text, reply_markup=markup, **kwargs)
+            return True
+
         client = getattr(self, "_client", None) or getattr(self, "client", None)
         use_rich = False
         try:
@@ -234,7 +242,9 @@ class HikkariConfigMod(loader.Module):
                                     token = t
                                     break
                     if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        from ..utils.rich_api import pack_inline_message_id as _pack
+                        _p = _pack(mid)
+                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
                         if ok:
                             return True
                 except Exception as e:
@@ -259,7 +269,9 @@ class HikkariConfigMod(loader.Module):
                     from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
                     token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
                     if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        from ..utils.rich_api import pack_inline_message_id as _pack
+                        _p = _pack(mid)
+                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
                         if ok:
                             return True
                 except Exception as e:
@@ -285,7 +297,36 @@ class HikkariConfigMod(loader.Module):
                     description="Config",
                 )
             except Exception:
-                return False
+                pass
+            # Resend via real Message (InlineCall.rich only edits)
+            chat = (
+                getattr(message, "chat_id", None)
+                or getattr(message, "sender_id", None)
+            )
+            client = getattr(self, "_client", None) or getattr(self, "client", None)
+            if client is not None and chat is not None:
+                try:
+                    placeholder = await client.send_message(int(chat), "\u2060")
+                    try:
+                        m = await self.inline.rich(
+                            placeholder,
+                            full_html,
+                            reply_markup=None,
+                            silent=True,
+                            title="HikkariConfig",
+                            description="Config",
+                        )
+                    finally:
+                        with contextlib.suppress(Exception):
+                            await placeholder.delete()
+                    with contextlib.suppress(Exception):
+                        if hasattr(message, "delete"):
+                            await message.delete()
+                    if m:
+                        return m
+                except Exception:
+                    pass
+            return False
 
         # Fresh open
         try:
