@@ -271,64 +271,74 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if markup:
                     self.inline._generate_markup(markup)
 
-            # 1) Bot API with packed imid (same path as working hk| pagination)
-            try:
-                from ..utils.rich_api import (
-                    edit_rich_message as _erm,
-                    _find_bot_token,
-                    pack_inline_message_id,
-                )
-                token = _find_bot_token(
-                    getattr(self, "_client", None) or getattr(self, "client", None)
-                )
-                if not token:
-                    for obj in (self.inline, getattr(self.inline, "bot", None)):
-                        if obj is None:
-                            continue
-                        for attr in ("token", "_token", "bot_token"):
-                            t = getattr(obj, attr, None)
-                            if isinstance(t, str) and ":" in t:
-                                token = t
-                                break
-                packed = pack_inline_message_id(mid) if mid is not None else None
-                logger.warning(
-                    "help edit: mid_type=%s packed=%s token=%s",
-                    type(mid).__name__ if mid is not None else None,
-                    (packed[:16] + "…") if packed and len(packed) > 16 else packed,
-                    bool(token),
-                )
-                if token and packed:
-                    ok = await _erm(str(token), full_html, inline_message_id=packed)
-                    if ok:
-                        return True
-            except Exception as e:
-                logger.warning("help bot-api edit failed: %s", e)
 
-            # 2) MTProto bot.edit_rich_message with raw imid object
+            # ── Edit same bubble (MTProto first — Bot API pack broken for uid>2^31) ──
+            edited = False
+
+            # 1) MTProto EditInlineBotMessageRequest with TL imid object
             if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
                 try:
-                    await self.inline.bot.edit_rich_message(
+                    res = await self.inline.bot.edit_rich_message(
                         html=full_html,
                         inline_message_id=mid,
                         reply_markup=None,
                     )
-                    return True
+                    logger.warning("help mtproto edit ok type=%s res=%r", type(mid).__name__, type(res).__name__ if res is not None else None)
+                    edited = True
                 except Exception as e:
-                    logger.warning("help mtproto edit_rich failed: %s", e)
+                    logger.warning("help mtproto edit_rich failed: %s", e, exc_info=True)
+
+            # 2) Bot API only if pack works (owner fits i32)
+            if not edited and mid is not None:
+                try:
+                    from ..utils.rich_api import (
+                        edit_rich_message as _erm,
+                        _find_bot_token,
+                        pack_inline_message_id,
+                    )
+                    token = _find_bot_token(
+                        getattr(self, "_client", None) or getattr(self, "client", None)
+                    )
+                    if not token:
+                        token = getattr(self.inline, "_token", None) or getattr(
+                            getattr(self.inline, "bot", None), "token", None
+                        )
+                    packed = pack_inline_message_id(mid)
+                    logger.warning(
+                        "help bot-api try packed=%s token=%s",
+                        (packed[:20] + "…") if packed and len(packed) > 20 else packed,
+                        bool(token),
+                    )
+                    if token and packed:
+                        ok = await _erm(str(token), full_html, inline_message_id=packed)
+                        if ok:
+                            edited = True
+                except Exception as e:
+                    logger.warning("help bot-api edit failed: %s", e)
 
             # 3) message.edit → _edit_unit
-            try:
-                ok = await message.edit(
-                    text,
-                    reply_markup=None,
-                    rich_message=full_html,
-                )
-                if ok is not False:
-                    return ok
-            except Exception as e:
-                logger.warning("help message.edit failed: %s", e)
+            if not edited:
+                try:
+                    ok = await message.edit(
+                        text,
+                        reply_markup=None,
+                        rich_message=full_html,
+                    )
+                    if ok is not False:
+                        logger.warning("help message.edit ok")
+                        edited = True
+                except Exception as e:
+                    logger.warning("help message.edit failed: %s", e)
 
-            # 4) last resort: open new rich (still better than freeze)
+            if edited:
+                return True
+
+            # 4) HARD FALLBACK: delete old via-msg and send a fresh one
+            #    (edit is broken for this imid / client — still better than dead buttons)
+            logger.warning("help edit all failed — delete+resend fallback")
+            with contextlib.suppress(Exception):
+                if hasattr(message, "delete"):
+                    await message.delete()
             try:
                 return await self.inline.rich(
                     message,
@@ -338,8 +348,19 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     title=str(text)[:64] or "Help",
                     description="Hikkari Help",
                 )
-            except Exception:
-                return False
+            except Exception as e:
+                logger.warning("help resend rich failed: %s", e)
+                try:
+                    return await self.inline.form(
+                        text,
+                        message=message,
+                        reply_markup=markup,
+                        silent=True,
+                    )
+                except Exception as e2:
+                    logger.warning("help resend form failed: %s", e2)
+                    return False
+
 
         # Fresh open — pure rich, tg-buttons only (no classic kb)
         try:

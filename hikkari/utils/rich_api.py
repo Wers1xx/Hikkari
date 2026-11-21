@@ -424,27 +424,16 @@ def pack_inline_message_id(mid) -> str | None:
                 struct.pack("<iiiq", int(mid.dc_id), int(mid.id), 0, int(mid.access_hash))
             )
         if isinstance(mid, tl_types.InputBotInlineMessageID64):
-            # Same wire format as resolve_inline_message_id inverse:
-            # dc_id:i32, message_id:i32, owner/peer:i32, access_hash:i64
-            # owner_id may exceed i32 — clamp into signed 32 range via low bits
             owner = int(mid.owner_id)
-            # Prefer fitting owner into i32 (Telegram user ids currently fit)
+            # Old Bot API format only fits owner in i32. Modern user ids (e.g. 8e9+)
+            # do NOT fit — packing produces invalid imid. Return None so caller
+            # uses MTProto EditInlineBotMessageRequest with the TL object instead.
             if owner > 0x7FFFFFFF or owner < -0x80000000:
-                # try full 64-bit layout used by some clients
-                try:
-                    return _encode_telegram_base64(
-                        struct.pack(
-                            "<iqqq",
-                            int(mid.dc_id),
-                            int(mid.owner_id),
-                            int(mid.id),
-                            int(mid.access_hash),
-                        )
-                    )
-                except Exception:
-                    owner = int(owner & 0xFFFFFFFF)
-                    if owner >= 0x80000000:
-                        owner -= 0x100000000
+                logger.debug(
+                    "pack_inline_message_id: owner_id=%s does not fit i32, skip Bot API pack",
+                    owner,
+                )
+                return None
             return _encode_telegram_base64(
                 struct.pack(
                     "<iiiq",

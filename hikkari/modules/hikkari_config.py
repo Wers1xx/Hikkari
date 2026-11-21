@@ -234,7 +234,9 @@ class HikkariConfigMod(loader.Module):
                                     token = t
                                     break
                     if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        from ..utils.rich_api import pack_inline_message_id as _pack_imid
+                        _p = _pack_imid(mid)
+                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
                         if ok:
                             return True
                 except Exception as e:
@@ -259,7 +261,9 @@ class HikkariConfigMod(loader.Module):
                     from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
                     token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
                     if token:
-                        ok = await _erm(str(token), full_html, inline_message_id=str(mid))
+                        from ..utils.rich_api import pack_inline_message_id as _pack_imid
+                        _p = _pack_imid(mid)
+                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
                         if ok:
                             return True
                 except Exception as e:
@@ -279,7 +283,22 @@ class HikkariConfigMod(loader.Module):
                 return await self.inline.rich(
                     message,
                     full_html,
-                    reply_markup=buttons or markup,
+                    reply_markup=None,
+                    silent=True,
+                    title="HikkariConfig",
+                    description="Config",
+                )
+            except Exception:
+                pass
+            # delete+resend fallback
+            with contextlib.suppress(Exception):
+                if hasattr(message, "delete"):
+                    await message.delete()
+            try:
+                return await self.inline.rich(
+                    message,
+                    full_html,
+                    reply_markup=None,
                     silent=True,
                     title="HikkariConfig",
                     description="Config",
