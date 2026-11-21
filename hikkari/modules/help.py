@@ -34,11 +34,10 @@ logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class Help(loader.Module):  # HELP_BANNER_REGEX_OK
+class Help(loader.Module):
     """Shows help for modules and commands"""
 
-    strings = {"close_btn": "🔻 Закрыть",
-        "name": "Help"}
+    strings = {"name": "Help"}
 
     def __init__(self):
         self.config = loader.ModuleConfig(
@@ -101,263 +100,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 validator=loader.validators.Boolean(),
             ),
         )
-
-
-    @staticmethod
-    def _is_out(message) -> bool:
-        return bool(getattr(message, "out", False))
-
-    def _acct_key(self) -> str:
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
-        tid = getattr(client, "tg_id", None) if client is not None else None
-        if tid is None and client is not None:
-            me = getattr(client, "hikkari_me", None) or getattr(client, "hikka_me", None)
-            tid = getattr(me, "id", None) if me is not None else None
-        return str(tid or "main")
-
-    def _acct_get(self, key: str, default=None):
-        store = self.get("_per_account", {}) or {}
-        bucket = store.get(self._acct_key()) or {}
-        return bucket.get(key, default)
-
-    def _acct_set(self, key: str, value) -> None:
-        store = dict(self.get("_per_account", {}) or {})
-        ck = self._acct_key()
-        bucket = dict(store.get(ck) or {})
-        bucket[key] = value
-        store[ck] = bucket
-        self.set("_per_account", store)
-
-
-
-
-
-
-    async def _help_form(
-        self,
-        text: str,
-        message,
-        reply_markup=None,
-        *,
-        rich_html: str | None = None,
-        banner_url: str | None = None,
-    ):
-        """Same path as HikkariConfig._cfg_form — pure Rich + tg-buttons via inline.rich."""
-        import contextlib
-        from ..inline.types import InlineCall, InlineMessage, BotInlineCall
-
-        markup = reply_markup or []
-        banner_kw = {}
-        if banner_url and str(banner_url).startswith(("http://", "https://")):
-            banner_kw["photo"] = str(banner_url)
-
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
-        use_rich = False
-        with contextlib.suppress(Exception):
-            from ..utils.rich import can_use_rich
-            use_rich = bool(can_use_rich(client, self._db))
-
-        with contextlib.suppress(Exception):
-            await self.inline.ensure_inline_ready()
-        with contextlib.suppress(Exception):
-            from ..utils.rich import api_gate
-            await api_gate(client, min_interval=0.35)
-
-        body = str(rich_html if rich_html is not None else text or "")
-        if not use_rich:
-            with contextlib.suppress(Exception):
-                from ..utils.rich import strip_rich
-                body = strip_rich(body)
-
-        if not use_rich:
-            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
-                try:
-                    return await message.edit(
-                        body,
-                        reply_markup=markup,
-                        **{k: banner_kw[k] for k in ("photo", "video", "gif") if k in banner_kw},
-                    )
-                except Exception:
-                    pass
-                try:
-                    return await message.edit(body, reply_markup=markup)
-                except Exception:
-                    pass
-            return await self.inline.form(
-                body,
-                message=message,
-                reply_markup=markup,
-                silent=True,
-                **banner_kw,
-            )
-
-
-        # ── Pure Rich (display) + reliable nav ──
-        from ..utils.rich_api import (
-            inject_banner_html,
-            to_rich_compatible,
-            pick_banner_url,
-            markup_to_tg_rows,
-        )
-
-        html = body
-        with contextlib.suppress(Exception):
-            html = to_rich_compatible(body)
-
-        burl = None
-        if banner_url and str(banner_url).startswith(("http://", "https://")):
-            burl = str(banner_url)
-        if not burl:
-            with contextlib.suppress(Exception):
-                burl = pick_banner_url(self.config.get("banner_url"))
-        if burl:
-            with contextlib.suppress(Exception):
-                html = inject_banner_html(html, burl)
-
-        def _prepare(h, unit_id, buttons):
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = buttons
-                self.inline._units[unit_id]["text"] = text
-                with contextlib.suppress(Exception):
-                    self.inline.generate_markup(unit_id)
-                buttons = self.inline._units[unit_id].get("buttons") or buttons
-            else:
-                with contextlib.suppress(Exception):
-                    self.inline._generate_markup(buttons)
-            btn_html = ""
-            with contextlib.suppress(Exception):
-                btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
-            full = h + ("\n" + btn_html if btn_html else "")
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["rich_message"] = full
-                self.inline._units[unit_id]["rich_html"] = full
-            return full, buttons
-
-        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
-        full_html, buttons = _prepare(
-            html, getattr(message, "unit_id", None) if is_nav else None, markup
-        )
-        with contextlib.suppress(Exception):
-            if markup:
-                self.inline._generate_markup(markup)
-
-        if is_nav:
-            mid = getattr(message, "inline_message_id", None)
-            if not mid:
-                oc = getattr(message, "original_call", None)
-                if oc is not None:
-                    mid = getattr(oc, "inline_message_id", None) or getattr(
-                        oc, "inlineMessageId", None
-                    )
-
-            # Try MTProto edit (sometimes works for non-rich fields)
-            edited = False
-            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                try:
-                    await self.inline.bot.edit_rich_message(
-                        html=full_html,
-                        inline_message_id=mid,
-                        reply_markup=None,
-                    )
-                    edited = True
-                except Exception as e:
-                    logger.warning("help mtproto edit: %s", e)
-
-            if not edited:
-                try:
-                    from ..utils.rich_api import (
-                        edit_rich_message as _erm,
-                        _find_bot_token,
-                        pack_inline_message_id,
-                    )
-                    token = _find_bot_token(
-                        getattr(self, "_client", None) or getattr(self, "client", None)
-                    )
-                    packed = pack_inline_message_id(mid) if mid is not None else None
-                    if token and packed:
-                        edited = bool(
-                            await _erm(str(token), full_html, inline_message_id=packed)
-                        )
-                except Exception as e:
-                    logger.warning("help bot-api edit: %s", e)
-
-            if edited:
-                return True
-
-            # Resend: create NEW message via userbot client (not InlineCall.edit)
-            # form/rich on InlineCall only edit — they never open a new unit.
-            chat = (
-                getattr(message, "chat_id", None)
-                or getattr(message, "sender_id", None)
-            )
-            client = getattr(self, "_client", None) or getattr(self, "client", None)
-            if client is not None and chat is not None:
-                try:
-                    placeholder = await client.send_message(int(chat), "\u2060")
-                    try:
-                        m = await self.inline.rich(
-                            placeholder,
-                            full_html,
-                            reply_markup=None,
-                            silent=True,
-                            title=str(text)[:64] or "Help",
-                            description="Hikkari Help",
-                        )
-                    finally:
-                        with contextlib.suppress(Exception):
-                            await placeholder.delete()
-                    with contextlib.suppress(Exception):
-                        if hasattr(message, "delete"):
-                            await message.delete()
-                    if m:
-                        return m
-                except Exception as e:
-                    logger.warning("help resend via placeholder failed: %s", e)
-
-            # Classic form last resort on placeholder
-            if client is not None and chat is not None:
-                try:
-                    placeholder = await client.send_message(int(chat), "\u2060")
-                    try:
-                        m = await self.inline.form(
-                            text,
-                            message=placeholder,
-                            reply_markup=markup,
-                            silent=True,
-                        )
-                    finally:
-                        with contextlib.suppress(Exception):
-                            await placeholder.delete()
-                    with contextlib.suppress(Exception):
-                        if hasattr(message, "delete"):
-                            await message.delete()
-                    return m
-                except Exception as e:
-                    logger.warning("help classic resend failed: %s", e)
-            return False
-
-        # Fresh open — pure rich
-        try:
-            return await self.inline.rich(
-                message,
-                full_html,
-                reply_markup=None,
-                silent=True,
-                title=str(text)[:64] or "Help",
-                description="Hikkari Help",
-            )
-        except Exception:
-            try:
-                return await self.inline.form(
-                    text,
-                    message=message,
-                    reply_markup=markup,
-                    silent=True,
-                )
-            except Exception:
-                return False
-
-
 
     async def client_ready(self):
         # Overwrite stale Help config from old installs (▪️ / 🪐)
@@ -520,9 +262,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             return base
         return f"{base} ({', '.join(al)})"
 
-    async def modhelp(self, message: Message, args: str, from_list: bool = False):
-        self._acct_set("help_nav_from_list", bool(from_list))
-        self._help_nav_from_list = bool(from_list)
+    async def modhelp(self, message: Message, args: str):
         exact = True
         if not (module := self.lookup(args)):
             if method := self.allmodules.dispatch(
@@ -658,33 +398,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                                 )
                                 break
                 banner_url = self._get_banner_url(source) if source else None
-                # Module attrs / strings before Help config banner
-                if not banner_url and module is not None:
-                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
-                        with contextlib.suppress(Exception):
-                            v = getattr(module, attr, None)
-                            if isinstance(v, str) and v.startswith(("http://", "https://")):
-                                banner_url = v.strip()
-                                break
-                    if not banner_url:
-                        with contextlib.suppress(Exception):
-                            for sk in ("banner", "banner_url", "meta_banner"):
-                                v = module.strings.get(sk) if hasattr(module, "strings") else None
-                                if isinstance(v, str) and v.startswith(("http://", "https://")):
-                                    banner_url = v.strip()
-                                    break
-                    if not banner_url:
-                        with contextlib.suppress(Exception):
-                            cfg = getattr(module, "config", None)
-                            if cfg is not None:
-                                for ck in ("banner", "banner_url", "meta_banner"):
-                                    try:
-                                        v = cfg[ck]
-                                    except Exception:
-                                        v = None
-                                    if isinstance(v, str) and v.startswith(("http://", "https://")):
-                                        banner_url = v.strip()
-                                        break
                 if not banner_url:
                     banner_url = str(self.config.get("banner_url") or "").strip() or None
                 if banner_url and str(banner_url).startswith(("http://", "https://")):
@@ -755,16 +468,17 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 if rows:
                     table = html_table(rows, header=("Command", "Description"))
                     parts.append(
-                        f"<details>\n<summary><b>Commands</b> ({len(rows)})</summary>\n"
+                        "<details>"
+                        f"<summary><b>Commands</b> ({len(rows)})</summary>\n"
                         f"{table}\n"
-                        f"</details>"
+                        "</details>"
                     )
                 if placeholders:
                     ph = self._plain_doc(placeholders, "")
                     if ph:
                         parts.append(
-                            f"<b>Placeholders</b>\n"
-                            f"<p>{html_mod.escape(ph[:500])}</p>"
+                            f"<details><summary>Placeholders</summary>"
+                            f"<p>{html_mod.escape(ph[:500])}</p></details>"
                         )
                 if dev_text:
                     parts.append(
@@ -775,139 +489,77 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 with contextlib.suppress(Exception):
                     html = to_rich_compatible(html)
 
-                # Module banner (# meta banner:) first; else help config banner
                 meta_b = None
                 with contextlib.suppress(Exception):
-                    src_head = ""
-                    from pathlib import Path as _P
-                    # try all known paths to module source
-                    candidates = []
-                    for attr in ("__origin__", "__file__", "_source_path"):
-                        with contextlib.suppress(Exception):
-                            v = getattr(module, attr, None)
-                            if v and not str(v).startswith("<"):
-                                candidates.append(str(v))
-                    with contextlib.suppress(Exception):
-                        import inspect as _ins
-                        f = _ins.getfile(module.__class__)
-                        if f and not f.startswith("<"):
-                            candidates.append(f)
-                    for path in candidates:
-                        pth = _P(path)
-                        if pth.is_file():
-                            with open(pth, "r", encoding="utf-8", errors="ignore") as _bf:
-                                src_head = _bf.read(16384)
-                            if src_head:
-                                break
-                    if not src_head:
-                        with contextlib.suppress(Exception):
-                            import inspect as _ins
-                            src_head = (_ins.getsource(module.__class__) or "")[:16384]
-                    if not src_head:
-                        with contextlib.suppress(Exception):
-                            src_head = (inspect.getdoc(module) or "")[:4000]
-                    if src_head:
-                        # Help's own parser
-                        with contextlib.suppress(Exception):
-                            meta_b = self._get_banner_url(src_head)
-                        if not meta_b:
-                            loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
-                            if loader_mod and hasattr(loader_mod, "_get_banner_url"):
-                                meta_b = loader_mod._get_banner_url(src_head)
-                        if not meta_b:
-                            import re as _re
-                            for pat in (
-                                r"#\s*meta\s+banner:\s*(\S+)",
-                                r"#\s*banner:\s*(\S+)",
-                            ):
-                                _m = _re.search(pat, src_head, _re.I)
-                                if _m:
-                                    meta_b = _m.group(1).strip().strip(chr(34) + chr(39))
-                                    break
-
-                burl = meta_b or banner_url or pick_banner_url(self.config.get("banner_url"))
-                if not burl and module is not None:
-                    for attr in ("banner", "banner_url", "meta_banner", "__banner__"):
-                        with contextlib.suppress(Exception):
-                            v = getattr(module, attr, None)
-                            if isinstance(v, str) and v.startswith(("http://", "https://")):
-                                burl = v.strip()
-                                break
+                    src = ""
+                    origin = getattr(module, "__origin__", "") or ""
+                    if origin and not str(origin).startswith("<"):
+                        from pathlib import Path as _P
+                        if _P(str(origin)).is_file():
+                            src = ""  # skip slow full-file read
+                    if hasattr(self, "_get_banner_url"):
+                        meta_b = self._get_banner_url(src) if src else None
+                    elif hasattr(module, "strings"):
+                        pass
+                # meta from module file via loader helper if present
+                with contextlib.suppress(Exception):
+                    loader_mod = self.lookup("Loader") or self.lookup("LoaderMod")
+                    if loader_mod and hasattr(loader_mod, "_get_banner_url"):
+                        origin = getattr(module, "__origin__", "") or ""
+                        if origin and not str(origin).startswith("<core"):
+                            from pathlib import Path as _P
+                            pth = _P(str(origin))
+                            if pth.is_file():
+                                meta_b = loader_mod._get_banner_url(
+                                    ""  # skip slow full-file read
+                                )
+                burl = meta_b or pick_banner_url(self.config.get("banner_url"))
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
-                _cls_key = module.__class__.__name__
-                _mod_key = module.strings.get("name", _cls_key)
-                # from_list: explicit flag from hmod callback (not type-guess)
-                _from_list = bool(from_list) or bool(
-                    getattr(self, "_help_nav_from_list", False)
-                    or self._acct_get("help_nav_from_list", False)
-                )
-                _row = []
-                if _from_list:
-                    _row.append({
-                        "text": "◀️ Назад",
-                        "callback": self.inline__help_show_list,
-                        "_callback_data": "hhelp|list",
-                        "disable_security": True,
-                    })
-                _has_cfg = False
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
                 with contextlib.suppress(Exception):
-                    _mc = getattr(module, "config", None)
-                    if _mc is not None:
-                        try:
-                            _has_cfg = bool(len(_mc))
-                        except Exception:
-                            _has_cfg = True
-                if _has_cfg:
-                    # Prefer class name in callback — lookup is reliable
-                    _cfg_key = _cls_key
-                    _row.append({
-                        "text": "⚙️ Config",
-                        "callback": self.inline__help_open_cfg,
-                        "args": (_cfg_key,),
-                        "_callback_data": ("hcfgmod|" + str(_cfg_key))[:64],
-                        "disable_security": True,
-                    })
-                _row.append({
-                    "text": "🔻 Закрыть",
-                    "action": "close",
-                    "_callback_data": "hhelp|close",
-                    "disable_security": True,
-                })
-                close_mk = [_row]
-                # Rich shows tg-buttons in HTML; classic also gets reply_markup
+                    btn = markup_to_tg_rows(close_mk, "")
+                    if btn:
+                        html = f"{html}\n{btn}"
+
                 if getattr(self.inline, "init_complete", False):
                     try:
-                        m = await self._help_form(
-                            str(_name)[:120] or "Help",
+                        m = await self.inline.rich(
                             message,
-                            reply_markup=close_mk,
-                            rich_html=html,
-                            banner_url=locals().get("banner_url"),
-                        )
-                        if m:
-                            return
-                    except Exception as e:
-                        logger.debug("help form rich failed: %s", e)
-                    # fallback rich without form unit
-                    with contextlib.suppress(Exception):
-                        m = await self.inline.form(
-                            text=html,
-                            message=message,
+                            html,
+                            title=str(_name)[:64],
+                            description=self._plain_doc(
+                                inspect.getdoc(module), "Module help"
+                            )[:80],
+                            thumbnail_url=burl,
                             reply_markup=close_mk,
                             silent=True,
                         )
                         if m:
                             return
+                    except Exception as e:
+                        logger.debug("help inline.rich failed: %s", e)
+                    try:
+                        m = await self.inline.form(
+                            text=str(_name)[:120] or "Help",
+                            message=message,
+                            rich_message=html,
+                            reply_markup=close_mk,
+                            silent=True,
+                        )
+                        if m:
+                            return
+                    except Exception as e:
+                        logger.debug("help form rich failed: %s", e)
         except Exception:
             logger.debug("module help rich failed", exc_info=True)
 
         await utils.answer(
             message,
-            f"{reply}<blockquote>{cmds}{inline_cmd}</blockquote>"
+            f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
             + (
-                f"<blockquote>\n{placeholders}</blockquote>"
+                f"<blockquote expandable>\n{placeholders}</blockquote>"
                 if placeholders
                 else ""
             )
@@ -922,103 +574,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
             **banner_kwargs,
         )
 
-    async def inline__help_show_list(self, call):
-        """Back → modules list. Edit current via-message in place."""
-        with contextlib.suppress(Exception):
-            await call.answer("← Список")
-        for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
-            with contextlib.suppress(Exception):
-                setattr(call, attr, val)
-        # Preserve imid from original Telegram callback
-        oc = getattr(call, "original_call", None)
-        if oc is not None and not getattr(call, "inline_message_id", None):
-            mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
-            if mid:
-                with contextlib.suppress(Exception):
-                    call.inline_message_id = mid
-        self._help_nav_from_list = False
-        with contextlib.suppress(Exception):
-            self._acct_set("help_nav_from_list", False)
-        try:
-            await self.help(call)
-        except Exception as e:
-            logger.exception("inline__help_show_list: %s", e)
-            with contextlib.suppress(Exception):
-                await call.answer("Back failed", show_alert=True)
-
-    async def inline__help_back_from_cfg(self, call, mod_name: str = ""):
-        try:
-            fl = bool(
-                getattr(self, "_help_nav_from_list", False)
-                or self._acct_get("help_nav_from_list", False)
-            )
-            await self.modhelp(call, mod_name or "", from_list=fl)
-        except Exception as e:
-            logger.debug("help back from cfg: %s", e)
-
-    async def inline__help_open_cfg(self, call, mod_name: str = ""):
-        """Open module config — edit same message."""
-        with contextlib.suppress(Exception):
-            await call.answer("Config…")
-        for attr, val in (("is_channel", False), ("is_private", True), ("is_group", False)):
-            with contextlib.suppress(Exception):
-                setattr(call, attr, val)
-        oc = getattr(call, "original_call", None)
-        if oc is not None and not getattr(call, "inline_message_id", None):
-            mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
-            if mid:
-                with contextlib.suppress(Exception):
-                    call.inline_message_id = mid
-        try:
-            cfg = (
-                self.lookup("HikkariConfig")
-                or self.lookup("HikkariConfigMod")
-                or self.lookup("config")
-            )
-            if cfg is None:
-                for m in list(getattr(self.allmodules, "modules", []) or []):
-                    if hasattr(m, "inline__configure") and "config" in m.__class__.__name__.lower():
-                        cfg = m
-                        break
-            if cfg is None or not hasattr(cfg, "inline__configure"):
-                with contextlib.suppress(Exception):
-                    await call.answer("Config unavailable", show_alert=True)
-                return
-
-            key = (mod_name or "").strip()
-            mod = self.lookup(key) if key else None
-            if mod is None and key:
-                for m in list(getattr(self.allmodules, "modules", []) or []):
-                    names = {m.__class__.__name__}
-                    with contextlib.suppress(Exception):
-                        names.add(str(m.strings.get("name", "")))
-                    if key in names or key.lower() in {x.lower() for x in names if x}:
-                        mod = m
-                        break
-            if mod is None:
-                with contextlib.suppress(Exception):
-                    await call.answer("Module not found", show_alert=True)
-                return
-            if not getattr(mod, "config", None):
-                with contextlib.suppress(Exception):
-                    await call.answer("No config", show_alert=True)
-                return
-
-            conf_key = mod.__class__.__name__
-            with contextlib.suppress(Exception):
-                cfg._help_return_mod = conf_key
-                cfg._help_return_help = self
-                cfg._help_from_list = bool(
-                    self._acct_get("help_nav_from_list", False)
-                    or getattr(self, "_help_nav_from_list", False)
-                )
-            await cfg.inline__configure(call, str(conf_key))
-        except Exception as e:
-            logger.exception("help open cfg: %s", e)
-            with contextlib.suppress(Exception):
-                await call.answer(str(e)[:80], show_alert=True)
-
-
     @loader.command(
         ru_doc="[args] | Помощь с вашими модулями!",
         ua_doc="[args] | допоможіть з вашими модулями!",
@@ -1027,20 +582,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
     async def help(self, message: Message):
         """[args] | help with your modules!"""
 
-        # Form callbacks pass InlineCall — body text is NOT command args
-        _tn = type(message).__name__
-        if _tn in ("InlineCall", "BotInlineCall") or getattr(message, "inline_message_id", None):
-            args = ""
-        else:
-            try:
-                args = utils.get_args_raw(message) or ""
-            except Exception:
-                args = ""
-            if args is False:
-                args = ""
-        _is_form_edit = _tn in ("InlineCall", "BotInlineCall") or bool(
-            getattr(message, "inline_message_id", None)
-        )
+        args = utils.get_args_raw(message)
 
         raw_banner = str(self.config["banner_url"] or "").strip()
         # Reject garbage saved from broken inline input (transfer msg, etc.)
@@ -1150,64 +692,22 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 and not getattr(mod, "callback_handlers", None)
                 and not placeholders
             ):
-                _empty = self.config["empty_emoji"]
-                with contextlib.suppress(Exception):
-                    from ..utils.rich import can_use_rich as _cur2, strip_rich as _sr
-                    if not _cur2(
-                        getattr(self, "_client", None) or getattr(self, "client", None),
-                        getattr(self, "_db", None),
-                    ):
-                        _empty = _sr(str(_empty)) or "🟠"
                 no_commands_ += [
-                    "\n{} <code>{}</code>".format(_empty, name)
+                    "\n{} <code>{}</code>".format(self.config["empty_emoji"], name)
                 ]
                 continue
 
             core = mod.__origin__.startswith("<core")
 
-            use_prem_emoji = False
-            with contextlib.suppress(Exception):
-                from ..utils.rich import can_use_rich as _cur
-                use_prem_emoji = bool(
-                    _cur(
-                        getattr(self, "_client", None) or getattr(self, "client", None),
-                        getattr(self, "_db", None),
-                    )
-                )
-            if use_prem_emoji:
-                emoji = (
-                    "<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>"
-                    if core
-                    else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"
-                )
-            else:
-                emoji = "🛡"
-            tmp += f"\n{emoji} <code>{name}</code>"
+            tmp += "\n{} <code>{}</code>".format(
+                ("<tg-emoji emoji-id=5778423822940114949>🛡</tg-emoji>" if core else "<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>"), name
+            )
             first = True
-
-            async def _sec_ok(func) -> bool:
-                if force:
-                    return True
-                msg = message
-                if type(msg).__name__ in ("InlineCall", "BotInlineCall"):
-                    with contextlib.suppress(Exception):
-                        if not hasattr(msg, "is_channel"):
-                            setattr(msg, "is_channel", False)
-                        if not hasattr(msg, "is_private"):
-                            setattr(msg, "is_private", True)
-                        if not hasattr(msg, "is_group"):
-                            setattr(msg, "is_group", False)
-                try:
-                    return bool(await self.allmodules.check_security(msg, func))
-                except AttributeError:
-                    return True
-                except Exception:
-                    return False
 
             commands = [
                 name
                 for name, func in mod.commands.items()
-                if await _sec_ok(func)
+                if await self.allmodules.check_security(message, func) or force
             ]
 
             for cmd in commands:
@@ -1228,7 +728,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                             func=func,
                             user=(
                                 message.sender_id
-                                if not self._is_out(message)
+                                if not message.out
                                 else self._client.tg_id
                             ),
                         )
@@ -1258,17 +758,6 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
 
             if commands or icommands or placeholders:
                 tmp += " )"
-                try:
-                    from ..utils.rich_api import tg_button as _tg_btn
-                    _hb = _tg_btn(
-                        "Help",
-                        type="callback_data",
-                        data=("hmod|" + str(name))[:64],
-                        style="primary",
-                    )
-                    tmp += " " + _hb
-                except Exception:
-                    pass
                 if core:
                     core_ += [tmp]
                 else:
@@ -1290,17 +779,8 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
         )
         reply = self.strings["all_header"].format(shown_count, hidden_count)
 
-        _use_rich_help = False
-        with contextlib.suppress(Exception):
-            from ..utils.rich import can_use_rich as _cur_help
-            _use_rich_help = bool(
-                self.config.get("rich_mode", True)
-                and _cur_help(
-                    getattr(self, "_client", None) or getattr(self, "client", None),
-                    getattr(self, "_db", None),
-                )
-            )
-        if _use_rich_help:
+        # === Heroku 2.2 native Rich help (details sections) ===
+        if self.config.get("rich_mode", True):
             try:
                 from .. import utils as _u
                 from .._internal import normalize_rich_html
@@ -1331,9 +811,8 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     sections = [("Модули", rich_modules)]
                 else:
                     sections = [("Встроенные модули", rich_core), ("Модули", rich_modules)]
-                # closed by default (no open attr)
                 rich_message += "".join(
-                    f"<details>\n<summary>{title}</summary>\n{content}\n</details>"
+                    f"<details><summary>{title}</summary>{content}</details>"
                     for title, content in sections
                     if content
                 )
@@ -1342,38 +821,25 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                # Footer Close (special route hhelp|close)
-                close_mk = [[{
-                    "text": "🔻 Закрыть",
-                    "action": "close",
-                    "_callback_data": "hhelp|close",
-                }]]
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
-                        from ..utils.rich_api import to_rich_compatible
-                        html = to_rich_compatible(rich_message)
-                        m = await self._help_form(
-                            str(reply)[:200] or "Hikkari Help",
-                            message,
+                        from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
+                        html = to_rich_compatible(
+                            rich_message
+                            + "\n"
+                            + (markup_to_tg_rows(close_mk, "") or "")
+                        )
+                        m = await self.inline.form(
+                            text=str(reply)[:200] or "Hikkari Help",
+                            message=message,
+                            rich_message=html,
                             reply_markup=close_mk,
-                            rich_html=html,
+                            silent=True,
                         )
                         sent = bool(m)
                     if not sent:
-                        # Back/list from existing form: never open a second message
-                        if _is_form_edit:
-                            with contextlib.suppress(Exception):
-                                from ..utils.rich_api import to_rich_compatible
-                                html2 = to_rich_compatible(rich_message)
-                                if hasattr(message, "edit"):
-                                    await message.edit(
-                                        text=str(reply)[:200] or "Hikkari Help",
-                                        reply_markup=close_mk,
-                                    )
-                                    sent = True
-                            if sent:
-                                return
                         with contextlib.suppress(Exception):
                             m = await self.inline.rich(
                                 message,
@@ -1433,11 +899,12 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 def _details_block(title: str, rows: list[tuple[str, str]]) -> str:
                     if not rows:
                         return ""
-                    body = "\n".join(f"{name} {cmds}" for name, cmds in rows)
+                    table = html_table(rows, header=("Module", "Commands"))
+                    # closed by default (no open attribute)
                     return (
                         f"<details>"
-                        f"<summary>{title}</summary>"
-                        f"{body}"
+                        f"<summary><b>{title}</b> ({len(rows)})</summary>\n"
+                        f"{table}\n"
                         f"</details>"
                     )
 
@@ -1630,7 +1097,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     return (
                         f"{text_header}\n"
                         f"<i>{page + 1}/{total_pages}</i>\n"
-                        f"<blockquote>{body}</blockquote>"
+                        f"<blockquote expandable>{body}</blockquote>"
                     )
 
                 async def goto(call, page: int):
@@ -1657,7 +1124,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                 first_btns.append([{"text": "🔻 Close", "action": "close"}])
                 await self.inline.form(
                     page_text(0),
-                    message=message if self._is_out(message) else utils.get_chat_id(message),
+                    message=message if message.out else utils.get_chat_id(message),
                     reply_markup=first_btns,
                     silent=True,
                 )
@@ -1676,7 +1143,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
+                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),
@@ -1698,7 +1165,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
+                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(plain_ + (no_commands_ if force else [])),
@@ -1720,7 +1187,7 @@ class Help(loader.Module):  # HELP_BANNER_REGEX_OK
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote><blockquote>{}</blockquote>"
+                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),

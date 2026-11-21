@@ -107,55 +107,34 @@ class HikkariConfigMod(loader.Module):
 
 
     async def _cfg_form(self, text, message, reply_markup=None, **kwargs):
-        """Config UI.
+        """Config UI: media banner + working callback keyboard.
 
-        Rich mode ON: pure Rich only (inline.rich / edit_rich_message + tg-buttons).
-        Never leave a classic via-inline keyboard on screen after navigation.
-        Rich mode OFF: classic form + media banner.
+        Pure Rich (reply_markup=None) breaks multi-button navigation — after
+        opening a section buttons die and going back fails. Use classic form
+        with photo/video for ALL pages so kb always works.
         """
-        import contextlib
         from ..inline.types import InlineCall, InlineMessage, BotInlineCall
 
         banner_kw = self._cfg_banner_kwargs()
-        markup = reply_markup or []
+        markup = reply_markup
 
-        # _send_initial_config_form uses _InlineFormDraft: it only captures
-        # text/markup via draft.edit(). Must NOT try inline.rich on the draft.
-        if type(message).__name__ == "_InlineFormDraft" or isinstance(
-            message, _InlineFormDraft
-        ):
-            await message.edit(text, reply_markup=markup, **kwargs)
-            return True
-
-        client = getattr(self, "_client", None) or getattr(self, "client", None)
-        use_rich = False
-        try:
-            from ..utils.rich import can_use_rich
-            use_rich = bool(can_use_rich(client, self._db))
-        except Exception:
-            use_rich = False
-
-        with contextlib.suppress(Exception):
-            await self.inline.ensure_inline_ready()
-
-        if not use_rich:
-            if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
-                try:
-                    return await message.edit(
-                        text,
-                        reply_markup=markup,
-                        **{
-                            k: banner_kw[k]
-                            for k in ("photo", "video", "gif")
-                            if k in banner_kw and banner_kw[k] is not None
-                        },
-                    )
-                except Exception:
-                    pass
-                try:
-                    return await message.edit(text, reply_markup=markup)
-                except Exception:
-                    pass
+        # Navigation / unit edit — keep same unit + buttons + media
+        if isinstance(message, (InlineCall, InlineMessage, BotInlineCall)):
+            edit_kw = {
+                k: v
+                for k, v in banner_kw.items()
+                if k in ("photo", "video", "gif", "file", "mime_type")
+            }
+            try:
+                return await message.edit(text, reply_markup=markup, **edit_kw)
+            except TypeError:
+                pass
+            except Exception:
+                pass
+            try:
+                return await message.edit(text, reply_markup=markup)
+            except Exception:
+                pass
             return await self.inline.form(
                 text,
                 message=message,
@@ -164,202 +143,14 @@ class HikkariConfigMod(loader.Module):
                 **banner_kw,
             )
 
-        # ── Pure Rich ──
-        from ..utils.rich_api import (
-            inject_banner_html,
-            to_rich_compatible,
-            pick_banner_url,
-            markup_to_tg_rows,
+        # Fresh .cfg open — single classic form with banner
+        return await self.inline.form(
+            text,
+            message=message,
+            reply_markup=markup,
+            silent=True,
+            **banner_kw,
         )
-
-        body = str(text or "")
-        html = body
-        with contextlib.suppress(Exception):
-            html = to_rich_compatible(body)
-
-        burl = None
-        with contextlib.suppress(Exception):
-            burl = pick_banner_url(self.config.get("banner_url"))
-        if not burl:
-            for k in ("photo", "video", "gif"):
-                v = banner_kw.get(k)
-                if isinstance(v, str) and v.startswith(("http://", "https://")):
-                    burl = v
-                    break
-        if burl:
-            with contextlib.suppress(Exception):
-                html = inject_banner_html(html, burl, force=True)
-
-        def _prepare(h, unit_id, buttons):
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["buttons"] = buttons
-                self.inline._units[unit_id]["text"] = text
-                with contextlib.suppress(Exception):
-                    self.inline.generate_markup(unit_id)
-                buttons = self.inline._units[unit_id].get("buttons") or buttons
-            btn_html = ""
-            with contextlib.suppress(Exception):
-                btn_html = markup_to_tg_rows(buttons, unit_id or "") if buttons else ""
-            full = h + ("\n" + btn_html if btn_html else "")
-            if unit_id and unit_id in getattr(self.inline, "_units", {}):
-                self.inline._units[unit_id]["rich_message"] = full
-                self.inline._units[unit_id]["rich_html"] = full
-            return full, buttons
-
-        is_nav = isinstance(message, (InlineCall, InlineMessage, BotInlineCall))
-
-        if is_nav:
-            unit_id = getattr(message, "unit_id", None)
-            mid = getattr(message, "inline_message_id", None)
-            if not mid:
-                oc = getattr(message, "original_call", None)
-                if oc is not None:
-                    mid = getattr(oc, "inline_message_id", None) or getattr(oc, "inlineMessageId", None)
-            if not unit_id and mid:
-                for uid, unit in list(getattr(self.inline, "_units", {}).items()):
-                    if isinstance(unit, dict) and unit.get("inline_message_id") == mid:
-                        unit_id = uid
-                        with contextlib.suppress(Exception):
-                            message.unit_id = uid
-                        break
-            full_html, buttons = _prepare(html, unit_id, markup)
-            # register callbacks, but do NOT attach classic keyboard (tg-buttons in HTML only)
-            with contextlib.suppress(Exception):
-                if markup:
-                    self.inline._generate_markup(markup)
-            # 0) Bot API token edit (official rich)
-            if mid:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
-                    if not token:
-                        for obj in (self.inline, getattr(self.inline, "bot", None)):
-                            if obj is None:
-                                continue
-                            for attr in ("token", "_token", "bot_token"):
-                                t = getattr(obj, attr, None)
-                                if isinstance(t, str) and ":" in t:
-                                    token = t
-                                    break
-                    if token:
-                        from ..utils.rich_api import pack_inline_message_id as _pack
-                        _p = _pack(mid)
-                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
-                        if ok:
-                            return True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("cfg bot-api edit: %s", e)
-            # 1) edit same bubble (mtproto)
-            if mid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                try:
-                    await self.inline.bot.edit_rich_message(
-                        html=full_html,
-                        inline_message_id=mid,
-                        reply_markup=None,
-                    )
-                    return True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "cfg edit_rich_message failed: %s", e, exc_info=True
-                    )
-            if mid:
-                try:
-                    from ..utils.rich_api import edit_rich_message as _erm, _find_bot_token
-                    token = _find_bot_token(getattr(self, "_client", None) or getattr(self, "client", None))
-                    if token:
-                        from ..utils.rich_api import pack_inline_message_id as _pack
-                        _p = _pack(mid)
-                        ok = bool(_p) and await _erm(str(token), full_html, inline_message_id=_p)
-                        if ok:
-                            return True
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("cfg rich_api edit: %s", e)
-            try:
-                ok = await message.edit(
-                    text,
-                    reply_markup=buttons or markup,
-                    rich_message=full_html,
-                )
-                if ok is not False:
-                    return ok
-            except Exception:
-                pass
-            try:
-                return await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=buttons or markup,
-                    silent=True,
-                    title="HikkariConfig",
-                    description="Config",
-                )
-            except Exception:
-                pass
-            # Resend via real Message (InlineCall.rich only edits)
-            chat = (
-                getattr(message, "chat_id", None)
-                or getattr(message, "sender_id", None)
-            )
-            client = getattr(self, "_client", None) or getattr(self, "client", None)
-            if client is not None and chat is not None:
-                try:
-                    placeholder = await client.send_message(int(chat), "\u2060")
-                    try:
-                        m = await self.inline.rich(
-                            placeholder,
-                            full_html,
-                            reply_markup=None,
-                            silent=True,
-                            title="HikkariConfig",
-                            description="Config",
-                        )
-                    finally:
-                        with contextlib.suppress(Exception):
-                            await placeholder.delete()
-                    with contextlib.suppress(Exception):
-                        if hasattr(message, "delete"):
-                            await message.delete()
-                    if m:
-                        return m
-                except Exception:
-                    pass
-            return False
-
-        # Fresh open
-        try:
-            full_html, _ = _prepare(html, None, markup)
-            with contextlib.suppress(Exception):
-                if markup:
-                    self.inline._generate_markup(markup)
-            return await self.inline.rich(
-                message,
-                full_html,
-                reply_markup=None,
-                silent=True,
-                title="HikkariConfig",
-                description="Config",
-            )
-        except Exception:
-            try:
-                full_html, _ = _prepare(html, None, markup)
-                return await self.inline.rich(
-                    message,
-                    full_html,
-                    reply_markup=None,
-                    silent=True,
-                    title="HikkariConfig",
-                    description="Config",
-                )
-            except Exception:
-                return False
-
-
-    async def _cfg_edit(self, call, text, reply_markup=None, **kwargs):
-        """Route config UI edits through _cfg_form so Rich never falls to classic inline."""
-        return await self._cfg_form(text, call, reply_markup=reply_markup, **kwargs)
 
     def _cfg_banner_kwargs(self) -> dict:
         """photo / video / gif for config forms from banner_url."""
@@ -562,7 +353,7 @@ class HikkariConfigMod(loader.Module):
                 or "will be deleted automatically" in query
                 or query in {"🔄", "✨"}
             ):
-                await self._cfg_edit(call, 
+                await call.edit(
                     self.strings.get(
                         "validation_error",
                         "🚫 <b>Invalid value</b>",
@@ -590,7 +381,7 @@ class HikkariConfigMod(loader.Module):
                 if not qs.startswith(("audio:", "audio_ref:")):
                     self._cleanup_audio_banner_files(mod, str(option), prev_q)
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -638,50 +429,12 @@ class HikkariConfigMod(loader.Module):
             ]
         ]
 
-        # Refresh form after input (Rich must edit original form bubble)
+        # Prefer Heroku-style edit without forcing inline_message_id kw if already on call
         try:
-            unit_id = getattr(call, "unit_id", None)
-            units = getattr(getattr(self, "inline", None), "_units", {}) or {}
-            if unit_id and unit_id in units and units[unit_id].get("inline_message_id"):
-                imid = units[unit_id]["inline_message_id"]
-                try:
-                    call.inline_message_id = imid
-                except Exception:
-                    pass
             if imid is not None:
-                await self._cfg_edit(call, text, reply_markup=markup, inline_message_id=imid)
+                await call.edit(text, reply_markup=markup, inline_message_id=imid)
             else:
-                await self._cfg_edit(call, text, reply_markup=markup)
-            # Extra: direct rich edit if still pure-rich mode (guarantees UI update)
-            try:
-                from ..utils.rich import can_use_rich
-                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible, inject_banner_html, pick_banner_url
-                client = getattr(self, "_client", None) or getattr(self, "client", None)
-                if can_use_rich(client, self._db) and imid and hasattr(getattr(self.inline, "bot", None), "edit_rich_message"):
-                    html = to_rich_compatible(text)
-                    burl = None
-                    with contextlib.suppress(Exception):
-                        burl = pick_banner_url(self.config.get("banner_url"))
-                    if burl:
-                        with contextlib.suppress(Exception):
-                            html = inject_banner_html(html, burl, force=True)
-                    if unit_id and unit_id in units:
-                        units[unit_id]["buttons"] = markup
-                        with contextlib.suppress(Exception):
-                            self.inline.generate_markup(unit_id)
-                        markup = units[unit_id].get("buttons") or markup
-                    btn = markup_to_tg_rows(markup, unit_id or "") if markup else ""
-                    full = html + (("\n" + btn) if btn else "")
-                    if unit_id and unit_id in units:
-                        units[unit_id]["rich_message"] = full
-                        units[unit_id]["rich_html"] = full
-                    await self.inline.bot.edit_rich_message(
-                        html=full,
-                        inline_message_id=imid,
-                        reply_markup=None,
-                    )
-            except Exception:
-                pass
+                await call.edit(text, reply_markup=markup)
         except Exception:
             logger = __import__("logging").getLogger(__name__)
             logger.exception("inline__set_config edit failed (value already saved)")
@@ -696,7 +449,7 @@ class HikkariConfigMod(loader.Module):
         mod_instance = self.lookup(mod)
         mod_instance.config[option] = mod_instance.config.getdef(option)
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings[
                 "option_reset" if isinstance(obj_type, bool) else "option_reset_lib"
             ].format(
@@ -733,7 +486,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -758,7 +511,7 @@ class HikkariConfigMod(loader.Module):
             )
         )
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings[
                 (
                     "configuring_option"
@@ -869,7 +622,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config[option] = self.lookup(mod).config[option] + query
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -879,7 +632,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -961,7 +714,7 @@ class HikkariConfigMod(loader.Module):
                     " target list"
                 )
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -971,7 +724,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -1079,7 +832,7 @@ class HikkariConfigMod(loader.Module):
         try:
             self.lookup(mod).config[option] = value
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -1089,7 +842,7 @@ class HikkariConfigMod(loader.Module):
             )
             return
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings[
                 "option_saved" if isinstance(obj_type, bool) else "option_saved_lib"
             ].format(
@@ -1133,7 +886,7 @@ class HikkariConfigMod(loader.Module):
 
             self.lookup(mod).config.reload()
         except loader.validators.ValidationError as e:
-            await self._cfg_edit(call, 
+            await call.edit(
                 self.strings["validation_error"].format(e.args[0]),
                 reply_markup={
                     "text": self.strings["try_again"],
@@ -1314,11 +1067,11 @@ class HikkariConfigMod(loader.Module):
             pass
         text = self._clip_cfg_text(text, 950)
         try:
-            return await self._cfg_edit(call, text, reply_markup=reply_markup, **kwargs)
+            return await call.edit(text, reply_markup=reply_markup, **kwargs)
         except Exception:
             logger.debug("cfg edit failed, hard clip", exc_info=True)
             with contextlib.suppress(Exception):
-                return await self._cfg_edit(call, 
+                return await call.edit(
                     self._clip_cfg_text(text, 500),
                     reply_markup=reply_markup,
                     **kwargs,
@@ -1436,7 +1189,7 @@ class HikkariConfigMod(loader.Module):
             )
             match validator.internal_id:
                 case "Boolean":
-                    await self._cfg_edit(call, 
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1446,7 +1199,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Series":
-                    await self._cfg_edit(call, 
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1458,7 +1211,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "Choice":
-                    await self._cfg_edit(call, 
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1470,7 +1223,7 @@ class HikkariConfigMod(loader.Module):
                     )
                     return
                 case "MultiChoice":
-                    await self._cfg_edit(call, 
+                    await call.edit(
                         text,
                         reply_markup=additonal_button_row
                         + self._put_pagination_before_nav(
@@ -1538,11 +1291,11 @@ class HikkariConfigMod(loader.Module):
             ],
         ]
         try:
-            await self._cfg_edit(call, text, reply_markup=markup)
+            await call.edit(text, reply_markup=markup)
         except Exception:
             logger.exception("configure_option edit failed")
             with contextlib.suppress(Exception):
-                await self._cfg_edit(call, self._clip_cfg_text(text, 500), reply_markup=markup)
+                await call.edit(self._clip_cfg_text(text, 500), reply_markup=markup)
             with contextlib.suppress(Exception):
                 await call.answer("⚠️ text truncated", show_alert=False)
 
@@ -1564,27 +1317,6 @@ class HikkariConfigMod(loader.Module):
             category=category,
         )
 
-    async def _back_from_module_cfg(self, call, obj_type=False, page=0, **kwargs):
-        """Back from module config → help modhelp or global config list.
-        Accepts page/**kwargs so mis-wired pagination never crashes.
-        """
-        help_mod = getattr(self, "_help_return_help", None)
-        mod_name = getattr(self, "_help_return_mod", None)
-        from_list = bool(getattr(self, "_help_from_list", False))
-        if help_mod is not None and mod_name and hasattr(help_mod, "modhelp"):
-            with contextlib.suppress(Exception):
-                self._help_return_mod = None
-                self._help_return_help = None
-                self._help_from_list = False
-            await help_mod.modhelp(call, mod_name, from_list=from_list)
-            return
-        # Not from help — this is global config nav; honor page if present
-        try:
-            page = int(page or 0)
-        except Exception:
-            page = 0
-        await self.inline__global_config(call, page=page, obj_type=obj_type)
-
     async def inline__configure(
         self,
         call: InlineCall,
@@ -1596,19 +1328,6 @@ class HikkariConfigMod(loader.Module):
     ):
 
         module = self.lookup(mod)
-        if module is None:
-            # retry by class name / loose match
-            for m in list(getattr(self.allmodules, "modules", []) or []):
-                names = {m.__class__.__name__}
-                with contextlib.suppress(Exception):
-                    names.add(str(m.strings.get("name", "")))
-                if str(mod) in names or str(mod).lower() in {x.lower() for x in names if x}:
-                    module = m
-                    break
-        if module is None or not getattr(module, "config", None):
-            with contextlib.suppress(Exception):
-                await call.answer("Module/config not found", show_alert=True)
-            return
         grouped = module.config.grouped_options()
 
         def fmt_value(option: str) -> str:
@@ -1656,7 +1375,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await self._cfg_edit(call, 
+            return await call.edit(
                 cat_text,
                 reply_markup=list(
                     utils.chunks(
@@ -1711,7 +1430,7 @@ class HikkariConfigMod(loader.Module):
                 ),
             )
 
-            return await self._cfg_edit(call, 
+            return await call.edit(
                 text,
                 reply_markup=list(
                     utils.chunks(
@@ -1735,7 +1454,7 @@ class HikkariConfigMod(loader.Module):
                     [
                         {
                             "text": self.strings["back_btn"],
-                            "callback": self._back_from_module_cfg,
+                            "callback": self.inline__global_config,
                             "style": "primary",
                             "kwargs": {"obj_type": obj_type},
                         },
@@ -1805,7 +1524,7 @@ class HikkariConfigMod(loader.Module):
             functools.partial(self.inline__configure_page, mod=mod, obj_type=obj_type),
         )
 
-        await self._cfg_edit(call, 
+        await call.edit(
             text,
             reply_markup=list(utils.chunks(btns, 2))
             + pagination
@@ -1813,7 +1532,7 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": self.strings["back_btn"],
-                        "callback": self._back_from_module_cfg,
+                        "callback": self.inline__global_config,
                         "style": "primary",
                         "kwargs": {"obj_type": obj_type},
                     },
@@ -1934,12 +1653,12 @@ class HikkariConfigMod(loader.Module):
                 [
                     {
                         "text": self.strings["builtin"],
-                        "callback": self._back_from_module_cfg,
+                        "callback": self.inline__global_config,
                         "kwargs": {"obj_type": True},
                     },
                     {
                         "text": self.strings["external"],
-                        "callback": self._back_from_module_cfg,
+                        "callback": self.inline__global_config,
                     },
                 ],
                 *(
@@ -1947,7 +1666,7 @@ class HikkariConfigMod(loader.Module):
                         [
                             {
                                 "text": self.strings["libraries"],
-                                "callback": self._back_from_module_cfg,
+                                "callback": self.inline__global_config,
                                 "kwargs": {"obj_type": "library"},
                             }
                         ]
@@ -2033,7 +1752,7 @@ class HikkariConfigMod(loader.Module):
                     f"<tg-emoji emoji-id=5253713110111365241>▫️</tg-emoji> <b>{utils.escape_html(mod_name)}</b>"
                 )
 
-        await self._cfg_edit(call, 
+        await call.edit(
             self.strings["configuring_folder"].format(
                 utils.escape_html(folder),
                 "\n".join(text_parts) if text_parts else "No options",
@@ -2171,7 +1890,7 @@ class HikkariConfigMod(loader.Module):
             total_pages,
         )
 
-        await self._cfg_edit(call, title, reply_markup=kb)
+        await call.edit(title, reply_markup=kb)
 
 
     @staticmethod
