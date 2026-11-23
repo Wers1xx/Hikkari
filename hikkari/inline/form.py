@@ -589,13 +589,23 @@ class Form(InlineUnit):
                 with contextlib.suppress(Exception):
                     await message.delete()
 
+        # Wait for chosen_inline feedback only briefly.
+        # A fixed 2s timeout made every form lag when feedback is disabled.
+        fb_ok = None
+        with contextlib.suppress(Exception):
+            fb_ok = self._db.get("hikkari.inline", "inline_feedback_ok", None)
+        wait_s = 0.8 if fb_ok is True else (0.12 if fb_ok is False else 0.35)
         try:
-            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=2)
+            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=wait_s)
+            with contextlib.suppress(Exception):
+                self._db.set("hikkari.inline", "inline_feedback_ok", True)
         except (asyncio.TimeoutError, KeyError):
-            logger.warning(
-                "Inline form %s: no chosen_inline feedback in 2s "
-                "(enable /setinlinefeedback in @BotFather). Continuing without it.",
+            with contextlib.suppress(Exception):
+                self._db.set("hikkari.inline", "inline_feedback_ok", False)
+            logger.debug(
+                "Inline form %s: no chosen_inline feedback in %.2fs — continue",
                 unit_id,
+                wait_s,
             )
         with contextlib.suppress(Exception):
             if "future" in self._units.get(unit_id, {}):
