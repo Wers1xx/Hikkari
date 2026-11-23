@@ -517,7 +517,7 @@ class Help(loader.Module):
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
 
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]]
                 with contextlib.suppress(Exception):
                     btn = markup_to_tg_rows(close_mk, "")
                     if btn:
@@ -821,7 +821,7 @@ class Help(loader.Module):
                     rich_message += f"<p>{self.strings.get('partial_load', '')}</p>"
                 # via@ form with close when inline ready; native fallback without button
                 rich_message = normalize_rich_html(rich_message)
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]]
                 sent = False
                 if getattr(self.inline, "init_complete", False):
                     with contextlib.suppress(Exception):
@@ -950,7 +950,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=banner_url,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                     )
@@ -1039,7 +1039,7 @@ class Help(loader.Module):
                         title="Hikkari Help",
                         description=text_header[:80],
                         thumbnail_url=None,
-                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                        reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
                         silent=True,
                         pages=None,
                         page=0,
@@ -1110,7 +1110,7 @@ class Help(loader.Module):
                     if page < total_pages - 1:
                         nav.append({"text": "▶️", "callback": goto, "args": (page + 1,)})
                     btns.append(nav)
-                    btns.append([{"text": "🔻 Close", "action": "close"}])
+                    btns.append([{"text": "🔻 Close", "action": "close", "style": "danger"}])
                     await call.edit(page_text(page), reply_markup=btns)
 
                 if not getattr(self.inline, "init_complete", False):
@@ -1121,7 +1121,7 @@ class Help(loader.Module):
                 if total_pages > 1:
                     nav.append({"text": "▶️", "callback": goto, "args": (1,)})
                 first_btns.append(nav)
-                first_btns.append([{"text": "🔻 Close", "action": "close"}])
+                first_btns.append([{"text": "🔻 Close", "action": "close", "style": "danger"}])
                 await self.inline.form(
                     page_text(0),
                     message=message if message.out else utils.get_chat_id(message),

@@ -359,19 +359,29 @@ class LoaderMod(loader.Module):
         rows = []
         prefix = self.get_prefix()
         undoc = self.strings.get("undoc", "—")
-        for name, fun in sorted(
-            getattr(instance, "commands", {}).items(), key=lambda x: x[0]
-        ):
+        cmds = dict(getattr(instance, "commands", {}) or {})
+        # If empty right after load, re-resolve from allmodules by class name
+        if not cmds:
+            try:
+                key = instance.__class__.__name__
+                for m in list(getattr(self.allmodules, "modules", []) or []):
+                    if m is instance or m.__class__.__name__ == key:
+                        cmds = dict(getattr(m, "commands", {}) or {})
+                        if cmds:
+                            instance = m
+                            break
+            except Exception:
+                pass
+        for name, fun in sorted(cmds.items(), key=lambda x: x[0]):
             doc = self._plain_cmd_doc(inspect.getdoc(fun), undoc)[:120]
             al = self._cmd_aliases(name, fun)
             label = f"{prefix}{name}"
             if al:
                 label = f"{label} ({', '.join(al)})"
             rows.append((label, doc))
-        if getattr(self.inline, "init_complete", False):
-            for name, fun in sorted(
-                getattr(instance, "inline_handlers", {}).items(), key=lambda x: x[0]
-            ):
+        ih = dict(getattr(instance, "inline_handlers", {}) or {})
+        if getattr(self.inline, "init_complete", False) and ih:
+            for name, fun in sorted(ih.items(), key=lambda x: x[0]):
                 doc = self._plain_cmd_doc(inspect.getdoc(fun), undoc)[:120]
                 rows.append((f"@{self.inline.bot_username} {name}", doc))
         return rows
@@ -532,7 +542,7 @@ class LoaderMod(loader.Module):
 
             close_mk = [[
                 {"text": "⚙️ Config", "callback": self._inline_open_mod_config, "args": (modname,)},
-                {"text": "🔻 Закрыть", "action": "close"},
+                {"text": "🔻 Закрыть", "action": "close", "style": "danger"},
             ]]
             if subscribe_markup:
                 close_mk = list(subscribe_markup) + close_mk
@@ -837,7 +847,7 @@ class LoaderMod(loader.Module):
                     "args": (page + 1,),
                 }
             )
-        rows = [nav, [{"text": "🔻 Close", "action": "close"}]]
+        rows = [nav, [{"text": "🔻 Close", "action": "close", "style": "danger"}]]
 
         use_rich = False
         with contextlib.suppress(Exception):
@@ -1742,7 +1752,7 @@ class LoaderMod(loader.Module):
                 burl = pick_banner_url(meta_b) if meta_b else None
                 if burl:
                     html = inject_banner_html(html, burl, force=True)
-                close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                close_mk = [[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]]
                 with contextlib.suppress(Exception):
                     btn = markup_to_tg_rows(close_mk, uid or "")
                     if btn:
@@ -1771,7 +1781,7 @@ class LoaderMod(loader.Module):
         with contextlib.suppress(Exception):
             await call.edit(
                 text,
-                reply_markup=[[{"text": "🔻 Закрыть", "action": "close"}]],
+                reply_markup=[[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]],
             )
             return
         if orig_msg is not None:
@@ -2638,7 +2648,7 @@ class LoaderMod(loader.Module):
         # Classic / form fallback with Close under commands
         text = loaded_msg()
         close_mk = list(subscribe_markup) if subscribe_markup else []
-        close_mk.append([{"text": "🔻 Закрыть", "action": "close"}])
+        close_mk.append([{"text": "🔻 Закрыть", "action": "close", "style": "danger"}])
         sent = False
         try:
             if getattr(self.inline, "init_complete", False):

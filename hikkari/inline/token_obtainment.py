@@ -205,11 +205,26 @@ class TokenObtainment(InlineUnit):
         root = here.parent / "assets" / "hikkari-ava.png"
         if root.is_file():
             return str(root)
+        # Last resort: fetch official avatar from GitHub assets
+        try:
+            import urllib.request
+            url = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-ava.png"
+            dest = here / "assets" / "hikkari-ava.png"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(url, str(dest))
+            if dest.is_file() and dest.stat().st_size > 500:
+                return str(dest)
+        except Exception:
+            pass
         return None
 
     
     async def ensure_bot_inline_enabled(self, force: bool = False) -> bool:
-        """If BotFather inline mode is off, turn it on for our bot username."""
+        """If BotFather inline mode is off, turn it on for our bot username.
+
+        Never opens @BotFather when the bot is already known-good (flag set)
+        or when the inline client is connected and answering.
+        """
         bot_un = getattr(self, "bot_username", None)
         if not bot_un:
             return False
@@ -217,6 +232,14 @@ class TokenObtainment(InlineUnit):
         flag_key = f"inline_mode_ok_{username}"
         if not force and self._db.get("hikkari.inline", flag_key, False):
             return True
+        # Live bot already working — mark OK, skip BotFather
+        if not force and getattr(self, "init_complete", False) and getattr(self, "_bot_client", None):
+            try:
+                if getattr(self._bot_client, "is_connected", lambda: False)():
+                    self._db.set("hikkari.inline", flag_key, True)
+                    return True
+            except Exception:
+                pass
 
         try:
             from hikkaritl.tl.functions.contacts import UnblockRequest

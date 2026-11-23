@@ -134,12 +134,9 @@ class TestMod(loader.Module):
             ),
             loader.ConfigValue(
                 "banner_url",
-                [
-                    "local:hikkari-started.jpg",
-                    "local:hikkari-info.jpg",
-                ],
+                "local:hikkari-cmd.jpg",
                 lambda: self.strings["banner_url"],
-                validator=loader.validators.RandomLink(),
+                validator=loader.validators.Link(),
             ),
             loader.ConfigValue(
                 "quote_media",

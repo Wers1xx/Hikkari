@@ -612,11 +612,15 @@ class InlineManager(
                 self.init_complete,
                 unit_id in self._units,
             )
-            # BotFather inline mode may be off — enable and retry once
+            # Only touch BotFather if we have never confirmed inline mode for this bot.
+            # A single empty unit result is NOT proof that inline is disabled.
             with contextlib.suppress(Exception):
-                await self.ensure_bot_inline_enabled(force=True)
-                await asyncio.sleep(0.3)
-                q = await self._client.inline_query(bot_un, unit_id)
+                flag_key = f"inline_mode_ok_{str(bot_un).lstrip('@')}"
+                already_ok = bool(self._db.get("hikkari.inline", flag_key, False))
+                if not already_ok:
+                    await self.ensure_bot_inline_enabled(force=False)
+                    await asyncio.sleep(0.3)
+                    q = await self._client.inline_query(bot_un, unit_id)
             if not q:
                 raise Exception("No query results")
 
