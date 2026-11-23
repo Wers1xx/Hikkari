@@ -885,7 +885,7 @@ class Modules:
 
         # Parallel load (Heroku-style speed): bound concurrency, lock registration
         import os as _os
-        _par = 16 if _os.environ.get("HIKKARI_FAST_START") else 8
+        _par = int(_os.environ.get("HIKKARI_PARALLEL_LOAD") or (24 if _os.environ.get("HIKKARI_FAST_START") else 16))
         sem = asyncio.Semaphore(_par)
         lock = asyncio.Lock()
         loaded: list = []
@@ -1683,31 +1683,41 @@ class Modules:
                 method.stop()
 
     def unregister_commands(self, instance: Module, purpose: str):
+        cls = instance.__class__.__name__
+        removed = []
         for name, cmd in self.commands.copy().items():
-            if cmd.__self__.__class__.__name__ == instance.__class__.__name__:
-                logger.debug(
-                    "Removing command %s of module %s for %s",
-                    name,
-                    instance.__class__.__name__,
-                    purpose,
-                )
-                del self.commands[name]
-                for alias, _command in self.aliases.copy().items():
-                    # Match "update" and "update -f"
-                    base = str(_command).split(maxsplit=1)[0].lower()
-                    if base == name.lower() or str(_command).lower() == name.lower():
-                        del self.aliases[alias]
+            try:
+                if cmd.__self__.__class__.__name__ != cls:
+                    continue
+            except Exception:
+                continue
+            del self.commands[name]
+            removed.append(name)
+            for alias, _command in self.aliases.copy().items():
+                base = str(_command).split(maxsplit=1)[0].lower()
+                if base == name.lower() or str(_command).lower() == name.lower():
+                    del self.aliases[alias]
+        if removed:
+            logger.debug(
+                "Removed %s command(s) of %s for %s",
+                len(removed),
+                cls,
+                purpose,
+            )
 
     def unregister_watchers(self, instance: Module, purpose: str):
+        cls = instance.__class__.__name__
+        n = 0
         for _watcher in self.watchers.copy():
-            if _watcher.__self__.__class__.__name__ == instance.__class__.__name__:
-                logger.debug(
-                    "Removing watcher %s of module %s for %s",
-                    _watcher,
-                    instance.__class__.__name__,
-                    purpose,
-                )
-                self.watchers.remove(_watcher)
+            try:
+                if _watcher.__self__.__class__.__name__ != cls:
+                    continue
+            except Exception:
+                continue
+            self.watchers.remove(_watcher)
+            n += 1
+        if n:
+            logger.debug("Removed %s watcher(s) of %s for %s", n, cls, purpose)
 
     def unregister_raw_handlers(self, instance: Module, purpose: str):
         """Unregister event handlers for a module"""

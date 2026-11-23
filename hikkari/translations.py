@@ -149,27 +149,25 @@ class BaseTranslator:
     async def load_module_translations(
         self, pack_url: str, cache_path: Path = None
     ) -> bool | dict:
-        try:
-            content = (await utils.run_sync(requests.get, pack_url)).text
-            data = yaml.load(content)
-        except Exception:
-            logger.exception("Unable to decode %s", pack_url)
-            data = None
-            content = None
-
+        data = None
+        content = None
+        # Boot path: prefer local cache — avoids network on every restart
+        if cache_path and cache_path.exists():
+            try:
+                data = yaml.load(cache_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.debug("Unable to decode cached %s", cache_path, exc_info=True)
+                data = None
         if not isinstance(data, dict):
-            if cache_path and cache_path.exists():
-                try:
-                    data = yaml.load(cache_path.read_text(encoding="utf-8"))
-                except Exception:
-                    logger.exception("Unable to decode cached %s", cache_path)
-                    return False
-
-                if not isinstance(data, dict):
-                    return {}
-
-            else:
-                return {}
+            try:
+                content = (await utils.run_sync(requests.get, pack_url, timeout=8)).text
+                data = yaml.load(content)
+            except Exception:
+                logger.debug("Unable to fetch/decode %s", pack_url, exc_info=True)
+                data = None
+                content = None
+        if not isinstance(data, dict):
+            return {}
 
         if cache_path and content is not None:
             try:
