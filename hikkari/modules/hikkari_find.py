@@ -484,6 +484,25 @@ class HikkariFindMod(loader.Module):
             modname = (info.get("name") if isinstance(info, dict) else None) or name
             rows = (info.get("rows") if isinstance(info, dict) else None) or []
             mod_doc = (info.get("doc") if isinstance(info, dict) else None) or ""
+            # Fallback: module is already in memory — pull commands directly
+            if not rows:
+                try:
+                    inst = self.lookup(str(modname)) or self.lookup(name)
+                    if inst is None:
+                        for m in list(getattr(self.allmodules, "modules", []) or []):
+                            if m.__class__.__name__.lower() in {
+                                str(modname).lower(),
+                                str(name).lower(),
+                            }:
+                                inst = m
+                                break
+                    if inst is not None and hasattr(loader_mod, "_module_cmds_rows"):
+                        rows = loader_mod._module_cmds_rows(inst) or []
+                        if not mod_doc and inst.__doc__:
+                            import inspect as _ins
+                            mod_doc = (_ins.getdoc(inst) or "")[:300]
+                except Exception:
+                    pass
             rich_ok = False
             try:
                 from ..utils.rich import can_use_rich
@@ -517,7 +536,7 @@ class HikkariFindMod(loader.Module):
                             f"{table}\n</details>"
                         )
                     html = to_rich_compatible("\n".join(parts))
-                    close_mk = [[{"text": "🔻 Закрыть", "action": "close"}]]
+                    close_mk = [[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]]
                     uid = getattr(call, "unit_id", None) or ""
                     btn = markup_to_tg_rows(close_mk, uid) or ""
                     if btn:

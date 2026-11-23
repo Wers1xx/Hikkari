@@ -2414,6 +2414,27 @@ class LoaderMod(loader.Module):
         if not isinstance(developer_entity, Channel):
             developer_entity = None
 
+        # Always snapshot commands for HikkariFind / quiet installs (message may be None)
+        try:
+            rows = self._module_cmds_rows(instance)
+            plain_doc = ""
+            if instance.__doc__:
+                plain_doc = (inspect.getdoc(instance) or "")[:300]
+            self._last_loaded = {
+                "name": str(modname).strip() if modname else instance.__class__.__name__,
+                "rows": rows,
+                "doc": plain_doc,
+                "ok": True,
+            }
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._last_loaded = {
+                    "name": str(getattr(instance, "__class__", type(instance)).__name__),
+                    "rows": [],
+                    "doc": "",
+                    "ok": True,
+                }
+
         if message is None:
             return True
 

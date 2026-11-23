@@ -825,7 +825,7 @@ class Events(InlineUnit):
                 except ConnectionError as e:
                     logger.warning("Callback watcher: bot disconnected (%s), reconnecting", e)
                     with contextlib.suppress(Exception):
-                        await self.ensure_inline_ready(force=True)
+                        await self.ensure_inline_ready(force=False)
                     with contextlib.suppress(Exception):
                         await call.answer("Bot reconnecting, try again", alert=True)
                     continue
