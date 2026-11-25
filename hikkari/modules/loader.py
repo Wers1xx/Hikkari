@@ -540,8 +540,8 @@ class LoaderMod(loader.Module):
                 with contextlib.suppress(Exception):
                     html = inject_banner_html(html, burl, force=True)
 
+            # No Config on install card — only Close (user asked)
             close_mk = [[
-                {"text": "⚙️ Config", "callback": self._inline_open_mod_config, "args": (modname,)},
                 {"text": "🔻 Закрыть", "action": "close", "style": "danger"},
             ]]
             if subscribe_markup:
@@ -649,14 +649,21 @@ class LoaderMod(loader.Module):
             with contextlib.suppress(Exception):
                 await message.edit(text, reply_markup=reply_markup or [])
                 return
+            # Stay in the same chat as the inline unit — never force bot DM
+            chat = None
+            with contextlib.suppress(Exception):
+                chat = getattr(message, "chat_id", None) or (
+                    self.inline._units.get(getattr(message, "unit_id", ""), {}) or {}
+                ).get("chat")
             with contextlib.suppress(Exception):
                 await message.delete()
+            if chat is not None:
+                with contextlib.suppress(Exception):
+                    await self._client.send_message(chat, text)
+                    return
+            # Last resort: user Saved Messages (not bot PM)
             with contextlib.suppress(Exception):
-                bot = getattr(self.inline, "bot", None)
-                if bot is not None:
-                    await bot.send_message(self.tg_id, text)
-                else:
-                    await self._client.send_message(self.tg_id, text)
+                await self._client.send_message("me", text)
             return
 
         try:
@@ -2673,9 +2680,11 @@ class LoaderMod(loader.Module):
         sent = False
         try:
             if getattr(self.inline, "init_complete", False):
+                # Always pass original Message so form stays in the same chat
+                # (chat_id-only / PM fallback was sending cards into bot DM).
                 m = await self.inline.form(
                     text,
-                    message=message if getattr(message, "out", False) else utils.get_chat_id(message),
+                    message=message,
                     reply_markup=close_mk,
                     silent=True,
                 )
