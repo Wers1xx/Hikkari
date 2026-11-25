@@ -899,15 +899,15 @@ class UpdaterMod(loader.Module):
     ) -> tuple[int, int] | None:
         if not isinstance(message_ref, str):
             return None
-
         parts = message_ref.split(":")
-        if len(parts) != 2:
-            return None
-
         try:
-            return int(parts[0]), int(parts[1])
+            if len(parts) == 2:
+                return int(parts[0]), int(parts[1])
+            if len(parts) == 3 and parts[0] in ("bot", "msg", "pm"):
+                return int(parts[1]), int(parts[2])
         except ValueError:
             return None
+        return None
 
     def _store_status_delete_target(self, chat_id, message_id) -> None:
         try:
@@ -1098,13 +1098,27 @@ class UpdaterMod(loader.Module):
                 self.set("selfupdatemsg", ser)
                 self.db.set("Updater", "selfupdatemsg", str(ser))
                 (Path.cwd() / ".hikkari_restart_imid").write_text(str(ser), encoding="utf-8")
-        else:
+        chat_id, message_id = self._load_status_delete_target()
+        if chat_id is not None and message_id is not None:
+            with contextlib.suppress(Exception):
+                uid = int(self._client.tg_id)
+                ref = f"{uid}:{int(message_id)}"
+                if not imid:
+                    self.set("selfupdatemsg", ref)
+                    self.db.set("Updater", "selfupdatemsg", ref)
+                self._store_status_delete_target(uid, message_id)
+                (Path.cwd() / ".hikkari_restart_status").write_text(
+                    f"{uid}:{int(message_id)}", encoding="utf-8"
+                )
+        elif not imid:
             with contextlib.suppress(Exception):
                 mid = getattr(target, "id", None) or getattr(target, "message_id", None)
                 if mid is not None:
-                    ref = f"{utils.get_chat_id(target)}:{mid}"
+                    uid = int(self._client.tg_id)
+                    ref = f"{uid}:{int(mid)}"
                     self.set("selfupdatemsg", ref)
                     self.db.set("Updater", "selfupdatemsg", ref)
+                    self._store_status_delete_target(uid, mid)
 
         # Persist delete target across process restart (db + file)
         with contextlib.suppress(Exception):
@@ -2079,34 +2093,53 @@ class UpdaterMod(loader.Module):
             self.db.set("Updater", "modules_count", len(self.allmodules.modules))
 
         edited = False
+        chat_id, message_id = None, None
 
-        if legacy_message_ref := self._parse_legacy_update_message_ref(ms):
-            chat_id, message_id = legacy_message_ref
+        legacy = self._parse_legacy_update_message_ref(ms)
+        if legacy:
+            chat_id, message_id = legacy
+            # Bot PM: chat must be the user id for Bot API
+            with contextlib.suppress(Exception):
+                uid = int(self._client.tg_id)
+                if chat_id not in (uid, -uid) and message_id:
+                    # if stored bot id, prefer user id
+                    if abs(int(chat_id)) != uid:
+                        pass
             try:
                 await self._client.edit_message(chat_id, message_id, msg)
                 edited = True
             except Exception as e:
-                logger.warning("full_restart edit failed (%s), trying bot", e)
+                logger.debug("user client edit status failed: %s", e)
+            if not edited:
                 bot = getattr(getattr(self, "inline", None), "bot", None)
                 if bot is not None:
-                    with contextlib.suppress(Exception):
-                        await bot.edit_message_text(
-                            text=self.inline.sanitise_text(msg),
-                            chat_id=int(chat_id),
-                            message_id=int(message_id),
-                            disable_web_page_preview=True,
-                        )
-                        edited = True
-
-            if edited:
-                saved_ms = ms
-                asyncio.ensure_future(
-                    self._delete_status_form_later(
-                        chat_id, message_id, delay=45, inline_id=str(saved_ms) if saved_ms else None
-                    )
+                    for cid in dict.fromkeys(
+                        [
+                            chat_id,
+                            int(getattr(self._client, "tg_id", 0) or 0) or None,
+                        ]
+                    ):
+                        if not cid:
+                            continue
+                        with contextlib.suppress(Exception):
+                            await bot.edit_message_text(
+                                text=self.inline.sanitise_text(msg),
+                                chat_id=int(cid),
+                                message_id=int(message_id),
+                                disable_web_page_preview=True,
+                            )
+                            chat_id = int(cid)
+                            edited = True
+                            break
+            self._store_status_delete_target(chat_id, message_id)
+            asyncio.ensure_future(
+                self._delete_status_form_later(
+                    chat_id, message_id, delay=30, inline_id=None
                 )
+            )
             return
 
+        # Pure inline id
         try:
             await self.inline.bot.edit_message_text(
                 inline_message_id=self._deserialize_inline_message_id(str(ms)),
@@ -2124,24 +2157,31 @@ class UpdaterMod(loader.Module):
             except Exception:
                 bot = getattr(getattr(self, "inline", None), "bot", None)
                 if bot is not None:
-                    with contextlib.suppress(Exception):
-                        await bot.edit_message_text(
-                            text=self.inline.sanitise_text(msg),
-                            chat_id=int(chat_id),
-                            message_id=int(message_id),
-                            disable_web_page_preview=True,
-                        )
-                        edited = True
+                    for cid in dict.fromkeys(
+                        [chat_id, int(getattr(self._client, "tg_id", 0) or 0) or None]
+                    ):
+                        if not cid:
+                            continue
+                        with contextlib.suppress(Exception):
+                            await bot.edit_message_text(
+                                text=self.inline.sanitise_text(msg),
+                                chat_id=int(cid),
+                                message_id=int(message_id),
+                                disable_web_page_preview=True,
+                            )
+                            chat_id = int(cid)
+                            edited = True
+                            break
 
-        saved_ms = ms
         asyncio.ensure_future(
             self._delete_status_form_later(
                 chat_id,
                 message_id,
-                delay=45,
-                inline_id=str(saved_ms) if saved_ms and ":" not in str(saved_ms) else None,
+                delay=30,
+                inline_id=str(ms) if ms and ":" not in str(ms) else None,
             )
         )
+
 
     def _find_commit_for_version(self, ver: str) -> str | None:
         """Find newest commit where version.py matches X.Y.Z"""
