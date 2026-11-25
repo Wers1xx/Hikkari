@@ -468,14 +468,21 @@ class TestMod(loader.Module):
                     html = to_rich_compatible(placeholders_msg)
                     html = inject_banner_html(html, burl, force=True)
                 else:
+                    ghash = utils.get_git_hash() or ""
+                    if ghash:
+                        build_cell = (
+                            f'<a href="https://github.com/Wers1xx/Hikkari/commit/{ghash}">'
+                            f"#{ghash[:7]}</a>"
+                        )
+                    else:
+                        build_cell = re.sub(
+                            r"<[^>]+>", "", str(data.get("build", "") or "—")
+                        )[:40] or "—"
                     rows = [
                         ("Ping", f"{data['ping']} ms"),
                         ("Uptime", str(data["uptime"])),
                         ("Version", str(data["version"])),
-                        (
-                            "Build",
-                            re.sub(r"<[^>]+>", "", str(data.get("build", "")))[:40],
-                        ),
+                        ("Build", build_cell),
                         ("Host", str(data.get("hostname") or "—")),
                         ("Python", str(data.get("python_ver", ""))),
                     ]
