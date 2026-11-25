@@ -1094,12 +1094,17 @@ class UpdaterMod(loader.Module):
 
         if imid is not None:
             with contextlib.suppress(Exception):
-                self.set("selfupdatemsg", self._serialize_inline_message_id(imid))
+                ser = self._serialize_inline_message_id(imid)
+                self.set("selfupdatemsg", ser)
+                self.db.set("Updater", "selfupdatemsg", str(ser))
+                (Path.cwd() / ".hikkari_restart_imid").write_text(str(ser), encoding="utf-8")
         else:
             with contextlib.suppress(Exception):
                 mid = getattr(target, "id", None) or getattr(target, "message_id", None)
                 if mid is not None:
-                    self.set("selfupdatemsg", f"{utils.get_chat_id(target)}:{mid}")
+                    ref = f"{utils.get_chat_id(target)}:{mid}"
+                    self.set("selfupdatemsg", ref)
+                    self.db.set("Updater", "selfupdatemsg", ref)
 
         # Persist delete target across process restart (db + file)
         with contextlib.suppress(Exception):
@@ -2039,6 +2044,14 @@ class UpdaterMod(loader.Module):
 
         self.set("restart_ts", None)
         ms = self.get("selfupdatemsg")
+        if not ms:
+            with contextlib.suppress(Exception):
+                ms = self.db.get("Updater", "selfupdatemsg")
+        if not ms:
+            with contextlib.suppress(Exception):
+                ip = Path.cwd() / ".hikkari_restart_imid"
+                if ip.is_file():
+                    ms = ip.read_text(encoding="utf-8").strip() or None
         failed_names = list(
             getattr(self.allmodules, "_failed_module_names", None) or []
         )
