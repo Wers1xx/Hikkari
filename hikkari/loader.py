@@ -885,7 +885,7 @@ class Modules:
 
         # Parallel load (Heroku-style speed): bound concurrency, lock registration
         import os as _os
-        _par = int(_os.environ.get("HIKKARI_PARALLEL_LOAD") or (24 if _os.environ.get("HIKKARI_FAST_START") else 16))
+        _par = int(_os.environ.get("HIKKARI_PARALLEL_LOAD") or 24)
         sem = asyncio.Semaphore(_par)
         lock = asyncio.Lock()
         loaded: list = []

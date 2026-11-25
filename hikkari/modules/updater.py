@@ -946,10 +946,9 @@ class UpdaterMod(loader.Module):
         self,
         chat_id: int | None,
         message_id: int | None,
-        delay: int = 8,
+        delay: int = 45,
     ) -> None:
-        """Delete restart status the same way config closes forms."""
-        await asyncio.sleep(delay)
+        await asyncio.sleep(max(1, int(delay)))
         if chat_id is None or message_id is None:
             chat_id, message_id = self._load_status_delete_target()
         if chat_id is None or message_id is None:
@@ -959,87 +958,91 @@ class UpdaterMod(loader.Module):
                     parts = marker.read_text(encoding="utf-8").strip().split(":")
                     if len(parts) == 2:
                         chat_id, message_id = int(parts[0]), int(parts[1])
-        if chat_id is None or message_id is None:
-            self._clear_status_delete_target()
-            with contextlib.suppress(Exception):
-                (Path.cwd() / ".hikkari_restart_status").unlink(missing_ok=True)
-            return
-
-        try:
-            chat_id = int(chat_id)
-            message_id = int(message_id)
-        except (TypeError, ValueError):
-            self._clear_status_delete_target()
-            return
 
         deleted = False
-
-        # Same order as inline form close / _delete_unit_message
-        bot = getattr(getattr(self, "inline", None), "bot", None)
-        if bot is not None:
-            with contextlib.suppress(Exception):
-                await bot.delete_message(chat_id, message_id)
-                deleted = True
-            bot_client = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(
-                bot, "client", None
-            )
-            if not deleted and bot_client is not None:
-                with contextlib.suppress(Exception):
-                    await bot_client.delete_messages(chat_id, [message_id])
-                    deleted = True
-
-        if not deleted:
-            with contextlib.suppress(Exception):
-                await self._client.delete_messages(chat_id, [message_id])
-                deleted = True
-
-        if not deleted:
-            token = None
-            with contextlib.suppress(Exception):
-                token = getattr(self.inline, "token", None) or getattr(
-                    self.inline, "_token", None
-                )
-            if not token:
-                with contextlib.suppress(Exception):
-                    token = self._db.get("hikka.inline", "bot_token") or self._db.get(
-                        "hikkari.inline", "bot_token"
-                    )
-            if token:
-                with contextlib.suppress(Exception):
-                    import aiohttp
-
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            f"https://api.telegram.org/bot{token}/deleteMessage",
-                            json={"chat_id": chat_id, "message_id": message_id},
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            data = await resp.json(content_type=None)
-                            if data.get("ok"):
-                                deleted = True
-
-        if not deleted:
-            # Retry once more after a short pause (bot / client race after restart)
-            await asyncio.sleep(2)
+        imid = None
+        with contextlib.suppress(Exception):
+            imid = self.get("selfupdatemsg")
+        if isinstance(imid, str) and ":" not in imid and len(imid) > 8:
             bot = getattr(getattr(self, "inline", None), "bot", None)
             if bot is not None:
                 with contextlib.suppress(Exception):
-                    await bot.delete_message(int(chat_id), int(message_id))
-                    deleted = True
-            if not deleted:
+                    await bot.edit_message_text(
+                        inline_message_id=self._deserialize_inline_message_id(str(imid)),
+                        text="·",
+                    )
                 with contextlib.suppress(Exception):
-                    await self._client.delete_messages(int(chat_id), [int(message_id)])
+                    await bot.delete_message(
+                        inline_message_id=self._deserialize_inline_message_id(str(imid)),
+                    )
                     deleted = True
-            if not deleted:
-                logger.warning(
-                    "status form delete failed chat=%s mid=%s", chat_id, message_id
-                )
+
+        if chat_id is not None and message_id is not None:
+            try:
+                chat_id = int(chat_id)
+                message_id = int(message_id)
+            except (TypeError, ValueError):
+                chat_id = message_id = None
+            if chat_id is not None and message_id is not None:
+                bot = getattr(getattr(self, "inline", None), "bot", None)
+                if bot is not None:
+                    with contextlib.suppress(Exception):
+                        await bot.delete_message(chat_id, message_id)
+                        deleted = True
+                    if not deleted:
+                        bot_client = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(
+                            bot, "client", None
+                        )
+                        if bot_client is not None:
+                            with contextlib.suppress(Exception):
+                                await bot_client.delete_messages(chat_id, [message_id])
+                                deleted = True
+                if not deleted:
+                    with contextlib.suppress(Exception):
+                        await self._client.delete_messages(chat_id, [message_id])
+                        deleted = True
+                if not deleted:
+                    token = None
+                    with contextlib.suppress(Exception):
+                        token = getattr(self.inline, "token", None) or getattr(
+                            self.inline, "_token", None
+                        )
+                    if not token:
+                        with contextlib.suppress(Exception):
+                            token = self._db.get("hikka.inline", "bot_token") or self._db.get(
+                                "hikkari.inline", "bot_token"
+                            )
+                    if token:
+                        with contextlib.suppress(Exception):
+                            import aiohttp
+                            async with aiohttp.ClientSession() as session:
+                                async with session.post(
+                                    f"https://api.telegram.org/bot{token}/deleteMessage",
+                                    json={"chat_id": chat_id, "message_id": message_id},
+                                    timeout=aiohttp.ClientTimeout(total=10),
+                                ) as resp:
+                                    data = await resp.json(content_type=None)
+                                    if data.get("ok"):
+                                        deleted = True
+                if not deleted:
+                    await asyncio.sleep(2)
+                    bot = getattr(getattr(self, "inline", None), "bot", None)
+                    if bot is not None:
+                        with contextlib.suppress(Exception):
+                            await bot.delete_message(int(chat_id), int(message_id))
+                            deleted = True
+                    if not deleted:
+                        with contextlib.suppress(Exception):
+                            await self._client.delete_messages(int(chat_id), [int(message_id)])
+                            deleted = True
 
         self._clear_status_delete_target()
         with contextlib.suppress(Exception):
+            self.set("selfupdatemsg", None)
+        with contextlib.suppress(Exception):
             (Path.cwd() / ".hikkari_restart_status").unlink(missing_ok=True)
 
-
+    
     async def process_restart_message(self, msg_obj: InlineCall | Message):
         imid = getattr(msg_obj, "inline_message_id", None)
         unit_msg = None
@@ -2070,7 +2073,7 @@ class UpdaterMod(loader.Module):
 
             if edited:
                 asyncio.ensure_future(
-                    self._delete_status_form_later(chat_id, message_id, delay=5)
+                    self._delete_status_form_later(chat_id, message_id, delay=45)
                 )
             self.set("selfupdatemsg", None)
             return
@@ -2103,7 +2106,7 @@ class UpdaterMod(loader.Module):
 
         self.set("selfupdatemsg", None)
         asyncio.ensure_future(
-            self._delete_status_form_later(chat_id, message_id, delay=5)
+            self._delete_status_form_later(chat_id, message_id, delay=45)
         )
 
     def _find_commit_for_version(self, ver: str) -> str | None:

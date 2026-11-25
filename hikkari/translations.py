@@ -151,7 +151,6 @@ class BaseTranslator:
     ) -> bool | dict:
         data = None
         content = None
-        # Boot path: prefer local cache — avoids network on every restart
         if cache_path and cache_path.exists():
             try:
                 data = yaml.load(cache_path.read_text(encoding="utf-8"))

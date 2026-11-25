@@ -588,9 +588,6 @@ class Form(InlineUnit):
             if isinstance(message, Message) and not message.out:
                 with contextlib.suppress(Exception):
                     await message.delete()
-
-        # Wait for chosen_inline feedback only briefly.
-        # A fixed 2s timeout made every form lag when feedback is disabled.
         fb_ok = None
         with contextlib.suppress(Exception):
             fb_ok = self._db.get("hikkari.inline", "inline_feedback_ok", None)

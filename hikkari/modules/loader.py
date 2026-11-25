@@ -539,8 +539,6 @@ class LoaderMod(loader.Module):
             if burl:
                 with contextlib.suppress(Exception):
                     html = inject_banner_html(html, burl, force=True)
-
-            # No Config on install card — only Close (user asked)
             close_mk = [[
                 {"text": "🔻 Закрыть", "action": "close", "style": "danger"},
             ]]
@@ -649,7 +647,6 @@ class LoaderMod(loader.Module):
             with contextlib.suppress(Exception):
                 await message.edit(text, reply_markup=reply_markup or [])
                 return
-            # Stay in the same chat as the inline unit — never force bot DM
             chat = None
             with contextlib.suppress(Exception):
                 chat = getattr(message, "chat_id", None) or (
@@ -2680,8 +2677,6 @@ class LoaderMod(loader.Module):
         sent = False
         try:
             if getattr(self.inline, "init_complete", False):
-                # Always pass original Message so form stays in the same chat
-                # (chat_id-only / PM fallback was sending cards into bot DM).
                 m = await self.inline.form(
                     text,
                     message=message,
