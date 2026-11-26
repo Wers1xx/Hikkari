@@ -538,6 +538,14 @@ class HikkariFindMod(loader.Module):
                     html = to_rich_compatible("\n".join(parts))
                     close_mk = [[{"text": "🔻 Закрыть", "action": "close", "style": "danger"}]]
                     uid = getattr(call, "unit_id", None) or ""
+                    if uid and hasattr(self.inline, "_units") and uid in self.inline._units:
+                        self.inline._units[uid]["buttons"] = close_mk
+                        with contextlib.suppress(Exception):
+                            self.inline.generate_markup(uid)
+                        close_mk = self.inline._units[uid].get("buttons") or close_mk
+                    else:
+                        with contextlib.suppress(Exception):
+                            self.inline._generate_markup(close_mk)
                     btn = markup_to_tg_rows(close_mk, uid) or ""
                     if btn:
                         html = f"{html}\n{btn}"
