@@ -545,26 +545,25 @@ class LoaderMod(loader.Module):
             if subscribe_markup:
                 close_mk = list(subscribe_markup) + close_mk
 
-            with contextlib.suppress(Exception):
-                btn_html = markup_to_tg_rows(close_mk, "")
-                if btn_html:
-                    html = f"{html}\n{btn_html}"
+            if message is None:
+                return False
 
-            chat = None
-            with contextlib.suppress(Exception):
-                chat = utils.get_chat_id(message)
-
-            # 1) Native user Premium rich (no via)
-            if chat:
-                with contextlib.suppress(Exception):
-                    if await try_send_rich(self._client, chat, html):
-                        with contextlib.suppress(Exception):
-                            if getattr(message, "out", False):
-                                await message.delete()
-                        return True
-
-            # 2) inline.rich unit (Help-style)
+            # Interactive Close needs a registered inline unit — never try_send_rich
+            # with empty unit_id (that made Close = noop and often landed in bot PM).
             if getattr(self.inline, "init_complete", False):
+                try:
+                    m = await self.inline.form(
+                        text=f"✅ {name} loaded",
+                        message=message,
+                        rich_message=html,
+                        reply_markup=close_mk,
+                        silent=True,
+                    )
+                    if m:
+                        return True
+                except Exception as e:
+                    logger.warning("loader form rich failed: %s", e)
+
                 try:
                     m = await self.inline.rich(
                         message,
@@ -580,24 +579,6 @@ class LoaderMod(loader.Module):
                 except Exception as e:
                     logger.warning("loader inline.rich failed: %s", e)
 
-                # 3) form with rich_message only (no photo kwargs — avoids dual msg)
-                try:
-                    plain = f"✅ {name} loaded"
-                    if desc:
-                        plain = f"{plain}\n{desc[:180]}"
-                    m = await self.inline.form(
-                        text=plain,
-                        message=message,
-                        rich_message=html,
-                        reply_markup=close_mk,
-                        silent=True,
-                    )
-                    if m:
-                        return True
-                except Exception as e:
-                    logger.warning("loader form rich failed: %s", e)
-
-            # 4) Classic form (expandable commands) — still better than plain
             try:
                 text_parts = [
                     f'<b><tg-emoji emoji-id="5256182535917940722">✅</tg-emoji> '
@@ -626,6 +607,13 @@ class LoaderMod(loader.Module):
                     )
                     if m:
                         return True
+                await utils.answer(
+                    message,
+                    "\n".join(text_parts),
+                    reply_markup=close_mk,
+                    skip_rich=True,
+                )
+                return True
             except Exception:
                 logger.debug("loader classic form failed", exc_info=True)
 
