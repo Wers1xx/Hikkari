@@ -511,13 +511,16 @@ def html_table(
         f"<tr><th>{html_mod.escape(str(h0))}</th>"
         f"<th>{html_mod.escape(str(h1))}</th></tr>"
     ]
+
+    def _cell(s: str) -> str:
+        s = str(s)
+        # keep intentional rich tags (tg-emoji, a, b, code, emoji)
+        if "<" in s and ">" in s:
+            return s
+        return html_mod.escape(s)
+
     for k, v in rows:
-        ks = html_mod.escape(str(k))
-        vs = str(v)
-        # keep intentional HTML (code, links, emoji) if already tagged
-        if not ("<" in vs and ">" in vs):
-            vs = html_mod.escape(vs)
-        body.append(f"<tr><td>{ks}</td><td>{vs}</td></tr>")
+        body.append(f"<tr><td>{_cell(k)}</td><td>{_cell(v)}</td></tr>")
     return f"<table bordered striped>{''.join(body)}</table>"
 
 

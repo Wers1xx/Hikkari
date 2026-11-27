@@ -88,7 +88,7 @@ class APIRatelimiterMod(loader.Module):
             ),
             loader.ConfigValue(
                 "threshold",
-                100,
+                120,
                 lambda: self.strings["_cfg_threshold"],
                 validator=loader.validators.Integer(minimum=10),
             ),
@@ -159,6 +159,15 @@ class APIRatelimiterMod(loader.Module):
             "GetPeerDialogsRequest",
             "GetParticipantRequest",
             "GetParticipantsRequest",
+            "GetUsersRequest",
+        }
+        _FILE_BULK = {
+            "GetFileRequest",
+            "GetFile",
+            "upload.GetFileRequest",
+            "UploadGetFileRequest",
+            "SaveFilePartRequest",
+            "GetWebFileRequest",
         }
 
         async def new_call(
@@ -193,8 +202,16 @@ class APIRatelimiterMod(loader.Module):
                 ):
                     request_name = type(r).__name__
                     now = time.perf_counter()
+                    is_file = request_name in _FILE_BULK or request_name.endswith(
+                        "GetFileRequest"
+                    )
                     is_read = request_name in _READ_BULK
-                    weight = float(self.config.get("read_weight", 0.35)) if is_read else 1.0
+                    if is_file:
+                        weight = 0.0
+                    elif is_read:
+                        weight = float(self.config.get("read_weight", 0.2) or 0.2)
+                    else:
+                        weight = 1.0
 
                     self._ratelimiter += [(request_name, now, weight)]
 
