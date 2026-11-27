@@ -478,16 +478,43 @@ class TestMod(loader.Module):
                         build_cell = re.sub(
                             r"<[^>]+>", "", str(data.get("build", "") or "—")
                         )[:40] or "—"
+                    def _pe(eid: str, fallback: str, label: str) -> str:
+                        return (
+                            f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji> '
+                            f"<b>{label}</b>"
+                        )
+
                     rows = [
-                        ("Ping", f"{data['ping']} ms"),
-                        ("Uptime", str(data["uptime"])),
-                        ("Version", str(data["version"])),
-                        ("Build", build_cell),
-                        ("Host", str(data.get("hostname") or "—")),
-                        ("Python", str(data.get("python_ver", ""))),
+                        (
+                            _pe("5224607267797606837", "☄️", "Ping"),
+                            f"{data['ping']} ms",
+                        ),
+                        (
+                            _pe("5440621591387980068", "🔜", "Uptime"),
+                            str(data["uptime"]),
+                        ),
+                        (
+                            _pe("5325547803936572038", "✨", "Version"),
+                            str(data["version"]),
+                        ),
+                        (
+                            _pe("5341715473882955310", "⚙️", "Build"),
+                            build_cell,
+                        ),
+                        (
+                            _pe("5427168083074628963", "💎", "Host"),
+                            str(data.get("hostname") or "—"),
+                        ),
+                        (
+                            _pe("5372878077250519677", "📱", "Python"),
+                            str(data.get("python_ver", "")),
+                        ),
                     ]
                     html = build_info_html(
-                        title="Hikkari Ping",
+                        title=(
+                            '<tg-emoji emoji-id="5438496463044752972">⭐️</tg-emoji> '
+                            "Hikkari Ping"
+                        ),
                         rows=rows,
                         footer=str(data.get("ping_hint") or ""),
                         banner_url=burl,

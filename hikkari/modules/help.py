@@ -482,7 +482,7 @@ class Help(loader.Module):
                         )
                 if dev_text:
                     parts.append(
-                        f"<p>\u2764\ufe0f Developer: "
+                        f"<p><tg-emoji emoji-id=\"5400300524312483961\">❤️</tg-emoji> Developer: "
                         f"{self._linkify_dev(str(dev_text))}</p>"
                     )
                 html = "\n".join(parts)

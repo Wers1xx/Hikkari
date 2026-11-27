@@ -516,7 +516,7 @@ class LoaderMod(loader.Module):
                 )
             if dev_plain:
                 linked = self._linkify_developer(dev_plain[:120])
-                parts.append(f"<p>\u2764\ufe0f Developer: {linked}</p>")
+                parts.append(f"<p><tg-emoji emoji-id=\"5400300524312483961\">❤️</tg-emoji> Developer: {linked}</p>")
 
             html = "\n".join(parts)
             with contextlib.suppress(Exception):
@@ -596,7 +596,7 @@ class LoaderMod(loader.Module):
                     )
                 if dev_plain:
                     text_parts.append(
-                        f"\u2764\ufe0f Developer: {self._linkify_developer(dev_plain[:120])}"
+                        f"<emoji document_id=\"5400300524312483961\">❤️</emoji> Developer: {self._linkify_developer(dev_plain[:120])}"
                     )
                 if getattr(self.inline, "init_complete", False):
                     m = await self.inline.form(
