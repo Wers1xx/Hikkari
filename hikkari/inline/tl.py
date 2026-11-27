@@ -783,27 +783,40 @@ def make_button(
     web_app: str | dict | None = None,
     copy_text: str | None = None,
 ):
-    # Plain buttons only — style/icon → ReplyMarkupInvalid on bot PM with hikkaritl
-    if url is not None:
-        return Button.url(text, url)
-    if data is not None:
-        return Button.inline(text, data)
-    if switch_inline_query_current_chat is not None:
-        return Button.switch_inline(
-            text, switch_inline_query_current_chat, same_peer=True
-        )
-    if switch_inline_query is not None:
-        return Button.switch_inline(text, switch_inline_query)
-    if web_app is not None:
-        try:
-            return Button.web_view(text, web_app if isinstance(web_app, str) else web_app)
-        except Exception:
-            return Button.inline(text, b"webapp")
-    if copy_text is not None:
-        try:
-            return Button.copy(text, copy_text)
-        except Exception:
-            return Button.inline(text, b"copy")
-    return Button.inline(text, b"noop")
+    sk = {}
+    if style in ("danger", "primary", "success"):
+        sk["style"] = style
+    if icon is not None:
+        sk["icon"] = icon
+    try:
+        if url is not None:
+            return Button.url(text, url, **sk)
+        if data is not None:
+            return Button.inline(text, data, **sk)
+        if switch_inline_query_current_chat is not None:
+            return Button.switch_inline(
+                text, switch_inline_query_current_chat, same_peer=True, **sk
+            )
+        if switch_inline_query is not None:
+            return Button.switch_inline(text, switch_inline_query, **sk)
+        if web_app is not None:
+            try:
+                return Button.web_view(
+                    text, web_app if isinstance(web_app, str) else web_app, **sk
+                )
+            except Exception:
+                return Button.inline(text, b"webapp", **sk)
+        if copy_text is not None:
+            try:
+                return Button.copy(text, copy_text, **sk)
+            except Exception:
+                return Button.inline(text, b"copy", **sk)
+        return Button.inline(text, b"noop", **sk)
+    except Exception:
+        if url is not None:
+            return Button.url(text, url)
+        if data is not None:
+            return Button.inline(text, data)
+        return Button.inline(text, b"noop")
 
 

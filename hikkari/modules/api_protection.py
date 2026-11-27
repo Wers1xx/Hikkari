@@ -239,17 +239,16 @@ class APIRatelimiterMod(loader.Module):
                                 ),
                             )
 
-                        # Non-blocking freeze: wait without freezing the whole process
-                        await asyncio.sleep(int(self.config["local_floodwait"]))
+                        fw = int(self.config.get("local_floodwait", 30) or 30)
+                        self._suspend_until = time.perf_counter() + fw
+                        await asyncio.sleep(fw)
                         self._ratelimiter.clear()
                         self._lock = False
+                        self._suspend_until = 0.0
 
-            # While locked, wait briefly — never stall the whole event loop for full FW
-            waited = 0.0
-            max_wait = min(float(self.config.get("local_floodwait", 10) or 10), 3.0)
-            while self._lock and waited < max_wait:
-                await asyncio.sleep(0.05)
-                waited += 0.05
+            # Real freeze: other API calls wait until lock clears
+            while self._lock:
+                await asyncio.sleep(0.1)
 
             return await old_call(sender, request, ordered, flood_sleep_threshold)
 

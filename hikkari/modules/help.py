@@ -557,9 +557,9 @@ class Help(loader.Module):
 
         await utils.answer(
             message,
-            f"{reply}<blockquote expandable>{cmds}{inline_cmd}</blockquote>"
+            f"{reply}<blockquote>{cmds}{inline_cmd}</blockquote>"
             + (
-                f"<blockquote expandable>\n{placeholders}</blockquote>"
+                f"<blockquote>\n{placeholders}</blockquote>"
                 if placeholders
                 else ""
             )
@@ -1097,7 +1097,7 @@ class Help(loader.Module):
                     return (
                         f"{text_header}\n"
                         f"<i>{page + 1}/{total_pages}</i>\n"
-                        f"<blockquote expandable>{body}</blockquote>"
+                        f"<blockquote>{body}</blockquote>"
                     )
 
                 async def goto(call, page: int):
@@ -1143,7 +1143,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),
@@ -1165,7 +1165,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(plain_ + (no_commands_ if force else [])),
@@ -1187,7 +1187,7 @@ class Help(loader.Module):
                     message,
                     (
                         "<tg-emoji emoji-id=5438496463044752972>⭐️</tg-emoji>"
-                        + " {}\n <blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote><blockquote expandable>{}</blockquote>"
+                        + " {}\n <blockquote>{}</blockquote><blockquote>{}</blockquote><blockquote>{}</blockquote>"
                     ).format(
                         reply,
                         "".join(core_),

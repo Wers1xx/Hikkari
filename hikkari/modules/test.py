@@ -356,7 +356,7 @@ class TestMod(loader.Module):
         _audio_banner = is_audio_banner(self.config.get("banner_url"))
         _rich = (
             not _audio_banner
-            and can_use_rich(self._client, self._db)
+            and (bool(self.config.get("rich_mode")) or can_use_rich(self._client, self._db))
             and getattr(self.inline, "init_complete", False)
         )
         # Always measure real Telegram RTT (edit → network → ack), not local CPU
@@ -443,7 +443,7 @@ class TestMod(loader.Module):
             )
             if (
                 not _audio_banner
-                and can_use_rich(self._client, self._db)
+                and (bool(self.config.get("rich_mode")) or can_use_rich(self._client, self._db))
                 and getattr(self.inline, "init_complete", False)
             ):
                 burl = pick_banner_url(self.config.get("banner_url"))
@@ -523,7 +523,7 @@ class TestMod(loader.Module):
                 )
                 if m:
                     return
-            elif can_use_rich(self._client, self._db):
+            elif bool(self.config.get("rich_mode")) or can_use_rich(self._client, self._db):
                 logger.info("ping rich: inline bot not ready (.yesbot / .ch_bot_token)")
         except Exception:
             logger.warning("ping rich failed", exc_info=True)

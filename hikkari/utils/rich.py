@@ -30,7 +30,6 @@ _KV_RE = re.compile(
 
 
 def is_rich_enabled(db: Any = None) -> bool:
-    """DB flag only. Prefer can_use_rich() for Premium gate. Live without restart."""
     if db is None:
         return False
     try:
@@ -41,16 +40,23 @@ def is_rich_enabled(db: Any = None) -> bool:
             ("CoreMod", "rich_mode"),
             ("Help", "rich_mode"),
             ("HelpMod", "rich_mode"),
+            ("TestMod", "rich_mode"),
+            ("HikkariInfo", "rich_mode"),
+            ("HikkariInfoMod", "rich_mode"),
         ):
             with contextlib.suppress(Exception):
                 val = db.get(mod, key, None)
-                if val is not None:
-                    return bool(val)
-        for mod in ("Settings", "CoreMod", "HikkariSettings", "TestMod", "Help", "HelpMod"):
-            with contextlib.suppress(Exception):
-                conf = db.get(mod, "config", None)
-                if isinstance(conf, dict) and "rich_mode" in conf:
-                    return bool(conf.get("rich_mode"))
+                if val is not None and bool(val):
+                    return True
+        for mod in (
+            "Settings", "CoreMod", "HikkariSettings", "TestMod", "Help", "HelpMod",
+            "HikkariInfo", "HikkariInfoMod", "test",
+        ):
+            for conf_key in ("__config__", "config"):
+                with contextlib.suppress(Exception):
+                    conf = db.get(mod, conf_key, None)
+                    if isinstance(conf, dict) and conf.get("rich_mode"):
+                        return True
         return False
     except Exception:
         return False
