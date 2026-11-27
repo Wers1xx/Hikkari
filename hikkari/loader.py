@@ -325,6 +325,48 @@ def _ensure_tl_aliases():
 _ensure_tl_aliases()
 
 
+def _ensure_aiogram_shim():
+    """Hikka TagAll etc. import aiogram.Bot; Hikkari uses TelethonBot.
+    Provide minimal Bot.set_instance so modules load without aiogram package.
+    """
+    if "aiogram" in sys.modules:
+        return
+    try:
+        import aiogram  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    class _Bot:
+        _instance = None
+
+        @classmethod
+        def set_instance(cls, bot):
+            cls._instance = bot
+            return bot
+
+        @classmethod
+        def get_instance(cls):
+            return cls._instance
+
+        def __init__(self, *a, **k):
+            pass
+
+    class _AiogramMod:
+        Bot = _Bot
+
+    sys.modules.setdefault("aiogram", _AiogramMod())
+    sys.modules.setdefault("aiogram.bot", type(sys)("aiogram.bot"))
+    try:
+        sys.modules["aiogram.bot"].Bot = _Bot
+    except Exception:
+        pass
+
+
+_ensure_aiogram_shim()
+
+
+
 # Compatibility: telethon.types → hikkaritl.tl.types for external modules
 try:
     import hikkaritl as _hktl
