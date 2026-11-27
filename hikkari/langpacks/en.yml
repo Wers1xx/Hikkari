@@ -677,21 +677,48 @@ help:
   _cmd_doc_support: Show support chat link
   show_preview_in_help: 'Show # meta banner in help preview [module]'
 hikkari_info:
-  info_message: "{}\n<blockquote>┌\n├  【<tg-emoji emoji-id=5883964170268840032>\U0001F464\
-  </tg-emoji>】 <b>Owner</b>: {me}\n├  【<tg-emoji emoji-id=5931415565955503486>\U0001F916\
-  </tg-emoji>】 <b>Version</b>: {version}\n└</blockquote>\n<blockquote>┌\n├  【<tg-emoji\
-  \ emoji-id=5778335621491723621>\U0001F4F7</tg-emoji>】 <b>Prefix</b>: {prefix}\n\
-  ├  【<tg-emoji emoji-id=5843799474362652262>\U0001F504</tg-emoji>】 <b>Uptime</b>:\
-  \ {uptime}\n├  【<tg-emoji emoji-id=5879770735999717115>\U0001F464</tg-emoji>】 <b>Branch</b>:\
-  \ {branch}\n└</blockquote>\n<blockquote>┌\n├  【<tg-emoji emoji-id=5775887550262546277>❗️</tg-emoji>】\
-  \ <b>CPU</b>: {cpu_usage}\n├  【<tg-emoji emoji-id=5931409969613116639>\U0001F6E1\
-  </tg-emoji>】 <b>RAM</b>: {ram_usage}\n├  【<tg-emoji emoji-id=5931472654660800739>\U0001F4CA\
-  </tg-emoji>】 <b>Ping</b>: {ping}\n└</blockquote>\n<blockquote>┌\n├  【<tg-emoji emoji-id=5926783847453692661>\U0001F6E1\
-  </tg-emoji>】 <b>Update</b>: {upd}\n├  【<tg-emoji emoji-id=5931415565955503486>\U0001F916\
-  </tg-emoji>】 <b>Host</b>: {platform}\n├  【<tg-emoji emoji-id=5819078828017849357>\U0001F916\
-  </tg-emoji>】 <b>OS</b>: {os}\n├  【<tg-emoji emoji-id=5819078828017849357>\U0001F916\
-  </tg-emoji>】 <b>Python</b>: {python_ver}\n└</blockquote>"
-  rich_info_message: "{}\n<blockquote><b>Component</b>\t\t<b>Current release</b>\n────────────────────\n<code>Owner</code>\t\t{me}\n<code>Version</code>\t\t{version}\n<code>Prefix</code>\t\t{prefix}\n<code>Uptime</code>\t\t{uptime}\n<code>Branch</code>\t\t{branch}\n<code>CPU</code>\t\t{cpu_usage}\n<code>RAM</code>\t\t{ram_usage}\n<code>Ping</code>\t\t{ping}\n<code>Update</code>\t\t{upd}\n<code>Host</code>\t\t{platform}\n<code>OS</code>\t\t{os}\n<code>Python</code>\t\t{python_ver}</blockquote>"
+  info_message: '{}
+
+  <blockquote>┌
+
+  ├  【<tg-emoji emoji-id=5883964170268840032>👤</tg-emoji>】 <b>Owner</b>: {me}
+
+  ├  【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Version</b>: {version}
+
+  └</blockquote>
+
+  <blockquote>┌
+
+  ├  【<tg-emoji emoji-id=5778335621491723621>📷</tg-emoji>】 <b>Prefix</b>: {prefix}
+
+  ├  【<tg-emoji emoji-id=5843799474362652262>🔄</tg-emoji>】 <b>Uptime</b>: {uptime}
+
+  ├  【<tg-emoji emoji-id=5879770735999717115>👤</tg-emoji>】 <b>Branch</b>: {branch}
+
+  └</blockquote>
+
+  <blockquote>┌
+
+  ├  【<tg-emoji emoji-id=5775887550262546277>❗️</tg-emoji>】 <b>CPU</b>: {cpu_usage}
+
+  ├  【<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>】 <b>RAM</b>: {ram_usage}
+
+  ├  【<tg-emoji emoji-id=5931472654660800739>📊</tg-emoji>】 <b>Ping</b>: {ping}
+
+  └</blockquote>
+
+  <blockquote>┌
+
+  ├  【<tg-emoji emoji-id=5926783847453692661>🛡</tg-emoji>】 <b>Update</b>: {upd}
+
+  ├  【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Host</b>: {platform}
+
+  ├  【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>OS</b>: {os}
+
+  ├  【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>Python</b>: {python_ver}
+
+  └</blockquote>'
+  rich_info_message: <figure><img src="{banner_url}"/></figure><details><summary>Overview</summary><table bordered striped compact><tr><th>Overview</th><th>Owner</th></tr><tr><td>【<tg-emoji emoji-id=5883964170268840032>👤</tg-emoji>】 <b>Owner</b></td><td>{me}</td></tr><tr><td>【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Version</b></td><td>{version}</td></tr><tr><td>【<tg-emoji emoji-id=5778335621491723621>📷</tg-emoji>】 <b>Prefix</b></td><td>{prefix}</td></tr><tr><td>【<tg-emoji emoji-id=5843799474362652262>🔄</tg-emoji>】 <b>Uptime</b></td><td>{uptime}</td></tr><tr><td>【<tg-emoji emoji-id=5879770735999717115>👤</tg-emoji>】 <b>Branch</b></td><td>{branch}</td></tr></table></details><details><summary>Status</summary><table bordered striped compact><tr><th>Status</th><th>Value</th></tr><tr><td>【<tg-emoji emoji-id=5926783847453692661>🛡</tg-emoji>】 <b>Update</b></td><td>{upd}</td></tr><tr><td>【<tg-emoji emoji-id=5775887550262546277>❗️</tg-emoji>】 <b>CPU</b></td><td>{cpu_usage}</td></tr><tr><td>【<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>】 <b>RAM</b></td><td>{ram_usage}</td></tr><tr><td>【<tg-emoji emoji-id=5931472654660800739>📊</tg-emoji>】 <b>Ping</b></td><td>{ping}</td></tr></table></details><details><summary>Environment</summary><table bordered striped compact><tr><th>Environment</th><th>Value</th></tr><tr><td>【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Host</b></td><td>{platform}</td></tr><tr><td>【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>OS</b></td><td>{os}</td></tr><tr><td>【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>Python</b></td><td>{python_ver}</td></tr></table></details>
   non_detectable: "<tg-emoji emoji-id=5210952531676504517>❌</tg-emoji> <b>This component cannot be detected on your server!</b>"
   ping_emoji: "emoji for ping in your info"
   send_info: "Send userbot info"

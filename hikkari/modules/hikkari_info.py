@@ -339,126 +339,129 @@ class HikkariInfoMod(loader.Module):
             return False
 
     async def infocmd(self, message: Message):
-        """Show userbot info. Classic by default; Rich only if rich_mode is on."""
+        """Show userbot info. Rich when Settings.rich_mode + Premium; else Heroku classic."""
         start = time.perf_counter_ns()
         data = await self._info_placeholders(start)
 
-        class _Safe(dict):
-            def __missing__(self, key):
-                return ""
+        # banner for rich <figure> / classic media
+        banner_cfg = self.config.get("banner_url")
+        burl = ""
+        with contextlib.suppress(Exception):
+            from ..utils.rich_api import pick_banner_url
+            burl = pick_banner_url(banner_cfg) or ""
+        if not burl and isinstance(banner_cfg, str) and banner_cfg.startswith("http"):
+            burl = banner_cfg
+        if not burl and isinstance(banner_cfg, (list, tuple)):
+            for x in banner_cfg:
+                if isinstance(x, str) and x.startswith("http"):
+                    burl = x
+                    break
+        data["banner_url"] = burl or ""
 
-        safe = _Safe({k: str(v) for k, v in data.items()})
+        # Live flag: Settings / global rich_mode + Premium (no restart)
+        from ..utils.rich import can_use_rich
+        use_rich = can_use_rich(self._client, getattr(self, "_db", None))
 
-        # --- Rich path (explicit opt-in only) ---
-        if True:  # rich gated below via can_use_rich (Settings.rich_mode, live)
+        if use_rich:
+            tmpl = None
+            with contextlib.suppress(Exception):
+                raw = self.strings.get("rich_info_message")
+                if raw and not str(raw).startswith("Unknown strings"):
+                    tmpl = str(raw)
+            if not tmpl:
+                tmpl = (
+                    '<figure><img src="{banner_url}"/></figure>'
+                    "<details><summary>Overview</summary>"
+                    '<table bordered striped compact>'
+                    "<tr><th>Overview</th><th>Value</th></tr>"
+                    "<tr><td><b>Owner</b></td><td>{me}</td></tr>"
+                    "<tr><td><b>Version</b></td><td>{version}</td></tr>"
+                    "<tr><td><b>Prefix</b></td><td>{prefix}</td></tr>"
+                    "<tr><td><b>Uptime</b></td><td>{uptime}</td></tr>"
+                    "<tr><td><b>Branch</b></td><td>{branch}</td></tr>"
+                    "<tr><td><b>CPU</b></td><td>{cpu_usage}</td></tr>"
+                    "<tr><td><b>RAM</b></td><td>{ram_usage}</td></tr>"
+                    "<tr><td><b>Ping</b></td><td>{ping}</td></tr>"
+                    "<tr><td><b>Update</b></td><td>{upd}</td></tr>"
+                    "<tr><td><b>Host</b></td><td>{platform}</td></tr>"
+                    "<tr><td><b>OS</b></td><td>{os}</td></tr>"
+                    "<tr><td><b>Python</b></td><td>{python_ver}</td></tr>"
+                    "</table></details>"
+                )
+            # custom rich only if user put real rich tags
+            custom = self.config.get("custom_message")
+            if custom and any(
+                t in str(custom) for t in ("<details", "<table", "<figure", "<h2")
+            ):
+                tmpl = str(custom)
+            html = _format_info_template(tmpl, data)
+            if burl and "<figure" not in html.lower():
+                html = f'<figure><img src="{burl}"/></figure>\n' + html
+            with contextlib.suppress(Exception):
+                from ..utils.rich_api import to_rich_compatible, normalize_rich_html
+                html = to_rich_compatible(html)
+                if "normalize_rich_html" in dir() or True:
+                    try:
+                        from ..utils.rich_api import normalize_rich_html as _nr
+                        html = _nr(html)
+                    except Exception:
+                        pass
             try:
-                from .._internal import normalize_rich_html
-                from ..utils.rich import can_use_rich
-
-                if bool(self.config.get("rich_mode")) or can_use_rich(self._client, getattr(self, "_db", None)):
-                    tmpl = None
-                    for key in ("rich_info_message", "info_message"):
-                        with contextlib.suppress(Exception):
-                            raw = self.strings.get(key)
-                            if raw and not str(raw).startswith("Unknown strings"):
-                                tmpl = raw
-                                break
-                    custom = self.config.get("custom_message")
-                    if custom and str(custom).strip() and any(
-                        x in str(custom) for x in ("<details", "<table", "<figure")
-                    ):
-                        html = str(custom)
-                    elif tmpl:
-                        html = str(tmpl)
-                    else:
-                        star = '<tg-emoji emoji-id="5283176512747507510">✨</tg-emoji>'
-                        html = (
-                            f"<p>{star} <b>Hikkari Userbot</b></p>"
-                            "<table bordered striped compact>"
-                            "<tr><td><b>Owner</b></td><td>{me}</td></tr>"
-                            "<tr><td><b>Version</b></td><td>{version}</td></tr>"
-                            "<tr><td><b>Build</b></td><td>{build}</td></tr>"
-                            "<tr><td><b>Prefix</b></td><td>{prefix}</td></tr>"
-                            "<tr><td><b>Uptime</b></td><td>{uptime}</td></tr>"
-                            "<tr><td><b>Ping</b></td><td>{ping}</td></tr>"
-                            "<tr><td><b>Platform</b></td><td>{platform}</td></tr>"
-                            "</table>"
-                        )
-                    html = _format_info_template(html, data)
-                    banner = self.config.get("banner_url")
-                    if isinstance(banner, list) and banner:
-                        import random as _r
-                        banner = _r.choice(banner)
-                    banner = str(banner or "").strip()
-                    if banner.startswith("local:"):
-                        banner = (
-                            "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/"
-                            + banner[6:].lstrip("/")
-                        )
-                    if not banner.startswith(("http://", "https://")):
-                        banner = "https://raw.githubusercontent.com/Wers1xx/Hikkari/master/assets/hikkari-info.jpg"
-                    if "<figure" not in html.lower() and "<video" not in html.lower():
-                        _be = banner.lower().split("?", 1)[0]
-                        if _be.endswith((".mp4", ".webm", ".mov")):
-                            html = f'<figure><video src="{banner}"/></figure>' + html
-                        else:
-                            html = f'<figure><img src="{banner}"/></figure>' + html
-                    html = normalize_rich_html(html)
-                    await utils.answer_with_media_fallback(message, rich_message=html)
-                    return
+                await utils.answer_with_media_fallback(message, rich_message=html)
+                return
             except Exception:
                 logger.exception("rich info failed, classic fallback")
 
-        # --- Classic single message (Heroku-style default) ---
+        # ── Classic (Heroku): closed blockquotes, no tables ──
         tmpl = None
-        with contextlib.suppress(Exception):
-            raw = self.strings.get("info_message")
-            if raw and not str(raw).startswith("Unknown strings"):
-                tmpl = raw
         custom = self.config.get("custom_message")
         if custom and str(custom).strip() and not any(
-            x in str(custom) for x in ("<details", "<table", "<figure")
+            x in str(custom) for x in ("<details", "<table", "<figure", "<h2")
         ):
-            text = str(custom)
-        elif tmpl:
-            text = str(tmpl)
-        else:
-            # Classic Hikkari (Heroku-like tree, slightly own style)
-            text = (
-                "<b>✨ Hikkari Userbot</b>\n"
-                "<blockquote>"
-                "┌ <b>Owner</b>: {me}\n"
-                "├ <b>Version</b>: {version}\n"
-                "├ <b>Build</b>: {build}\n"
-                "├ <b>Prefix</b>: <code>{prefix}</code>\n"
-                "├ <b>Uptime</b>: {uptime}\n"
-                "├ <b>Branch</b>: {branch}\n"
-                "├ <b>CPU</b>: {cpu_usage}%\n"
-                "├ <b>RAM</b>: {ram_usage}\n"
-                "├ <b>Ping</b>: {ping} ms\n"
-                "├ <b>Update</b>: {upd}\n"
-                "├ <b>Platform</b>: {platform}\n"
-                "├ <b>OS</b>: {os}\n"
-                "└ <b>Python</b>: {python_ver}"
-                "</blockquote>"
+            tmpl = str(custom)
+        if not tmpl:
+            with contextlib.suppress(Exception):
+                raw = self.strings.get("info_message")
+                if raw and not str(raw).startswith("Unknown strings"):
+                    tmpl = str(raw)
+        if not tmpl:
+            tmpl = (
+                "{}\n"
+                "<blockquote>┌\n"
+                "├  【<tg-emoji emoji-id=5883964170268840032>👤</tg-emoji>】 <b>Owner</b>: {me}\n"
+                "├  【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Version</b>: {version}\n"
+                "└</blockquote>\n"
+                "<blockquote>┌\n"
+                "├  【<tg-emoji emoji-id=5778335621491723621>📷</tg-emoji>】 <b>Prefix</b>: {prefix}\n"
+                "├  【<tg-emoji emoji-id=5843799474362652262>🔄</tg-emoji>】 <b>Uptime</b>: {uptime}\n"
+                "├  【<tg-emoji emoji-id=5879770735999717115>👤</tg-emoji>】 <b>Branch</b>: {branch}\n"
+                "└</blockquote>\n"
+                "<blockquote>┌\n"
+                "├  【<tg-emoji emoji-id=5775887550262546277>❗️</tg-emoji>】 <b>CPU</b>: {cpu_usage}\n"
+                "├  【<tg-emoji emoji-id=5931409969613116639>🛡</tg-emoji>】 <b>RAM</b>: {ram_usage}\n"
+                "├  【<tg-emoji emoji-id=5931472654660800739>📊</tg-emoji>】 <b>Ping</b>: {ping}\n"
+                "└</blockquote>\n"
+                "<blockquote>┌\n"
+                "├  【<tg-emoji emoji-id=5926783847453692661>🛡</tg-emoji>】 <b>Update</b>: {upd}\n"
+                "├  【<tg-emoji emoji-id=5931415565955503486>🤖</tg-emoji>】 <b>Host</b>: {platform}\n"
+                "├  【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>OS</b>: {os}\n"
+                "├  【<tg-emoji emoji-id=5819078828017849357>🤖</tg-emoji>】 <b>Python</b>: {python_ver}\n"
+                "└</blockquote>"
             )
-        text = _format_info_template(text, data)
-
-        banner = self.config.get("banner_url")
-        media = utils.resolve_banner_media(banner) if banner else None
-        # resolve_banner_media returns path / URL / InputMediaWebPage — not a dict
+        text = _format_info_template(tmpl, data)
+        media = None
+        with contextlib.suppress(Exception):
+            media = utils.resolve_banner_media(banner_cfg) if banner_cfg else None
         inv = bool(self.config.get("invert_media"))
-        if media is None:
-            await utils.answer(message, text)
-        elif isinstance(media, str) and media.startswith("audio_ref:"):
+        if media is None or (isinstance(media, str) and media.startswith("audio_ref:")):
             await utils.answer(message, text)
         else:
-            await utils.answer(
-                message,
-                text,
-                file=media,
-                invert_media=inv,
-            )
+            try:
+                await utils.answer(
+                    message, text, file=media, invert_media=inv
+                )
+            except WebpageMediaEmptyError:
+                await utils.answer(message, text)
 
 
     async def ubinfo(self, message: Message):
