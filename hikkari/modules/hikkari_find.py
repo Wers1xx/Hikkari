@@ -21,8 +21,18 @@ logger = logging.getLogger(__name__)
 LIMOKA_INDEX = (
     "https://raw.githubusercontent.com/MuRuLOSE/limoka/main/modules.json"
 )
+# additional JSON catalogs (same schema or list of modules)
+EXTRA_JSON = [
+    "https://raw.githubusercontent.com/hikariatama/ftg-modules/master/modules.json",
+]
 EXTRA_FULL = [
     "https://raw.githubusercontent.com/Wersixx/Wers1xx/main/full.txt",
+    "https://raw.githubusercontent.com/hikariatama/host/master/full.txt",
+    "https://raw.githubusercontent.com/AmoreForever/amoremods/master/full.txt",
+    "https://raw.githubusercontent.com/Fl1yd/FTG-Modules/master/full.txt",
+    "https://raw.githubusercontent.com/vsecoder/hikka_modules/main/full.txt",
+    "https://raw.githubusercontent.com/thomasmod/hikkamods/main/full.txt",
+    "https://raw.githubusercontent.com/sqlmelody/modules/main/full.txt",
 ]
 
 
@@ -95,9 +105,24 @@ class HikkariFindMod(loader.Module):
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "banner_url",
+                "",
+                lambda: "Banner URL for find result form (Rich/classic)",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "max_results",
+                50,
+                lambda: "Max search results to page through",
+                validator=loader.validators.Integer(minimum=5, maximum=150),
+            ),
+        )
         self._index: list[dict] = []
         self._index_ts: float = 0.0
         self._install_lock = asyncio.Lock()
+
 
     async def _load_index(self, force: bool = False) -> list[dict]:
         if self._index and not force and time.time() - self._index_ts < 300:
@@ -229,22 +254,35 @@ class HikkariFindMod(loader.Module):
     def _score(self, entry: dict, q: str) -> int:
         blob = entry.get("blob") or ""
         name = (entry.get("name") or "").lower()
+        desc = (entry.get("desc") or "").lower()
         ql = q.lower().strip()
         if not ql:
             return 0
         score = 0
         if name == ql or name == ql.replace(" ", ""):
-            score += 100
+            score += 120
+        if name.startswith(ql):
+            score += 70
         if ql in name:
-            score += 50
+            score += 55
         compact_name = re.sub(r"[^a-z0-9]", "", name)
         compact_q = re.sub(r"[^a-z0-9]", "", ql)
-        if compact_q and compact_q in compact_name:
-            score += 40
+        if compact_q and compact_q == compact_name:
+            score += 100
+        elif compact_q and compact_q in compact_name:
+            score += 45
         for tok in re.split(r"\s+", ql):
-            if tok and tok in blob:
-                score += 10
+            if not tok:
+                continue
+            if tok in name:
+                score += 20
+            elif tok in desc:
+                score += 12
+            elif tok in blob:
+                score += 8
         if ql in blob:
+            score += 18
+        if ql in desc:
             score += 15
         return score
 
@@ -299,11 +337,22 @@ class HikkariFindMod(loader.Module):
             return
 
         # Pagination: 1 module per page
+        limit = int(self.config.get("max_results") or 50)
         self._find_cache = {
             "q": q,
-            "items": matched[:30],
+            "items": matched[:limit],
         }
         await self._render_find_page(status, page=0, edit=False)
+
+    def _banner(self) -> str | None:
+        b = self.config.get("banner_url") if hasattr(self, "config") else None
+        if isinstance(b, str) and b.startswith(("http://", "https://")):
+            return b.strip()
+        if isinstance(b, (list, tuple)):
+            for x in b:
+                if isinstance(x, str) and x.startswith(("http://", "https://")):
+                    return x.strip()
+        return None
 
     async def _render_find_page(self, message_or_call, page: int = 0, edit: bool = True):
         cache = getattr(self, "_find_cache", None) or {}
@@ -331,7 +380,6 @@ class HikkariFindMod(loader.Module):
                     "text": "⬅️",
                     "callback": self._find_page,
                     "args": (page - 1,),
-                    "emoji_id": 5469737533045626725,
                 }
             )
         nav.append(
@@ -339,7 +387,6 @@ class HikkariFindMod(loader.Module):
                 "text": self.strings["install_btn"].format(name=e["name"][:18]),
                 "callback": self._install,
                 "args": (e.get("urls") or [e["url"]], e["name"]),
-                "emoji_id": 5406745015365943482,
             }
         )
         if page < len(items) - 1:
@@ -348,66 +395,71 @@ class HikkariFindMod(loader.Module):
                     "text": "➡️",
                     "callback": self._find_page,
                     "args": (page + 1,),
-                    "emoji_id": 5469737533045626725,
                 }
             )
-        rows = [nav, [{"text": self.strings["close_btn"], "action": "close"}]]
+        rows = [
+            nav,
+            [{"text": self.strings["close_btn"], "action": "close", "style": "danger"}],
+        ]
+
         use_rich = False
         with contextlib.suppress(Exception):
             from ..utils.rich import can_use_rich
             use_rich = bool(can_use_rich(self._client, self._db))
 
+        banner = self._banner()
+        rich_html = None
         if use_rich:
             with contextlib.suppress(Exception):
-                uid = getattr(message_or_call, "unit_id", None)
-                if uid and uid in (getattr(self.inline, "_units", None) or {}):
-                    self.inline._units[uid]["buttons"] = rows
-                    self.inline.generate_markup(uid)
-                    rows = self.inline._units[uid].get("buttons") or rows
+                from ..utils.rich_api import to_rich_compatible
+                parts = [
+                    f"<h2>{utils.escape_html(e['name'])}</h2>",
+                    f"<p><i>{utils.escape_html(e.get('desc') or '—')}</i></p>",
+                    f"<p><code>{utils.escape_html(e.get('url') or '')}</code></p>",
+                    f"<p>📄 {page + 1}/{len(items)} · <b>{utils.escape_html(q)}</b></p>",
+                ]
+                if banner:
+                    parts.insert(0, f'<figure><img src="{banner}"/></figure>')
+                rich_html = to_rich_compatible("\n".join(parts))
 
+        # Edit existing unit — keep callbacks bound to this unit
         if edit and hasattr(message_or_call, "edit"):
             try:
-                if use_rich:
-                    from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                    body = text if "<" in str(text) else f"<p>{text}</p>"
-                    # tg-buttons only in HTML — empty reply_markup avoids double keyboard
-                    html = to_rich_compatible(
-                        body + "\n" + (markup_to_tg_rows(rows, "") or "")
-                    )
-                    await message_or_call.edit(
-                        text=str(text)[:200],
-                        rich_message=html,
-                        reply_markup=rows,  # unit callbacks; rich edit sends kb=None
-                    )
-                else:
-                    await message_or_call.edit(text, reply_markup=rows)
+                uid = getattr(message_or_call, "unit_id", None)
+                if uid and hasattr(self.inline, "_units") and uid in self.inline._units:
+                    self.inline._units[uid]["buttons"] = rows
+                    with contextlib.suppress(Exception):
+                        self.inline.generate_markup(uid)
+                kw = {"reply_markup": rows}
+                if rich_html:
+                    kw["rich_message"] = rich_html
+                await message_or_call.edit(text, **kw)
                 return
             except Exception:
                 logger.debug("find page edit failed", exc_info=True)
 
-        if use_rich:
-            try:
-                from ..utils.rich_api import markup_to_tg_rows, to_rich_compatible
-                body = text if "<" in str(text) else f"<p>{text}</p>"
-                html = to_rich_compatible(
-                    body + "\n" + (markup_to_tg_rows(rows, "") or "")
-                )
-                # form still needs reply_markup for callback map; form.py embeds
-                # tg-buttons and answers with buttons=None when rich succeeds
+        # First open
+        try:
+            kw = {
+                "text": text,
+                "message": message_or_call,
+                "reply_markup": rows,
+                "silent": True,
+            }
+            if rich_html:
+                kw["rich_message"] = rich_html
+            # classic banner via photo only if not rich
+            if banner and not rich_html:
+                kw["photo"] = banner
+            await self.inline.form(**kw)
+            return
+        except Exception:
+            logger.debug("find form failed", exc_info=True)
+            with contextlib.suppress(Exception):
                 await self.inline.form(
-                    text=str(text)[:200] if text else "HikkariFind",
-                    message=message_or_call,
-                    rich_message=html,
-                    reply_markup=rows,
-                    silent=True,
+                    text, message=message_or_call, reply_markup=rows, silent=True
                 )
-                return
-            except Exception:
-                logger.debug("find rich form failed", exc_info=True)
 
-        await self.inline.form(
-            text, message=message_or_call, reply_markup=rows, silent=True
-        )
 
     async def _find_page(self, call: InlineCall, page: int):
         with contextlib.suppress(Exception):
