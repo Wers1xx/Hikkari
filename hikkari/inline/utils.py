@@ -708,12 +708,14 @@ class Utils(InlineUnit):
 
                 # Always keep unit state in sync (buttons + rich payload)
                 if unit_id and unit_id in self._units:
-                    self._units[unit_id]["buttons"] = reply_markup
+                    if reply_markup:
+                        self._units[unit_id]["buttons"] = reply_markup
                     if text is not None:
                         self._units[unit_id]["text"] = text
                     self._units[unit_id]["rich_message"] = rm
                     with contextlib.suppress(Exception):
-                        self.generate_markup(unit_id)
+                        if reply_markup:
+                            self.generate_markup(unit_id)
 
                 kb = None
                 with contextlib.suppress(Exception):

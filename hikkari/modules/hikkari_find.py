@@ -411,9 +411,66 @@ class HikkariFindMod(loader.Module):
             use_rich = bool(can_use_rich(self._client, self._db))
 
         banner = self._banner()
-        rich_html = None
-        if use_rich:
-            with contextlib.suppress(Exception):
+
+        def _build_rich(uid: str | None) -> str | None:
+            if not use_rich:
+                return None
+            try:
+                from ..utils.rich_api import to_rich_compatible, markup_to_tg_rows
+                if uid and hasattr(self.inline, "_units") and uid in self.inline._units:
+                    self.inline._units[uid]["buttons"] = rows
+                    with contextlib.suppress(Exception):
+                        self.inline.generate_markup(uid)
+                    # refresh rows from unit (with _callback_data)
+                    unit_rows = self.inline._units[uid].get("buttons") or rows
+                else:
+                    unit_rows = rows
+                parts = [
+                    f"<h2>{utils.escape_html(e['name'])}</h2>",
+                    f"<p><i>{utils.escape_html(e.get('desc') or '—')}</i></p>",
+                    f"<p><code>{utils.escape_html(e.get('url') or '')}</code></p>",
+                    f"<p>📄 {page + 1}/{len(items)} · <b>{utils.escape_html(q)}</b></p>",
+                ]
+                if banner:
+                    parts.insert(0, f'<figure><img src="{banner}"/></figure>')
+                # styles live inside Rich HTML — survive every edit
+                btn_html = markup_to_tg_rows(unit_rows, uid or "")
+                if btn_html:
+                    parts.append(btn_html)
+                return to_rich_compatible("\n".join(parts))
+            except Exception:
+                logger.debug("find build rich failed", exc_info=True)
+                return None
+
+        if edit and hasattr(message_or_call, "edit"):
+            try:
+                uid = getattr(message_or_call, "unit_id", None)
+                rich_html = _build_rich(uid)
+                if rich_html:
+                    # pure rich buttons — do not pass classic reply_markup
+                    # (MTProto classic kb strips styles on rich messages)
+                    await message_or_call.edit(
+                        text,
+                        reply_markup=None,
+                        rich_message=rich_html,
+                    )
+                    return
+                await message_or_call.edit(text, reply_markup=rows)
+                return
+            except Exception:
+                logger.debug("find page edit failed", exc_info=True)
+
+        # First open: form registers unit + callbacks; rich embeds tg-buttons
+        try:
+            kw = {
+                "text": text,
+                "message": message_or_call,
+                "reply_markup": rows,
+                "silent": True,
+            }
+            if use_rich:
+                # placeholder rich; form assigns unit_id then we may not rebuild —
+                # put structure without callbacks first, form generate_markup fills
                 from ..utils.rich_api import to_rich_compatible
                 parts = [
                     f"<h2>{utils.escape_html(e['name'])}</h2>",
@@ -423,36 +480,8 @@ class HikkariFindMod(loader.Module):
                 ]
                 if banner:
                     parts.insert(0, f'<figure><img src="{banner}"/></figure>')
-                rich_html = to_rich_compatible("\n".join(parts))
-
-        # Edit existing unit — keep callbacks bound to this unit
-        if edit and hasattr(message_or_call, "edit"):
-            try:
-                uid = getattr(message_or_call, "unit_id", None)
-                if uid and hasattr(self.inline, "_units") and uid in self.inline._units:
-                    self.inline._units[uid]["buttons"] = rows
-                    with contextlib.suppress(Exception):
-                        self.inline.generate_markup(uid)
-                kw = {"reply_markup": rows}
-                if rich_html:
-                    kw["rich_message"] = rich_html
-                await message_or_call.edit(text, **kw)
-                return
-            except Exception:
-                logger.debug("find page edit failed", exc_info=True)
-
-        # First open
-        try:
-            kw = {
-                "text": text,
-                "message": message_or_call,
-                "reply_markup": rows,
-                "silent": True,
-            }
-            if rich_html:
-                kw["rich_message"] = rich_html
-            # classic banner via photo only if not rich
-            if banner and not rich_html:
+                kw["rich_message"] = to_rich_compatible("\n".join(parts))
+            elif banner:
                 kw["photo"] = banner
             await self.inline.form(**kw)
             return
