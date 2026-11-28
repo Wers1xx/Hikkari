@@ -455,6 +455,7 @@ async def edit_rich_message(
     inline_message_id: str | None = None,
     chat_id: int | str | None = None,
     message_id: int | None = None,
+    reply_markup: dict | list | None = None,
 ) -> bool:
     """
     Edit an existing message to a Rich Message (Bot API editMessageText + rich_message).
@@ -467,6 +468,11 @@ async def edit_rich_message(
             "skip_entity_detection": True,
         },
     }
+    if reply_markup is not None:
+        if isinstance(reply_markup, dict) and "inline_keyboard" in reply_markup:
+            payload["reply_markup"] = reply_markup
+        elif isinstance(reply_markup, list):
+            payload["reply_markup"] = {"inline_keyboard": reply_markup}
     if inline_message_id is not None:
         packed = pack_inline_message_id(inline_message_id)
         if packed:

@@ -380,6 +380,7 @@ class HikkariFindMod(loader.Module):
                     "text": "⬅️",
                     "callback": self._find_page,
                     "args": (page - 1,),
+                    "style": "primary",
                 }
             )
         nav.append(
@@ -387,6 +388,7 @@ class HikkariFindMod(loader.Module):
                 "text": self.strings["install_btn"].format(name=e["name"][:18]),
                 "callback": self._install,
                 "args": (e.get("urls") or [e["url"]], e["name"]),
+                "style": "success",
             }
         )
         if page < len(items) - 1:
@@ -395,6 +397,7 @@ class HikkariFindMod(loader.Module):
                     "text": "➡️",
                     "callback": self._find_page,
                     "args": (page + 1,),
+                    "style": "primary",
                 }
             )
         rows = [

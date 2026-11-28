@@ -721,9 +721,39 @@ class Utils(InlineUnit):
 
                 with contextlib.suppress(Exception):
                     await self.ensure_inline_ready()
+                if mid and isinstance(rm, str):
+                    # Prefer HTTP Bot API so button style (danger/primary) is kept
+                    try:
+                        from ..utils.rich_api import (
+                            edit_rich_message as _erm_http,
+                            _find_bot_token,
+                        )
+                        token = _find_bot_token(
+                            getattr(self, "_client", None)
+                            or getattr(self, "client", None)
+                        ) or getattr(self, "_token", None) or getattr(self, "token", None)
+                        kb_api = None
+                        with contextlib.suppress(Exception):
+                            kb_api = self.buttons_to_bot_api_keyboard(
+                                unit_id if unit_id else reply_markup
+                            )
+                        pure = "<tg-button" in rm
+                        if token and not pure:
+                            ok = await _erm_http(
+                                token,
+                                rm,
+                                inline_message_id=mid,
+                                reply_markup={"inline_keyboard": kb_api}
+                                if kb_api
+                                else None,
+                            )
+                            if ok:
+                                return True
+                    except Exception as e:
+                        logger.debug("HTTP rich edit failed: %s", e)
+
                 if mid and hasattr(self.bot, "edit_rich_message"):
                     try:
-                        # If HTML already has <tg-button>, skip classic kb
                         pure = isinstance(rm, str) and "<tg-button" in rm
                         await self.bot.edit_rich_message(
                             html=rm if isinstance(rm, str) else None,
